@@ -1,3 +1,11 @@
+# [MODULE DOC] Script (top-level code, no functions): builds class-balanced ICL eval splits for imagenet-1k.
+# For
+# k in [5, 1] support examples per class: for each of the 1000 classes, filters train to that class
+# (batched filter, one pass over train per class: very slow), shuffles (unseeded random) and takes k examples
+# for validation_support_set, k for test_support_set and 10 for validation_query_set; concatenates per split,
+# prints sizes and per-label counts, pushes each split as a config of the private repo
+# HuggingFaceM4/imagenet1k_support_<k>k_query_sets, plus test_query_set = the full original validation split,
+# then reloads and prints the repo.
 import random
 from collections import Counter
 

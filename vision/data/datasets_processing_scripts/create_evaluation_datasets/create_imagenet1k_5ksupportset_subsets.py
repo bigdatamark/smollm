@@ -1,3 +1,6 @@
+# [MODULE DOC] Script (top-level code): same as create_imagenet1k_1ksupportset_subsets.py but for
+# HuggingFaceM4/imagenet1k_support_5k_query_sets: test_query_set split into 6 contiguous parts, each pushed
+# privately as <NAME_DS>_part_<i> together with the unchanged support/validation splits.
 import numpy as np
 from datasets import load_dataset
 from tqdm import tqdm

@@ -1,3 +1,11 @@
+# [MODULE DOC] Script (top-level code, no functions): builds HuggingFaceM4/NLVR2_support_query_sets (private)
+# from the local
+# NLVR2/NLVR2.py loading script (relative path, must be run from the vision/data directory). The train split
+# is divided into its 100 "directory" buckets (one batched filter pass per bucket); from each bucket,
+# after an unseeded shuffle, 20 (buckets 0-51) or 21 (buckets 52-99) examples go to validation_support_set and
+# as many to test_support_set (2048 each in total, more diversity than random sampling).
+# validation_query_set = 1024 random validation examples; test_query_set = the test split. Prints sizes,
+# pushes the DatasetDict, reloads and prints it.
 import random
 
 from datasets import DatasetDict, concatenate_datasets, load_dataset

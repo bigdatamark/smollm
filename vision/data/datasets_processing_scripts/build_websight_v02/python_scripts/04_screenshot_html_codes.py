@@ -1,3 +1,11 @@
+# [MODULE DOC] Script (WebSight v0.2 step 4): renders generated HTML pages with headless Chromium
+# (Playwright) and stores
+# (screenshot, html_code, idea) datasets. Input: NUM_JSON_IDEAS_AND_HTML_CODES JSON files at
+# COMMON_PATH_JSON_IDEAS_AND_HTML_CODES (format with IDX), each a list of [idea, html_code]. Output: one
+# HF dataset per JSON file at COMMON_PATH_SAVE_DATASETS_PAIRS_IMAGE_CODE/<IDX> with columns image (JPEG,
+# quality JPG_QUALITY), html_code and llm_generated_idea. Already-existing outputs are skipped, so the script
+# can be rerun to retry failures. When run as main: builds ScreenshotHTMLcodes from the constants and calls
+# it.
 import json
 import multiprocessing
 import os
@@ -24,6 +32,8 @@ USER_AGENT_PLAYWRIGHT = (
 
 
 class ScreenshotHTMLcodes:
+    # [CLASS DOC] Orchestrates screenshotting of all JSON files with a multiprocessing pool, processed in
+    # chunks.
     def __init__(
         self,
         num_json_ideas_and_html_codes: int,
@@ -34,6 +44,10 @@ class ScreenshotHTMLcodes:
         common_path_save_datasets_pairs_image_code: str,
         user_agent_playwright: str,
     ) -> None:
+        # [FUNCTION DOC] Stores the configuration: number of JSON files, number of worker processes, chunk
+        # size (number of JSON
+        # files per pool run), JPEG quality, input/output path templates (with {IDX}) and the browser user
+        # agent.
         self.num_json_ideas_and_html_codes = num_json_ideas_and_html_codes
         self.num_processes = num_processes
         self.size_chunk_multiprocessing = size_chunk_multiprocessing
@@ -43,10 +57,14 @@ class ScreenshotHTMLcodes:
         self.user_agent_playwright = user_agent_playwright
 
     def __call__(self) -> None:
+        # [FUNCTION DOC] Computes the indices still to process and processes them chunk by chunk.
         remaining_indices = self._check_remaining_indices()
         self._sequential_process_multi_json_ideas_and_html_codes(remaining_indices=remaining_indices)
 
     def _check_remaining_indices(self) -> List[int]:
+        # [FUNCTION DOC] HELPER: returns the list of JSON indices in [0, num_json) whose output dataset
+        # directory does not exist yet
+        # (screenshots often fail, so reruns only process missing ones).
         """When taking screenshots of some websites, it often fails for some reasons.
         Therefore, we do a try/except and skip the indices of the json where it failed.
         We can go through them again to increase our success rate.
@@ -60,12 +78,19 @@ class ScreenshotHTMLcodes:
         return remaining_indices
 
     def _load_json_ideas_and_html_codes(self, idx_json_file: int) -> List[List[str]]:
+        # [FUNCTION DOC] HELPER: loads and returns the list of [idea, html_code] pairs from the JSON file
+        # with index idx_json_file.
         path_json_ideas_and_html_codes = self.common_path_json_ideas_and_html_codes.format(IDX=idx_json_file)
         with open(path_json_ideas_and_html_codes, "r") as f:
             ideas_and_html_codes = json.load(f)
         return ideas_and_html_codes
 
     def _modify_image_urls(self, html_code: str) -> str:
+        # [FUNCTION DOC] HELPER: makes repeated unsplash random-image URLs distinct so the rendered page
+        # shows different images:
+        # for each match of "https://source.unsplash.com/random/WxH/?keyword", the n-th occurrence of a
+        # keyword gets
+        # n-1 underscores appended to it. Returns the modified HTML string.
         """When an image URL appears more than once, when the HTML is rendered,
         the same image is displayed. The trick is to add a `_` at the end of the
         keyword of the URL to generate another image, still corresponding to the
@@ -75,6 +100,12 @@ class ScreenshotHTMLcodes:
         url_counts = {}
 
         def replace_url(match):
+            # [FUNCTION DOC] HELPER: re.sub callback; increments the per-keyword counter (closure mapping
+            # url_counts) and returns the
+            # matched URL with its keyword suffixed by (count-1) underscores. Note: uses str.replace on the
+            # whole match,
+            # so the keyword is also replaced if it appears elsewhere in the URL (e.g. in the size part,
+            # unlikely).
             keyword = match.group(1)
             url_counts[keyword] = url_counts.get(keyword, 0) + 1
             modified_keyword = keyword + "_" * (url_counts[keyword] - 1)
@@ -84,6 +115,9 @@ class ScreenshotHTMLcodes:
         return modified_html_code
 
     def _convert_png_to_jpg(self, bytes_image_png: bytes, jpg_quality: int) -> Image.Image:
+        # [FUNCTION DOC] HELPER: decodes PNG bytes, converts to RGB, re-encodes as JPEG with the given
+        # quality in memory and returns
+        # the re-opened PIL JPEG image.
         image_png = Image.open(BytesIO(bytes_image_png))
         image_png = image_png.convert("RGB")
         output = BytesIO()
@@ -95,6 +129,10 @@ class ScreenshotHTMLcodes:
     def _save_dataset_pairs_image_code(
         self, ideas_and_html_codes: List[List[str]], screenshots: List[Image.Image], idx_json: int
     ) -> None:
+        # [FUNCTION DOC] HELPER: builds a datasets.Dataset with columns image (screenshots), html_code and
+        # llm_generated_idea from
+        # the pairs and saves it to the output path for idx_json. Raises ValueError if the number of pairs and
+        # screenshots differ.
         if len(ideas_and_html_codes) != len(screenshots):
             raise ValueError("`ideas_and_html_codes` and `screenshots` should have the same length")
         ideas = [idea for idea, _ in ideas_and_html_codes]
@@ -104,6 +142,13 @@ class ScreenshotHTMLcodes:
         ds.save_to_disk(path_save_datasets_pairs_image_code)
 
     def _process_one_json_ideas_and_html_codes(self, idx_json_to_process: int) -> int:
+        # [FUNCTION DOC] Worker function: loads JSON idx_json_to_process, launches headless Chromium (device
+        # scale factor 2, custom
+        # user agent), and for each html page (new tab each time, never closed individually): sets the
+        # content with
+        # de-duplicated image URLs, waits for network idle, takes a full-page screenshot and converts it to
+        # JPEG.
+        # Saves the dataset and returns the index. Any Playwright error propagates (fails the whole JSON).
         ideas_and_html_codes = self._load_json_ideas_and_html_codes(idx_json_file=idx_json_to_process)
 
         screenshots = []
@@ -127,6 +172,9 @@ class ScreenshotHTMLcodes:
         return idx_json_to_process
 
     def _process_multi_json_ideas_and_html_codes(self, indices_to_process: List[int]) -> None:
+        # [FUNCTION DOC] Processes the given indices with a multiprocessing.Pool of num_processes workers
+        # (imap_unordered), printing
+        # each finished index and updating a tqdm bar. An exception in any worker propagates out of the loop.
         with multiprocessing.Pool(processes=self.num_processes) as pool:
             with tqdm(total=len(indices_to_process)) as pbar:
                 for idx_json in pool.imap_unordered(self._process_one_json_ideas_and_html_codes, indices_to_process):
@@ -134,6 +182,9 @@ class ScreenshotHTMLcodes:
                     pbar.update()
 
     def _sequential_process_multi_json_ideas_and_html_codes(self, remaining_indices: List[int]) -> None:
+        # [FUNCTION DOC] Splits remaining_indices into chunks of size_chunk_multiprocessing; for each chunk
+        # sleeps 10s then runs the
+        # pool, silently swallowing any exception (failed chunks are retried by rerunning the script).
         for idx_chunk in tqdm(range(0, len(remaining_indices), self.size_chunk_multiprocessing)):
             time.sleep(10)
             try:

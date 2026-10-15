@@ -1,3 +1,7 @@
+# [MODULE DOC] Script (top-level code): converts lmms-lab/ai2d (test) to an MCQ eval set with numeric labels
+# "1"-"4" and
+# pushes it privately to HuggingFaceM4/AI2D as a DatasetDict with a "test" split, then reloads it to cache
+# it. Keeps only question/label/image columns; prints the first question.
 """
 srun --pty --cpus-per-task=8 --partition=hopper-cpu --qos high bash -i
 conda activate shared-m4
@@ -27,6 +31,9 @@ NAME_DS_PUSH_HUB = "HuggingFaceM4/AI2D"
 
 
 def map_func_transform_ai2d_ds(example):
+    # [FUNCTION DOC] Map function: label = str(answer index + 1); question becomes "Question:
+    # <q>\nChoices:\n" followed by
+    # "Choice <i>: <option>" lines (1-based), stripped. Returns the example.
     example["label"] = str(int(example["answer"]) + 1)
     question = example["question"].strip()
     question = f"Question: {question}\nChoices:\n"

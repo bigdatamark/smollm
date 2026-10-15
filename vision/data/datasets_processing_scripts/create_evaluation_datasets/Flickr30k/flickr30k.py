@@ -1,4 +1,8 @@
 # coding=utf-8
+# [MODULE DOC] HF `datasets` loading script for Flickr30k with Karpathy splits. Captions come from Karpathy's
+# caption_datasets.zip (dataset_flickr30k.json, downloaded); images must be downloaded manually
+# (flickr30k-images.tar.gz in data_dir). Each example: image (path), filename, imgid, sentids, sentences
+# (raw caption strings) and sentences_original (full caption records with tokens/raw/imgid/sentid).
 # Copyright 2020 The HuggingFace Datasets Authors and the current dataset script contributor.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -68,10 +72,15 @@ _FEATURES = datasets.Features(
 
 
 class Flickr30k(datasets.GeneratorBasedBuilder):
+    # [CLASS DOC] GeneratorBasedBuilder for Flickr30k (train / validation / test from the Karpathy "split"
+    # field).
     """Flick30k."""
 
     @property
     def manual_download_instructions(self):
+        # [FUNCTION DOC] Property returning the user-facing text explaining how to download
+        # flickr30k-images.tar.gz manually and
+        # pass its folder as data_dir.
         return """\
     You need to go to http://shannon.cs.illinois.edu/DenotationGraph/data/index.html,
     and manually download the dataset ("Flickr 30k images."). Once it is completed,
@@ -81,6 +90,8 @@ class Flickr30k(datasets.GeneratorBasedBuilder):
     """
 
     def _info(self):
+        # [FUNCTION DOC] Returns the DatasetInfo (empty description, _FEATURES schema, homepage, empty
+        # license, citation).
         return datasets.DatasetInfo(
             description=_DESCRIPTION,
             features=_FEATURES,
@@ -90,6 +101,11 @@ class Flickr30k(datasets.GeneratorBasedBuilder):
         )
 
     def _split_generators(self, dl_manager):
+        # [FUNCTION DOC] Downloads/extracts the Karpathy annotation zip and extracts the manual images
+        # tarball from
+        # dl_manager.manual_dir; returns three SplitGenerators (TRAIN/"train", VALIDATION/"val", TEST/"test")
+        # sharing
+        # the annotation and image paths and differing by split_name.
         annotations_zip = dl_manager.download_and_extract(_ANNOTATION_URL)
         annotation_path = os.path.join(annotations_zip, "dataset_flickr30k.json")
         images_path = os.path.join(
@@ -109,6 +125,10 @@ class Flickr30k(datasets.GeneratorBasedBuilder):
         ]
 
     def _generate_examples(self, annotation_path, images_path, split_name):
+        # [FUNCTION DOC] Prints the annotation path, loads the JSON and yields (counter, example) for every
+        # image record whose
+        # "split" equals split_name; keys are consecutive ints from 0. Asserts each image file exists
+        # (AssertionError otherwise).
         counter = 0
         print(annotation_path)
         with open(annotation_path, "r", encoding="utf-8") as f:

@@ -1,3 +1,9 @@
+# [MODULE DOC] Older variant of the ScienceQA loading script (image questions only) where everything is
+# packed into a
+# single "context" prompt: optional "Context: <hint>\n", "Question: <question>\n",
+# "Choose the best answer among:\n" then one "<letter> - <choice>\n" line per choice. Features: image,
+# context, solution, question, label (ClassLabel A-E). Reads problems.json / pid_splits.json from hard-coded
+# local paths (LOCAL_FOLDER_PATH).
 # Copyright 2020 The HuggingFace Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -70,9 +76,12 @@ LOCAL_FOLDER_PATH = {
 
 
 class ScienceQADataset(datasets.GeneratorBasedBuilder):
+    # [CLASS DOC] GeneratorBasedBuilder for the image subset of ScienceQA (old prompt format), version 1.0.0.
     VERSION = datasets.Version("1.0.0")
 
     def _info(self):
+        # [FUNCTION DOC] Returns the DatasetInfo with features image, context, solution, question and label
+        # (ClassLabel A-E).
         features = datasets.Features(
             {
                 "image": datasets.Image(),
@@ -91,6 +100,11 @@ class ScienceQADataset(datasets.GeneratorBasedBuilder):
         )
 
     def _split_generators(self, dl_manager):
+        # [FUNCTION DOC] Downloads/extracts every _URLS entry (Google Drive) and builds, for train / val /
+        # test, gen_kwargs with
+        # pid_splits_path, problems_path (download dir joined with the json file name), images_path (download
+        # dir
+        # joined with the split folder name) and split_name. Returns SplitGenerators TRAIN, VALIDATION, TEST.
         data_dir = dl_manager.download_and_extract(_URLS)
         gen_kwargs = {}
         for split_name in ["train", "val", "test"]:
@@ -118,6 +132,13 @@ class ScienceQADataset(datasets.GeneratorBasedBuilder):
         ]
 
     def _generate_examples(self, pid_splits_path, problems_path, images_path, split_name):
+        # [FUNCTION DOC] Loads the hard-coded pid_splits/problems JSON, and for each problem of split_name
+        # with an image yields
+        # (index in split list, example) with image path images_path/<pid>/<file>, label = answer index, the
+        # context
+        # prompt described in the module doc, and the raw (newline-collapsed) question and solution.
+        # KNOWN ISSUE: ignores its pid_splits_path and problems_path arguments (hard-coded local paths
+        # instead).
         # Ideal solution would be this:
         # pid_splits = json.load(open(pid_splits_path, "r"))
         # problems = json.load(open(problems_path, "r"))

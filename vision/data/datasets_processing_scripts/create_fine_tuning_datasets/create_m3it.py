@@ -1,3 +1,10 @@
+# [MODULE DOC] Script (top-level code): builds HuggingFaceM4/M3IT from the train split of a subset of
+# MMInstruction/M3IT
+# configs (English image tasks; Chinese/video and broken configs excluded). DocVQA is filtered to images whose
+# base64 string is at most 1M chars; every dataset is checked to have exactly one image per example, the
+# base64
+# image is decoded into an "image" column, datasets are concatenated, image_base64_str dropped, shuffled
+# (seed 42), saved to /fsx/hugo/M3IT and pushed. Uses NUM_PROC processes.
 import base64
 from io import BytesIO
 
@@ -53,18 +60,26 @@ INTERESTING_CONFIGS = [
 # Specifically for DocVQA, because the big images cause problems
 # Keeps 23097/39463 examples
 def filter_func_remove_huge_images(example):
+    # [FUNCTION DOC] Filter predicate: False when the first base64 image string is longer than 1,000,000
+    # characters.
     if len(example["image_base64_str"][0]) > 1_000_000:
         return False
     return True
 
 
 def filter_func_check_one_image(example):
+    # [FUNCTION DOC] Validation pass used as a filter: raises ValueError if an example has more than one
+    # image, otherwise
+    # returns True (never removes anything).
     if len(example["image_base64_str"]) > 1:
         raise ValueError("Found 2 images instead of 1")
     return True
 
 
 def map_func_add_image_column(example):
+    # [FUNCTION DOC] Map function: raises ValueError if more than one image; decodes the single base64 image
+    # into a PIL image in
+    # example["image"] (None when the string is None, as happens for ScienceQA). Returns the example.
     if len(example["image_base64_str"]) > 1:
         raise ValueError("Found 2 images instead of 1")
     img_base64_str = example["image_base64_str"][0]

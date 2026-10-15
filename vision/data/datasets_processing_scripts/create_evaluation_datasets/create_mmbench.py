@@ -1,3 +1,8 @@
+# [MODULE DOC] Script (top-level code, no functions): splits HuggingFaceM4/MMBench_dev_modif "train" into a
+# 1024-example
+# validation_support_set and a validation_query_set with all remaining examples (unseeded random shuffle),
+# prints sizes and their (expected empty) intersection, pushes both as configs of the private repo
+# HuggingFaceM4/mmbench_support_query_sets, then reloads and prints it.
 import random
 
 from datasets import load_dataset

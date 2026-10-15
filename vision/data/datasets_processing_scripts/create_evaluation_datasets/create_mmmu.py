@@ -1,3 +1,9 @@
+# [MODULE DOC] Script (top-level code): converts the coalesced HuggingFaceM4/MMMU (dev / validation / test;
+# the commented code
+# documents how it was built from the 30 MMMU subjects) into HuggingFaceM4/MMMU-modif-with-categories
+# (private), with prompts in m4 chat format (END_OF_UTTERANCE_TOKEN then "\nAssistant:"). Output features:
+# id, question, answers (list), images (list), question_type, explanation, topic_difficulty, subfield,
+# img_type, broad_category (from MMMU_CATEGORIES) and narrow_category (subject parsed from the id).
 import ast
 
 import datasets
@@ -60,6 +66,10 @@ from m4.training.utils import END_OF_UTTERANCE_TOKEN
 
 
 def format_value_to_list(value):
+    # [FUNCTION DOC] HELPER: parses a string that may hold a Python list literal (e.g. MMMU
+    # "options"/"answer"). Returns the
+    # parsed list if ast.literal_eval yields a list, otherwise (non-list literal, SyntaxError or ValueError)
+    # returns [value].
     try:
         evaluated_value = ast.literal_eval(value)
         if isinstance(evaluated_value, list):
@@ -119,6 +129,17 @@ image_numbers = ["1", "2", "3", "4", "5", "6", "7"]
 
 
 def map_transform_ds_mmmu(example):
+    # [FUNCTION DOC] Map function: the non-None image_1..image_7 columns are gathered into "images" and a
+    # header line
+    # "<image i>:<image>" per image (numbered from 1) is prepended to the question; narrow_category = id
+    # without its first and last "_"-separated parts; broad_category = the MMMU_CATEGORIES key containing it
+    # (left
+    # unset if none matches). answers = parsed answer list ([""] when the answer is "?", i.e. test). If there
+    # are
+    # options: question = "Question: " + images header + question + "\nChoices:" + "\n<letter>. <option>"
+    # lines +
+    # "\nAnswer with the letter.<EOU>\nAssistant: Answer:"; otherwise question + "<EOU>\nAssistant:".
+    # Returns the example.
     example["images"] = [
         example[f"image_{image_number}"]
         for image_number in image_numbers

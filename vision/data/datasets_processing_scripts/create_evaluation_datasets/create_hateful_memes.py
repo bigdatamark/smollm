@@ -1,3 +1,12 @@
+# [MODULE DOC] Script (all top-level code, no functions) building in-context-learning eval splits for Hateful
+# Memes ("seen" config): loads HuggingFaceM4/Hateful-Memes
+# (auth token), shuffles the train indices with the unseeded random module (non-reproducible), and carves
+# disjoint index sets from train: validation_support_set (2048 examples), test_support_set (2048),
+# validation_query_set (1000, also from train). test_query_set = the original test split. First prints the
+# hateful / not-hateful label balance of train. Prints set sizes and the (expected empty) intersections
+# between query and support sets
+# and pushes the splits one by one as configs to the private Hub repo
+# HuggingFaceM4/HatefulMemes_support_query_sets, then reloads and prints it.
 import random
 
 from datasets import load_dataset

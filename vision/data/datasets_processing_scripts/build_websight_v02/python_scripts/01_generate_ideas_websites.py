@@ -1,3 +1,12 @@
+# [MODULE DOC] Script (WebSight v0.2 step 1): generates website layout ideas with Mistral-7B-Instruct-v0.2 on
+# CUDA (bf16).
+# Argument: sys.argv[1] = NAME_FILE (output file stem). No functions; all logic runs at import.
+# Builds one chat prompt (PROMPT asks for a list of 10 ideas), repeats it BATCH_SIZE times and, for NUM_ITER
+# iterations, samples up to 1000 new tokens. Each decoded output: remove "</s>", collapse double newlines,
+# split into lines, keep lines starting with a digit; requires exactly 10 such lines numbered "1." to "10."
+# (the number prefix is stripped), otherwise the output is discarded; any exception (e.g. empty line) also
+# discards it. Accepted ideas are accumulated in ALL_IDEAS, the count is printed, and they are written one per
+# line to /fsx/hugo/ideas_mistral_websight_v02/ideas/<NAME_FILE>.txt.
 import sys
 
 import torch

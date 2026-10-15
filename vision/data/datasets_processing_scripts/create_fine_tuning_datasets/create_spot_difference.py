@@ -1,3 +1,9 @@
+# [MODULE DOC] Script (top-level code): builds HuggingFaceM4/SpotDifference_4 (private) from the
+# Spot-the-Difference instruction
+# data: SD (subtle difference) and GSD/CGD (general scene difference) instruction JSONs plus JSON mappings
+# from
+# image id to base64 image. Each example: instruction, answer, images (2 PIL images). Both parts are decoded
+# (NUM_PROC processes), concatenated, shuffled (seed 42) and pushed. Raises PIL's PNG text-chunk limit.
 import base64
 import copy
 import json
@@ -24,6 +30,9 @@ PATH_IMAGES_GSD = "/fsx/hugo/SpotDifference/GCD/CGD.json"
 
 
 def map_func_image_64_to_PIL(example):
+    # [FUNCTION DOC] Map function: decodes the first two base64 strings of example["images"] into PIL images
+    # and replaces the
+    # list with them. Returns the example.
     images = example["images"]
     new_images = []
     for idx in range(2):

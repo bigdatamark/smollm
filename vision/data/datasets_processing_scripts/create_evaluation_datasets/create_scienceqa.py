@@ -1,3 +1,11 @@
+# [MODULE DOC] Script (top-level code, no functions): builds HuggingFaceM4/ScienceQA_support_query_sets
+# (private) from the local ScienceQA loading script
+# ScienceQA/scienceqa.py (hard-coded path on the author's machine). validation_support_set = 2048 random
+# train examples whose
+# (question, solution) pair does not occur in validation; test_support_set = 2048 random train examples not
+# overlapping test in the same sense (the two support sets may share rows); validation_query_set = 1024 random
+# validation examples; test_query_set = full test. Unseeded shuffles. Prints sizes, pushes the DatasetDict,
+# reloads and prints it.
 import random
 
 from datasets import DatasetDict, load_dataset

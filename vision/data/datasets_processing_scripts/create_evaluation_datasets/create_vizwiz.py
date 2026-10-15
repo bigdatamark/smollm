@@ -1,3 +1,11 @@
+# [MODULE DOC] Script (top-level code, no functions): builds HuggingFaceM4/VizWiz_support_query_sets
+# (private) from HuggingFaceM4/VizWiz: after an unseeded shuffle of train,
+# disjoint validation_support_set (2048), test_support_set (2048) and validation_query_set (1024) are taken
+# from
+# train; test_query_set = the original test split. The "id" column is removed from every split (the comment
+# about the VQAv2
+# server is copied from create_vqav2.py). Prints sizes and the (expected empty) intersections,
+# pushes each split as a config, reloads and prints the result.
 import random
 
 from datasets import load_dataset

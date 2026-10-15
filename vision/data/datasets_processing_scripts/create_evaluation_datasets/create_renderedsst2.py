@@ -1,3 +1,9 @@
+# [MODULE DOC] Script (top-level code, no functions): builds HuggingFaceM4/RenderedSST2_support_query_sets
+# (private) from
+# HuggingFaceM4/RenderedSST2: from the shuffled (unseeded) train split, disjoint validation_support_set (512),
+# test_support_set (512) and validation_query_set (5000; smaller support sets leave room since train has only
+# 6920 rows); test_query_set = original test. Prints sizes and intersections, pushes each split as a config,
+# reloads and prints the result.
 import random
 
 from datasets import load_dataset

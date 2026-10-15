@@ -1,3 +1,9 @@
+# [MODULE DOC] HF `datasets` loading script for ScienceQA restricted to questions that have an image. Builds
+# multiple-choice evaluation fields: question ("Question: ...\n"), hint ("Context: ...\n" when present),
+# context (choices as "(A) choice (B) choice ..."), lecture ("BECAUSE: ..." when present), solution, and label
+# (ClassLabel A-E from the answer index).
+# Despite downloading from Google Drive, problems.json and pid_splits.json are read from hard-coded local
+# paths (LOCAL_FOLDER_PATH) on the author's machine.
 # Copyright 2020 The HuggingFace Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -70,9 +76,13 @@ LOCAL_FOLDER_PATH = {
 
 
 class ScienceQADataset(datasets.GeneratorBasedBuilder):
+    # [CLASS DOC] GeneratorBasedBuilder for the image subset of ScienceQA, version 1.0.0.
     VERSION = datasets.Version("1.0.0")
 
     def _info(self):
+        # [FUNCTION DOC] Returns the DatasetInfo with features image, question, hint, context, lecture,
+        # solution (strings/Image)
+        # and label (ClassLabel A-E).
         features = datasets.Features(
             # Previous features
             # {
@@ -110,6 +120,11 @@ class ScienceQADataset(datasets.GeneratorBasedBuilder):
         )
 
     def _split_generators(self, dl_manager):
+        # [FUNCTION DOC] Downloads/extracts every _URLS entry (Google Drive) and builds, for train / val /
+        # test, gen_kwargs with
+        # pid_splits_path, problems_path (download dir joined with the json file name), images_path (download
+        # dir
+        # joined with the split folder name) and split_name. Returns SplitGenerators TRAIN, VALIDATION, TEST.
         data_dir = dl_manager.download_and_extract(_URLS)
         gen_kwargs = {}
         for split_name in ["train", "val", "test"]:
@@ -137,6 +152,16 @@ class ScienceQADataset(datasets.GeneratorBasedBuilder):
         ]
 
     def _generate_examples(self, pid_splits_path, problems_path, images_path, split_name):
+        # [FUNCTION DOC] Loads pid_splits and problems JSON from LOCAL_FOLDER_PATH, iterates over the problem
+        # ids of split_name and
+        # yields (index in the split list, example) only for problems with an image (image path =
+        # images_path/<pid>/<image file>). Double newlines in hint, question and choices are collapsed,
+        # fields are
+        # formatted as described in the module doc and only the feature keys are kept. Keys are not
+        # contiguous.
+        # KNOWN ISSUE: ignores its pid_splits_path and problems_path arguments and reads hard-coded local
+        # paths, so
+        # it only works on the original author's machine.
         # Ideal solution would be this:
         # pid_splits = json.load(open(pid_splits_path, "r"))
         # problems = json.load(open(problems_path, "r"))

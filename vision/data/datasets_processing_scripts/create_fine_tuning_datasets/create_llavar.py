@@ -1,3 +1,9 @@
+# [MODULE DOC] Script (top-level code, no functions): builds HuggingFaceM4/LLaVAR-Instruct-16K from the
+# LLaVAR fine-tuning
+# JSON (local paths, see download links at the top): keeps the last 15500 conversations (the LLaVAR part, the
+# earlier ones being regular LLaVA), opens each image, and splits turns into user_texts ("human", with the
+# <image> tag removed) and bot_texts ("gpt"), asserting equal counts. Pushes columns image, user_texts,
+# bot_texts. All images are held open in memory.
 # DL finetuning images: https://drive.google.com/file/d/1Ms7OCjcFQ18Whmujszpc9bTp0Jy0Dye4/view?usp=sharing
 # DL finetuning instructions: https://drive.google.com/file/d/1ISdKOV1wwVkLHf5FNutctpOBa-CmNRFv/view?usp=sharing
 

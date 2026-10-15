@@ -1,3 +1,8 @@
+# [MODULE DOC] HF `datasets` loading script for NLVR2 (Natural Language for Visual Reasoning): each example
+# is a sentence,
+# a left and a right image, and a True/False label. Annotations (JSON lines) come from the lil-lab GitHub repo
+# and image zips from lil.nlp.cornell.edu; test = test1 + test2.
+# KNOWN ISSUE: _CITATION is the BibTeX of an unrelated paper ("Data Scaling Laws in NMT"), not NLVR2.
 """NVLR2 loading script."""
 
 
@@ -48,11 +53,15 @@ _SPLITS = {
 
 
 class NLVR2Dataset(datasets.GeneratorBasedBuilder):
+    # [CLASS DOC] GeneratorBasedBuilder for NLVR2 with a single "default" config, version 1.0.0.
     VERSION = datasets.Version("1.0.0")
 
     DEFAULT_CONFIG_NAME = "default"
 
     def _info(self):
+        # [FUNCTION DOC] Returns the DatasetInfo with features identifier, sentence, left_image, right_image
+        # (Images), label
+        # (ClassLabel ["True", "False"]) and directory (string).
         return datasets.DatasetInfo(
             description=_DESCRIPTION,
             features=datasets.Features(
@@ -71,6 +80,14 @@ class NLVR2Dataset(datasets.GeneratorBasedBuilder):
         )
 
     def _split_generators(self, dl_manager):
+        # [FUNCTION DOC] Downloads the train/dev/test1/test2 JSON files and the image zips, and returns
+        # TRAIN, VALIDATION and TEST
+        # SplitGenerators; TEST combines the test1 and test2 files with their respective image folders. Train
+        # images
+        # are expected under <extracted>/images/train, others under <extracted>/<dev|test1|test2>.
+        # KNOWN ISSUE: the train image zip URL is passed to dl_manager.extract (not download_and_extract), so
+        # the
+        # remote URL is never downloaded and extraction fails unless it is already a local path.
         urls = {
             "default": {
                 "train": os.path.join(_URL_JSON, f'{_SPLITS["train"]}.json'),
@@ -114,6 +131,11 @@ class NLVR2Dataset(datasets.GeneratorBasedBuilder):
         ]
 
     def _generate_examples(self, files_paths, images_paths):
+        # [FUNCTION DOC] For each (json-lines file, image dir) pair, yields one record per line. The
+        # identifier
+        # "<split>-<set>-<pair>-<n>" gives image file names "<split>-<set>-<pair>-img0.png"/"-img1.png"; train
+        # images live in the numbered sub-directory ex["directory"], other splits directly in the image dir
+        # (directory "0"). Asserts both image files exist. Keys are consecutive ints starting at 1.
         idx = 0
         for i, files_path in enumerate(files_paths):
             for line in open(files_path).readlines():

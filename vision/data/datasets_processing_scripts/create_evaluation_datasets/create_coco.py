@@ -1,3 +1,11 @@
+# [MODULE DOC] Script (all top-level code, no functions) building in-context-learning eval splits for COCO
+# 2014 captions: loads HuggingFaceM4/COCO "2014_captions"
+# (auth token), shuffles the train indices with the unseeded random module (non-reproducible), and carves
+# disjoint index sets from train: validation_support_set (2048 examples), test_support_set (2048),
+# validation_query_set (5000, also from train). test_query_set = the original test split. Prints set sizes
+# and the (expected empty) intersections between query and support sets
+# and pushes the splits one by one as configs to the private Hub repo HuggingFaceM4/coco_support_query_sets,
+# then reloads and prints it.
 import random
 
 from datasets import load_dataset

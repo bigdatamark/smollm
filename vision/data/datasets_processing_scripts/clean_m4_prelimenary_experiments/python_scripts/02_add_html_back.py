@@ -1,3 +1,8 @@
+# [MODULE DOC] Script: re-attaches raw HTML to one processed web-document shard by matching document URLs
+# against the C4
+# HTML shards. CLI args (all required): --html_dir_path (dir of "c4-*" HTML datasets with "url"/"html"
+# columns), --processed_dir_path, --output_dir_path, --shard_idx, --num_proc. Output: the processed shard
+# with added "document_url" and "html" columns saved to <output_dir_path>/shard_<shard_idx>.
 import json
 from pathlib import Path
 
@@ -12,6 +17,11 @@ from datasets import concatenate_datasets, load_from_disk
 
 
 def load_html_ds(dir_path: Path):
+    # [FUNCTION DOC] HELPER: loads and concatenates the "train" split of every sub-directory of dir_path
+    # (pathlib.Path) whose
+    # name starts with "c4-" (others are skipped with a print); tqdm progress. Returns one datasets.Dataset.
+    # Raises ValueError (from concatenate_datasets) if no shard is found.
+    # Unused by main.
     html_ds_list = []
     for arrow_shard_dir in tqdm.tqdm(dir_path.iterdir()):
         if not arrow_shard_dir.is_dir() or not arrow_shard_dir.name.startswith("c4-"):
@@ -25,12 +35,18 @@ def load_html_ds(dir_path: Path):
 
 
 def load_processed_shard(dir_path: Path, shard_idx: int):
+    # [FUNCTION DOC] HELPER: loads and returns the dataset saved at dir_path / "shard_<shard_idx>"
+    # (load_from_disk).
     shard_dir = dir_path / f"shard_{shard_idx}"
     processed_shard = load_from_disk(shard_dir)
     return processed_shard
 
 
 def add_doc_url(example):
+    # [FUNCTION DOC] datasets.map function: parses the example's JSON "metadata" list and sets
+    # example["document_url"] to the
+    # "document_url" field of the first non-None entry (None if all entries are None). Returns the mutated
+    # example.
     metadata = json.loads(example["metadata"])
     document_url = None
     for meta in metadata:
@@ -42,6 +58,8 @@ def add_doc_url(example):
 
 
 def get_args():
+    # [FUNCTION DOC] Parses and returns the CLI arguments (paths as pathlib.Path, shard_idx and num_proc as
+    # int, all required).
     import argparse
 
     parser = argparse.ArgumentParser()
@@ -54,6 +72,16 @@ def get_args():
 
 
 def main():
+    # [FUNCTION DOC] Skips (prints and returns) if the output already exists. Loads the processed shard, adds
+    # document_url,
+    # then iterates over the entries of html_dir_path (filesystem order), skipping non "c4-" dirs and those
+    # whose
+    # enumeration index is below shard_idx; for each C4 shard builds a url -> row index mapping and fills the
+    # "html" column of rows still lacking it (None when not found). Stops early once every row has HTML, then
+    # saves the dataset and prints the path.
+    # KNOWN ISSUE: skipping uses the enumeration index of iterdir() (unordered, counting non-c4 entries) as
+    # if it
+    # were a shard number, so which C4 shards are searched is arbitrary and some matches can be missed.
     args = get_args()
 
     save_path = args.output_dir_path / f"shard_{args.shard_idx}"
@@ -81,6 +109,11 @@ def main():
         print("built url_to_index dict")
 
         def get_html_from_c4(example):
+            # [FUNCTION DOC] HELPER: map function; leaves examples that already have non-None "html"
+            # untouched, otherwise looks up
+            # example["document_url"] in the closure's url_to_index and sets example["html"] to the matching
+            # C4 html
+            # (or None). Returns the example.
             if example.get("html", None) is not None:
                 return example
 

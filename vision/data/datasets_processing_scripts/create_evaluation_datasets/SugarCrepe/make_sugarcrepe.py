@@ -1,3 +1,10 @@
+# [MODULE DOC] Script (no functions, all top-level): builds the SugarCrepe compositionality benchmark on the
+# Hub. For each
+# of the 7 configs (swap/replace/add of objects/attributes/relations) reads PATH_JSON_DATA/<config>.json,
+# opens the COCO val2017 image of each entry, and stores tested_labels = [caption, negative_caption] and
+# true_label = caption. true_label is a ClassLabel over the set of all captions of all configs (shared
+# features, so label ids are consistent across configs). Pushes each config as
+# HuggingFaceM4/SugarCrepe_<config>, split "test". All images are kept open in memory.
 """
 srun --pty --cpus-per-task=48 --mem-per-cpu=11G bash -i
 conda activate /fsx/m4/conda/shared-m4

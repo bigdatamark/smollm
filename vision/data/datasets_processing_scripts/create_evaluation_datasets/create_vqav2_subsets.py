@@ -1,3 +1,8 @@
+# [MODULE DOC] Script (top-level code): splits the test_query_set of
+# HuggingFaceM4/VQAv2_modif_support_query_sets into
+# NUM_SUBSETS (6) contiguous near-equal parts (numpy array_split) to parallelize evaluation; each part, with
+# the
+# other splits unchanged, is pushed privately to <NAME_DS>_part_<i>.
 import numpy as np
 from datasets import load_dataset
 from tqdm import tqdm

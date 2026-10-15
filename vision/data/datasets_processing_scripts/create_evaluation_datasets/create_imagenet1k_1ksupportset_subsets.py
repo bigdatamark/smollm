@@ -1,3 +1,9 @@
+# [MODULE DOC] Script (top-level code): splits the test_query_set of
+# HuggingFaceM4/imagenet1k_support_1k_query_sets into
+# NUM_SUBSETS (6) contiguous, near-equal parts (numpy array_split) so evaluation can be parallelized. Loads
+# the
+# dataset 6 times, replaces test_query_set by part i in copy i (other splits unchanged), and pushes each copy
+# privately to <NAME_DS>_part_<i>.
 import numpy as np
 from datasets import load_dataset
 from tqdm import tqdm

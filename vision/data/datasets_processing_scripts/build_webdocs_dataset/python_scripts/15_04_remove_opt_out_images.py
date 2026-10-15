@@ -1,3 +1,10 @@
+# [MODULE DOC] Script (step 15_04): removes opted-out images from one shard of the web-document dataset
+# (output of
+# 15_03). Same setup as 15_03: IDX_JOB from sys.argv[1], PIL limits disabled, INFO logging, tmp dir
+# /scratch/storage_hugo_<IDX_JOB>/ recreated, opt-out url list downloaded with `aws s3 cp`, shard synced
+# with s5cmd and loaded (format reset).
+# When run as main: drops the "input_ids" and "attention_mask" columns, maps OptOutFilteringImages over the
+# dataset, saves it and syncs it to the "_optoutrmvimg2" S3 prefix, then deletes the tmp directory.
 import json
 import logging
 import os
@@ -42,12 +49,22 @@ PATH_SAVE_S3_WEB_DOCS_OPT_OUT_FILTERED = f"s3://m4-datasets-us-east-1/webdocs/we
 
 
 class OptOutFilteringImages:
+    # [CLASS DOC] Picklable datasets.map callable that removes opted-out image slots from a document. Holds
+    # the path of the
+    # JSON opt-out url list and the loaded set of urls.
     def __init__(self, path_opt_out_urls):
+        # [FUNCTION DOC] Stores path_opt_out_urls (str, JSON list of url strings) and loads it into the set
+        # self.opt_out_urls.
         self.path_opt_out_urls = path_opt_out_urls
         with open(path_opt_out_urls) as f:
             self.opt_out_urls = set(json.load(f))
 
     def __call__(self, example):
+        # [FUNCTION DOC] Map function. Parses the example's JSON "metadata" list, finds the indices of
+        # non-None entries whose
+        # "src" is opted out, and if any, removes those indices from the parallel lists "texts", "images" and
+        # "metadata" (metadata re-serialized to JSON). Returns the (mutated) example; unchanged if nothing to
+        # remove.
         metadata = json.loads(example["metadata"])
         indices_to_remove = [
             ind for ind, meta in enumerate(metadata) if (meta is not None) and (meta["src"] in self.opt_out_urls)
@@ -59,6 +76,9 @@ class OptOutFilteringImages:
         return example
 
     def __reduce__(self):
+        # [FUNCTION DOC] Pickling support: rebuilds the object from path_opt_out_urls in worker processes
+        # instead of pickling the
+        # url set.
         return self.__class__, (self.path_opt_out_urls,)
 
 

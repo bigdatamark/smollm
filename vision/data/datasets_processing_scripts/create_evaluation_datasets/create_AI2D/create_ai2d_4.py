@@ -1,3 +1,7 @@
+# [MODULE DOC] Script (top-level code): builds HuggingFaceM4/AI2D_4: lmms-lab/ai2d test questions whose
+# options are not
+# single letters (2497 of 3088), formatted with lettered choices A-D (original case) and the
+# "Answer with the letter." instruction; pushed privately and reloaded to cache it.
 """
 srun --pty --cpus-per-task=8 --partition=hopper-cpu --qos high bash -i
 conda activate shared-m4
@@ -30,6 +34,7 @@ ds_test = load_dataset(ORIGINAL_NAME_DS, split=ORIGINAL_SPLIT_DS)  # 3088 exampl
 
 
 def filter_ds(example):
+    # [FUNCTION DOC] Filter predicate: False if any option is a single alphabetic character, True otherwise.
     options = example["options"]
     if any([option.isalpha() and (len(option) == 1) for option in options]):
         return False
@@ -40,6 +45,9 @@ ds_test = ds_test.filter(filter_ds, num_proc=NUM_PROC)  # 2497 examples
 
 
 def map_func_transform_ai2d_ds(example):
+    # [FUNCTION DOC] Map function: label = letter of the answer index; question = "Question: <q>\nChoices:\n"
+    # + "<letter>.
+    # <option>" lines + "Answer with the letter.". Returns the example.
     example["label"] = POSSIBLE_LABELS[int(example["answer"])]
     question = example["question"].strip()
     question = f"Question: {question}\nChoices:\n"

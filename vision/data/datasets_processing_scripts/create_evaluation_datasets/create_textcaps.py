@@ -1,3 +1,12 @@
+# [MODULE DOC] Script (top-level code, no functions): builds HuggingFaceM4/TextCaps_support_query_sets
+# (private) from HuggingFaceM4/TextCaps (force re-downloaded): after an unseeded shuffle of train,
+# disjoint validation_support_set (2048), test_support_set (2048) and validation_query_set (5000) are taken
+# from
+# train; test_query_set = the original test split. Also adds server_check_support_set (same rows as
+# validation_support_set) and
+# server_check_query_set (full original validation) for checks against the evaluation server. Prints sizes
+# and the (expected empty) intersections,
+# pushes everything as one DatasetDict, reloads and prints the result.
 import random
 
 from datasets import DatasetDict, load_dataset

@@ -1,3 +1,9 @@
+# [MODULE DOC] Script (top-level code): builds HuggingFaceM4/AI2D_5 from the AI2D questions whose options ARE
+# single
+# letters (591 examples, diagram labels). Labels are the (uppercased) option texts; the ClassLabel names are
+# the set of all such options (order from set(), so label ids are not deterministic across runs). Adds
+# tested_labels (the 4 options). Question: instruction + "Question: <q>\n" + "The choices are: <sorted
+# options comma-separated>". Pushed privately and reloaded.
 """
 srun --pty --cpus-per-task=8 --partition=hopper-cpu --qos high bash -i
 conda activate shared-m4
@@ -18,6 +24,11 @@ ds_test = load_dataset(ORIGINAL_NAME_DS, split=ORIGINAL_SPLIT_DS)  # 3088 exampl
 
 
 def filter_ds(example):
+    # [FUNCTION DOC] Predicate over an lmms-lab/ai2d example: returns False if any option in
+    # example["options"] is a single
+    # alphabetic character (letter-labelled diagrams), True otherwise. Used negated at module level, so only
+    # the
+    # letter-option questions are kept.
     options = example["options"]
     if any([option.isalpha() and (len(option) == 1) for option in options]):
         return False
@@ -44,6 +55,9 @@ NAME_DS_PUSH_HUB = "HuggingFaceM4/AI2D_5"
 
 
 def map_func_transform_ai2d_ds(example):
+    # [FUNCTION DOC] Map function: uppercases single-char options, sets tested_labels to them and label to
+    # the option at the
+    # answer index, then builds the question with the comma-separated sorted options. Returns the example.
     choices = example["options"]
     choices = [choice.upper() if (len(choice) == 1) else choice for choice in choices]
     example["tested_labels"] = choices

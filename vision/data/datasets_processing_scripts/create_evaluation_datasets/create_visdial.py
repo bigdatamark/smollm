@@ -1,3 +1,21 @@
+# [MODULE DOC] Script (top-level code): builds HuggingFaceM4/VisDial_modif_support_query_sets (private) from
+# VisDial v1.0 files
+# in /scratch/visdial (see the shell commands in the leading string) and COCO 2014 images in /scratch/coco;
+# image
+# paths are taken from the jxu124/visdial Hub dataset (asserted aligned with the dialogs by image_id).
+# Each dialog (10 rounds, 100 answer options per round) is turned into: image, caption, context (previous
+# rounds
+# as "Question: q? Answer: a. " followed by "Question: q? Answer: "), answer (ClassLabel over all train+val
+# answers), answer_options and relevance_scores. Support sets (2048 each, from train, unseeded shuffle) use
+# the
+# last round and all-zero scores; validation_query_set (1024 from train) uses a random round with a one-hot
+# score
+# on the true answer; test_query_set = the real validation split with the dense relevance annotations.
+# Images are attached by func_map_add_images (20 processes); each split is pushed as a config, then reloaded.
+# KNOWN ISSUE: for the test query set the chosen round uses data_relevance_scores[0]["round_id"] (first
+# example's round) for every example instead of data_relevance_scores[idx_ex], misaligning question and
+# scores.
+# The "COCO_val2014" check only executes `pass`, so nothing is discarded.
 # Download images and dialogs
 """
 mkdir /scratch/coco
@@ -267,6 +285,9 @@ ds_test_query_set = Dataset.from_dict(
 
 
 def func_map_add_images(example):
+    # [FUNCTION DOC] Map function: opens the image at /scratch/<example["image_path"]> with PIL and stores it
+    # in example["image"].
+    # Returns the example.
     path = example["image_path"]
     example["image"] = Image.open(os.path.join("/scratch/", path))
     return example

@@ -1,3 +1,6 @@
+# [MODULE DOC] Script (top-level code): converts Lin-Chen/MMStar "val" into HuggingFaceM4/MMStar (private,
+# single "validation"
+# split) with features id, question, label (ClassLabel A-D) and image, then reloads it to cache.
 """
 srun --pty --cpus-per-task=24 --mem-per-cpu=20G --partition=hopper-cpu --qos high bash -i
 conda activate shared-m4
@@ -28,6 +31,13 @@ NAME_DS_PUSH_HUB = "HuggingFaceM4/MMStar"
 
 
 def map_func_transform_mmstar_ds(example):
+    # [FUNCTION DOC] Map function normalizing MMStar prompts: id = str(index); label = answer letter; removes
+    # the known
+    # "Hint: ..." answer-format instructions (including a typo'd "H+B53int" variant); prefixes "Question: " if
+    # absent; turns "Options: " (or the first "(A)") into a "Choices:" block; rewrites "A: ", ", B: " etc. and
+    # "(A) " etc. into "A. " lines; asserts the Choices block and A/B/C lines exist (AssertionError
+    # otherwise);
+    # appends "\nAnswer with the letter.". Returns the example.
     example["id"] = str(example["index"])
     example["label"] = example["answer"]
     #

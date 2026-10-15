@@ -1,3 +1,9 @@
+# [MODULE DOC] Script (top-level code): builds HuggingFaceM4/A-OKVQA (train / validation / test) from the raw
+# A-OKVQA v1.0
+# JSON files in LOCAL_PATH, with COCO 2017 images embedded as JPEG bytes. Test rows have no
+# correct_choice_idx, direct_answers or rationales (None).
+# KNOWN ISSUE: FEATURES declares "direct_answers" as a single string while A-OKVQA provides a list of answers,
+# so Dataset.from_dict casting may fail or the column type is wrong.
 import json
 import os
 from io import BytesIO
@@ -24,6 +30,9 @@ FEATURES = datasets.Features(
 
 
 def convert_img_to_bytes(img_path, format):
+    # [FUNCTION DOC] HELPER: opens the image at img_path, re-encodes it in the given PIL format (e.g. "JPEG")
+    # in memory and
+    # returns the bytes; closes the image.
     img = Image.open(img_path)
     buffer = BytesIO()
     img.save(buffer, format=format)
@@ -33,6 +42,9 @@ def convert_img_to_bytes(img_path, format):
 
 
 def find_image_path(image_id):
+    # [FUNCTION DOC] HELPER: returns the path of the COCO image <image_id zero-padded to 12>.jpg found in the
+    # first of the
+    # train2017 / val2017 / test2017 folders under /fsx/hugo/coco that contains it; raises ValueError if none.
     for folder in ["/fsx/hugo/coco/train2017/", "/fsx/hugo/coco/val2017/", "/fsx/hugo/coco/test2017/"]:
         path = folder + str(image_id).zfill(12) + ".jpg"
         if os.path.exists(path):
@@ -41,6 +53,9 @@ def find_image_path(image_id):
 
 
 def init_dict():
+    # [FUNCTION DOC] HELPER: returns a fresh mapping from every FEATURES column name to an empty list
+    # (column-wise buffer for
+    # Dataset.from_dict).
     dict_to_fill = {
         "image": [],
         "question_id": [],

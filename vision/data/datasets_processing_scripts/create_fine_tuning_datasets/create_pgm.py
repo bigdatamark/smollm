@@ -1,3 +1,8 @@
+# [MODULE DOC] Script (top-level code): builds HuggingFaceM4/PGM (Procedurally Generated Matrices, "neutral"
+# regime) from .npz
+# files in LOCAL_PATH (names like PGM_neutral_<split>_<id>.npz). Each example: 8 context panels and 8 answer
+# choices (160x160 grayscale PIL images), relation_structure_encoded, relation_structure, meta_target, target
+# (index of the correct choice) and id. Splits train / val (-> validation) / test, pushed as a DatasetDict.
 import glob
 import os
 
@@ -24,6 +29,9 @@ FEATURES = datasets.Features(
 
 
 def init_dict():
+    # [FUNCTION DOC] HELPER: returns a fresh mapping from every FEATURES column name to an empty list
+    # (column-wise buffer for
+    # Dataset.from_dict).
     dict_to_fill = {
         "panels": [],
         "choices": [],
@@ -37,6 +45,12 @@ def init_dict():
 
 
 def extract_all_files_for_split(split_files, split):
+    # [FUNCTION DOC] Loads every .npz path of split_files (list of str), asserts its file-name split field
+    # equals `split`, parses
+    # the integer id, reshapes "image" to 16x160x160 (first 8 = panels, last 8 = choices, converted to uint8
+    # PIL
+    # images), adds a leading axis to meta_target, and appends all fields to a column-wise mapping which is
+    # returned. Prints progress every 1000 files.
     print(f"start extracting {len(split_files)} files")
     result_dict = init_dict()
 

@@ -1,3 +1,8 @@
+# [MODULE DOC] Script (top-level code): prepares MathVista (AI4Math/MathVista: "testmini" as validation,
+# "test") with
+# prompts already in the m4 chat format (question, END_OF_UTTERANCE_TOKEN from m4.training.utils, then
+# "\nAssistant:"). Output features: pid, question, answers (list of str), image (from decoded_image).
+# Pushes both splits privately to HuggingFaceM4/MathVista-modif.
 import datasets
 from datasets import load_dataset
 
@@ -30,6 +35,13 @@ options_choices = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"]
 
 
 def map_transform_val_ds_mathvista(example):
+    # [FUNCTION DOC] Map function for testmini. For multiple-choice questions (choices not None; asserts
+    # question_type is
+    # "multi_choice"), appends "\nChoices:" and one "\n<letter>. <choice>" line per choice, then
+    # "\nAnswer with the letter.<EOU>\nAssistant: Answer:"; answers = [letter of the choice equal to the
+    # answer]
+    # (asserts one was found). Free-form: appends "<EOU>\nAssistant:" and answers = [answer]. Sets image =
+    # decoded_image. Returns the example.
     example["answers"] = [""]
     if example["choices"] is not None:
         assert example["question_type"] == "multi_choice"
@@ -49,6 +61,8 @@ def map_transform_val_ds_mathvista(example):
 
 
 def map_transform_test_ds_mathvista(example):
+    # [FUNCTION DOC] Map function for test (no ground truth): same prompt construction as the validation
+    # version, answers=None.
     example["answers"] = None
     if example["choices"] is not None:
         assert example["question_type"] == "multi_choice"

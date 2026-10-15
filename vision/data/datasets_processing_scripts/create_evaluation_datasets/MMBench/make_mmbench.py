@@ -1,3 +1,9 @@
+# [MODULE DOC] Script (all top-level code): builds the MMBench dev set on the Hub from the local TSV
+# downloaded from
+# opencompass (PATH_MMBENCH_DATA). Drops metadata columns, renames "answer" to "label" (ClassLabel A-D),
+# decodes the base64 "image" column into PIL images and pushes to HuggingFaceM4/MMBench_dev. Then adds a
+# "context" prompt column, removes question/hint/A-D columns and pushes privately to
+# HuggingFaceM4/MMBench_dev_modif. Uses NUM_PROC processes.
 import base64
 from copy import deepcopy
 from io import BytesIO
@@ -24,6 +30,8 @@ ds = ds.rename_column("answer", "label")
 
 
 def map_func_transform_image_column(example):
+    # [FUNCTION DOC] datasets.map function: replaces example["image"] (base64 string) by the decoded PIL
+    # image; returns example.
     example["image"] = Image.open(BytesIO(base64.b64decode(example["image"])))
     return example
 
@@ -38,6 +46,11 @@ ds.push_to_hub(REPO_ID)
 
 
 def map_func_modif_context(example):
+    # [FUNCTION DOC] datasets.map function: builds example["context"] as newline-joined lines: "Context:
+    # <hint>" (only if hint
+    # is non-empty), "Question: <question>", "Possible answers:", "<letter>: <answer>" for each non-empty
+    # option
+    # among A-D, and a final "Correct answer: ". Returns the example.
     question = example["question"]
     hint = example["hint"]
     context = []

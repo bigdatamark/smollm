@@ -1,3 +1,9 @@
+# [MODULE DOC] Streamlit exploration app (run with `streamlit run`): finds web documents of one hard-coded
+# local shard
+# (web_document_dataset_45M ... /train/shard_215, with an "html" column) whose HTML matches a user-typed CSS
+# selector (default "[class~='footer']"), then shows for a chosen/random document: its URL, texts, images,
+# the rendered HTML, and each matching node rendered and as raw HTML. classes_to_remove is unused (only
+# referenced by commented-out code). All UI code runs at module level on every Streamlit rerun.
 import random
 from functools import partial
 
@@ -20,6 +26,9 @@ css_rule = st.text_input("CSS rule", value="[class~='footer']")
 
 
 def filter_doc_with_matching_class(example, css_rule):
+    # [FUNCTION DOC] datasets.filter predicate: parses example["html"] with selectolax and returns True if at
+    # least one node
+    # matches the CSS selector css_rule (str), False otherwise.
     current_html = example["html"]
     tree = HTMLParser(current_html)
     matche = tree.css_first(css_rule)
@@ -30,6 +39,10 @@ def filter_doc_with_matching_class(example, css_rule):
 
 @st.cache_data  # it is caching but is incredibly slow when N is big.
 def load_examples(num_docs, css_rule):
+    # [FUNCTION DOC] Loads the hard-coded shard from disk and filters it (32 processes) to documents matching
+    # css_rule.
+    # Returns the filtered datasets.Dataset. Cached by Streamlit (st.cache_data) per (num_docs, css_rule).
+    # num_docs is unused (the select is commented out).
     dataset = load_from_disk(
         "/home/lucile/data/web_document_dataset_45M_sharded_ftered_2_line_deduplicated_with_html/train/shard_215"
     )

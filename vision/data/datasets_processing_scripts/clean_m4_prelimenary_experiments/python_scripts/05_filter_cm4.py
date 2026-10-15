@@ -1,3 +1,7 @@
+# [MODULE DOC] Script: removes from one processed web-document shard every document whose URL is in the
+# banned-url files
+# produced by 04_get_banned_urls.py. CLI args (required): --processed_dir_path, --output_dir_path,
+# --shard_idx, --num_proc, --banned_urls_dir_path. Output saved to <output_dir_path>/shard_<shard_idx>.
 import json
 from pathlib import Path
 
@@ -12,6 +16,11 @@ from datasets import concatenate_datasets, load_from_disk
 
 
 def load_html_ds(dir_path: Path):
+    # [FUNCTION DOC] HELPER: loads and concatenates the "train" split of every sub-directory of dir_path
+    # (pathlib.Path) whose
+    # name starts with "c4-" (others are skipped with a print); tqdm progress. Returns one datasets.Dataset.
+    # Raises ValueError (from concatenate_datasets) if no shard is found.
+    # Unused in this script (copied from 02_add_html_back.py).
     html_ds_list = []
     for arrow_shard_dir in tqdm.tqdm(dir_path.iterdir()):
         if not arrow_shard_dir.is_dir() or not arrow_shard_dir.name.startswith("c4-"):
@@ -25,12 +34,18 @@ def load_html_ds(dir_path: Path):
 
 
 def load_processed_shard(dir_path: Path, shard_idx: int):
+    # [FUNCTION DOC] HELPER: loads and returns the dataset saved at dir_path / "shard_<shard_idx>"
+    # (load_from_disk).
     shard_dir = dir_path / f"shard_{shard_idx}"
     processed_shard = load_from_disk(shard_dir)
     return processed_shard
 
 
 def add_doc_url(example):
+    # [FUNCTION DOC] datasets.map function: parses the example's JSON "metadata" list and sets
+    # example["document_url"] to the
+    # "document_url" field of the first non-None entry (None if all entries are None). Returns the mutated
+    # example.
     metadata = json.loads(example["metadata"])
     document_url = None
     for meta in metadata:
@@ -42,6 +57,8 @@ def add_doc_url(example):
 
 
 def get_args():
+    # [FUNCTION DOC] Parses and returns the required CLI arguments (paths as pathlib.Path, shard_idx/num_proc
+    # as int).
     import argparse
 
     parser = argparse.ArgumentParser()
@@ -54,6 +71,10 @@ def get_args():
 
 
 def main():
+    # [FUNCTION DOC] Skips if the output exists. Loads the processed shard, adds "document_url", loads every
+    # line (stripped) of
+    # every file in banned_urls_dir_path into a set, filters out rows whose document_url is banned (num_proc
+    # processes), prints how many rows were removed / kept, saves the shard and prints the path.
     args = get_args()
 
     save_path = args.output_dir_path / f"shard_{args.shard_idx}"

@@ -1,3 +1,8 @@
+# [MODULE DOC] Script (top-level code): variant of create_ai2d.py with letter labels A-D. Questions are
+# formatted as
+# "Question: <q>\nChoices:\n" + "<letter>. <lowercased option>" lines + "Answer with the letter.";
+# pushed privately to HuggingFaceM4/AI2D_2 and reloaded. A trailing string literal keeps (unexecuted) code
+# that produced AI2D_3 by filtering out questions containing letter options.
 """
 srun --pty --cpus-per-task=8 --partition=hopper-cpu --qos high bash -i
 conda activate shared-m4
@@ -27,6 +32,9 @@ NAME_DS_PUSH_HUB = "HuggingFaceM4/AI2D_2"
 
 
 def map_func_transform_ai2d_ds(example):
+    # [FUNCTION DOC] Map function: label = POSSIBLE_LABELS[answer index] (letter); question formatted with
+    # lettered,
+    # lowercased choices and the "Answer with the letter." instruction. Returns the example.
     example["label"] = POSSIBLE_LABELS[int(example["answer"])]
     question = example["question"].strip()
     question = f"Question: {question}\nChoices:\n"

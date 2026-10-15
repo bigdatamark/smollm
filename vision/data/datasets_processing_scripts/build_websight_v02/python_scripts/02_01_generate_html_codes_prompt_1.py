@@ -1,3 +1,10 @@
+# [MODULE DOC] Script (WebSight v0.2 step 2, prompt 1): turns website ideas into full HTML + Tailwind CSS
+# pages with
+# deepseek-coder-33b-instruct (custom CHAT_TEMPLATE, greedy decoding, MAX_NEW_TOKENS=2048, explicit
+# PAD/EOS token ids). Argument: sys.argv[1] = NAME_FILE selecting the ideas file
+# (.../ideas_1500_per_file/<NAME_FILE>.txt) and the output JSON (.../prompt_1/<NAME_FILE>.json).
+# The prompt asks for a complete website inside a <body> tag, with images only from source.unsplash.com.
+# When run as main: builds GenerationHTMLCodes from the module constants and calls it.
 import json
 import random
 import sys
@@ -45,6 +52,9 @@ PATH_SAVE_IDEAS_AND_HTML_CODES = f"/fsx/hugo/websight_v02_generated_html_codes/p
 
 
 class GenerationHTMLCodes:
+    # [CLASS DOC] End-to-end generator: load ideas, load model/tokenizer on GPU, generate HTML for each idea
+    # in batches,
+    # post-process, and save a JSON list of [idea, html_code] pairs.
     def __init__(
         self,
         path_ideas_websites,
@@ -57,6 +67,13 @@ class GenerationHTMLCodes:
         eos_token_id,
         path_save_ideas_and_html_codes,
     ):
+        # [FUNCTION DOC] Stores the configuration: path_ideas_websites (text file, one idea per line),
+        # model_name (HF hub id),
+        # chat_template (Jinja string set on the tokenizer), batch_size (int), prompt (format string with
+        # {idea}),
+        # max_new_tokens, pad_token_id, eos_token_id (ints), path_save_ideas_and_html_codes (output JSON
+        # path).
+        # No I/O.
         self.path_ideas_websites = path_ideas_websites
         self.model_name = model_name
         self.chat_template = chat_template
@@ -68,16 +85,24 @@ class GenerationHTMLCodes:
         self.path_save_ideas_and_html_codes = path_save_ideas_and_html_codes
 
     def __call__(self):
+        # [FUNCTION DOC] Runs the full pipeline: load_ideas_websites, load_model_and_tokenizer,
+        # all_model_generations, then a
+        # final save_ideas_and_html_codes.
         self.load_ideas_websites()
         self.load_model_and_tokenizer()
         self.all_model_generations()
         self.save_ideas_and_html_codes()
 
     def load_ideas_websites(self):
+        # [FUNCTION DOC] Reads the ideas file and stores its lines (split on newline) as the list
+        # self.ideas_websites.
         with open(self.path_ideas_websites, "r") as f:
             self.ideas_websites = f.read().split("\n")
 
     def load_model_and_tokenizer(self):
+        # [FUNCTION DOC] Loads the causal LM (flash-attention 2, trust_remote_code, bfloat16) and moves it to
+        # CUDA; loads the
+        # tokenizer and overrides its chat_template. Sets self.model and self.tokenizer.
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
             use_flash_attention_2=True,
@@ -88,6 +113,17 @@ class GenerationHTMLCodes:
         self.tokenizer.chat_template = self.chat_template
 
     def batch_model_generations(self, batch_ideas):
+        # [FUNCTION DOC] Generates one completion per idea in batch_ideas (list of str). Each idea is
+        # inserted into the prompt as
+        # a single user message, tokenized with the chat template (generation prompt added), then all prompts
+        # are
+        # left-padded with PAD_TOKEN_ID to the longest length and stacked into one tensor on the model device.
+        # Greedy generation; prompt tokens are cut off, outputs decoded skipping special tokens and the eos
+        # token
+        # string removed. Returns the list of decoded strings (same order as batch_ideas).
+        # KNOWN ISSUE: uses the module globals PROMPT and PAD_TOKEN_ID instead of self.prompt /
+        # self.pad_token_id,
+        # and passes no attention_mask, so the left padding tokens are attended to.
         all_messages = [
             [
                 {"role": "user", "content": PROMPT.format(idea=idea)},
@@ -118,6 +154,12 @@ class GenerationHTMLCodes:
         return decoded
 
     def extract_html_code_from_generation(self, generation):
+        # [FUNCTION DOC] Extracts the HTML body from a generation (str). Returns None unless the text
+        # contains exactly one
+        # "<body " and one "</body>"; otherwise takes the substring from "<body " through "</body>" and wraps
+        # it
+        # in TEMPLATE_HTML_CODE (html tag + Tailwind 2.2.19 CDN stylesheet link). Returns the full HTML
+        # string.
         if (generation.count("<body ") != 1) or (generation.count("</body>") != 1):
             return None
         else:
@@ -128,16 +170,28 @@ class GenerationHTMLCodes:
             return html_code
 
     def replace_overused_color_from_html_code(self, html_code):
+        # [FUNCTION DOC] Diversifies colors: replaces every occurrence of OVERUSED_COLOR ("blue") in
+        # html_code with one color
+        # picked at random (random module, unseeded) from LIST_COLORS (may pick blue again). Returns the new
+        # string.
+        # Note: plain substring replace, so it also affects text content containing "blue".
         random_color = random.choice(LIST_COLORS)
         html_code = html_code.replace(OVERUSED_COLOR, random_color)
         return html_code
 
     def save_ideas_and_html_codes(self):
+        # [FUNCTION DOC] Writes self.ideas_and_html_codes (list of [idea, html_code]) as JSON to the output
+        # path (overwriting)
+        # and prints the number of pairs.
         with open(self.path_save_ideas_and_html_codes, "w") as f:
             json.dump(self.ideas_and_html_codes, f)
         print(f"Number of HTML codes: {len(self.ideas_and_html_codes)}")
 
     def all_model_generations(self):
+        # [FUNCTION DOC] Iterates over the ideas in batches of batch_size (tqdm progress), generates,
+        # extracts and recolors the
+        # HTML; keeps only pairs whose extraction succeeded in self.ideas_and_html_codes (reset at start).
+        # Checkpoints by saving the JSON every 10 batches.
         self.ideas_and_html_codes = []
         for idx in tqdm(range(0, len(self.ideas_websites), self.batch_size)):
             batch_ideas = self.ideas_websites[idx : idx + self.batch_size]

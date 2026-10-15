@@ -1,3 +1,7 @@
+# [MODULE DOC] Script: re-extracts web documents (version "_v2") from one HTML shard with the m4 extraction
+# pipeline,
+# using a DOMTreeSimplificator that also removes footer/site-info nodes and replaces "more-link" nodes by the
+# END_OF_DOCUMENT_TOKEN_TO_BE_REPLACED text. Configures INFO logging. When run as main: get_args then main.
 import argparse
 import logging
 from multiprocessing import cpu_count
@@ -22,6 +26,9 @@ logger.setLevel(logging.INFO)
 
 
 def get_args():
+    # [FUNCTION DOC] Parses CLI args: --arrow_shard_dir (Path), --shard_id (int), --extraction_dir (Path),
+    # --num_proc (int,
+    # default cpu_count()). None are required. Returns the argparse namespace.
     parser = argparse.ArgumentParser(description="Extract web documents.")
     # ---------------- Path args ----------------
     parser.add_argument(
@@ -51,6 +58,14 @@ def get_args():
 
 
 def main(args):
+    # [FUNCTION DOC] Loads <arrow_shard_dir>/shard_<shard_id>, builds the simplificators and runs
+    # html_to_web_documents
+    # (html column "html", url column "document_url", original columns kept, new columns suffixed "_v2",
+    # num_proc
+    # processes), then saves the result under extraction_dir and logs progress.
+    # KNOWN ISSUE: saves to args.extraction_dir / args.dataset_name, but no --dataset_name argument is
+    # defined,
+    # so the save step raises AttributeError.
     html_dataset = load_from_disk(args.arrow_shard_dir / f"shard_{args.shard_id}")
 
     dom_tree_simplificator = DOMTreeSimplificator(

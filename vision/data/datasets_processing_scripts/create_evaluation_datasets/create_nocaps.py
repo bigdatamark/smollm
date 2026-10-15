@@ -1,3 +1,11 @@
+# [MODULE DOC] Script (top-level code, no functions): builds HuggingFaceM4/NoCaps_support_query_sets
+# (private). Support
+# sets come from COCO 2014 captions train (sentences_raw -> annotations_captions, imgid -> image_id): two
+# disjoint random 2048-example sets (validation_support_set, test_support_set). NoCaps is reduced to image,
+# annotations_captions, image_id and cast to a common schema. validation_query_set = 4500 random NoCaps
+# validation examples, test_query_set = NoCaps test; additionally server_check_support_set (same rows as
+# validation_support_set) and server_check_query_set (full NoCaps validation) for checking against the
+# evaluation server. Unseeded shuffles. Prints sizes, pushes the DatasetDict, reloads and prints it.
 import random
 
 from datasets import DatasetDict, Features, Image, Value, load_dataset

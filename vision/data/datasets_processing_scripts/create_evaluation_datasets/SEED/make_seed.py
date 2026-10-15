@@ -1,3 +1,8 @@
+# [MODULE DOC] Script (all top-level code): builds HuggingFaceM4/SEED from AILab-CVC/SEED-Bench (test split):
+# keeps only
+# image questions, loads images from the local unzipped SEED-Bench-image folder (PATH_IMAGES), makes "answer"
+# a ClassLabel A-D, drops data_id/data_type/question_id/segment and pushes the full set, then one config per
+# question type (names from QUESTION_TYPE_ID_TO_TASK) to the Hub. Disables the PIL pixel limit.
 """
 srun --pty --cpus-per-task=48 --mem-per-cpu=11G bash -i
 conda activate /fsx/m4/conda/shared-m4-2023-03-10
@@ -43,12 +48,15 @@ QUESTION_TYPE_ID_TO_TASK = {
 
 
 def filter_data_type(example):
+    # [FUNCTION DOC] Filter predicate: True only when example["data_type"] == "image" (drops video questions).
     if example["data_type"] != "image":
         return False
     return True
 
 
 def map_replace_images(example):
+    # [FUNCTION DOC] Map function: sets example["image"] to the PIL image opened from PATH_IMAGES/<data_id>;
+    # returns example.
     path_image = os.path.join(PATH_IMAGES, example["data_id"])
     image = Image.open(path_image)
     example["image"] = image
@@ -56,6 +64,9 @@ def map_replace_images(example):
 
 
 def filter_question_type_id(example, question_type_id):
+    # [FUNCTION DOC] Filter predicate: True when example["question_type_id"] equals question_type_id (string
+    # key of
+    # QUESTION_TYPE_ID_TO_TASK).
     if example["question_type_id"] != question_type_id:
         return False
     return True

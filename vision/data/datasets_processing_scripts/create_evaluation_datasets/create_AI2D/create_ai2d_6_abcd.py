@@ -1,3 +1,7 @@
+# [MODULE DOC] Script (top-level code): same as create_ai2d_5_abcd.py (letter-option AI2D subset, labels =
+# option texts,
+# non-deterministic ClassLabel order from set()) but the sorted choices are listed one per line after
+# "Choices:\n". Pushed privately to HuggingFaceM4/AI2D_6 and reloaded.
 """
 srun --pty --cpus-per-task=8 --partition=hopper-cpu --qos high bash -i
 conda activate shared-m4
@@ -18,6 +22,11 @@ ds_test = load_dataset(ORIGINAL_NAME_DS, split=ORIGINAL_SPLIT_DS)  # 3088 exampl
 
 
 def filter_ds(example):
+    # [FUNCTION DOC] Predicate over an lmms-lab/ai2d example: returns False if any option in
+    # example["options"] is a single
+    # alphabetic character (letter-labelled diagrams), True otherwise. Used negated at module level, so only
+    # the
+    # letter-option questions are kept.
     options = example["options"]
     if any([option.isalpha() and (len(option) == 1) for option in options]):
         return False
@@ -44,6 +53,9 @@ NAME_DS_PUSH_HUB = "HuggingFaceM4/AI2D_6"
 
 
 def map_func_transform_ai2d_ds(example):
+    # [FUNCTION DOC] Map function: uppercases single-char options -> tested_labels; label = option at the
+    # answer index;
+    # question = instruction + "Question: <q>\nChoices:\n" + sorted choices one per line, stripped.
     choices = example["options"]
     choices = [choice.upper() if (len(choice) == 1) else choice for choice in choices]
     example["tested_labels"] = choices

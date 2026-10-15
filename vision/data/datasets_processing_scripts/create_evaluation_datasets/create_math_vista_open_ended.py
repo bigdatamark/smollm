@@ -1,3 +1,8 @@
+# [MODULE DOC] Script (top-level code): builds HuggingFaceM4/MathVista_OpenEnded (private) with the free-form
+# questions of
+# MathVista "testmini" and "test". Features: pid (int), question (with " (Unit: <unit>)" appended when a unit
+# exists), instruction (the hint part of MathVista's "query" prompt), answer (list with one str, None for
+# test), image.
 """
 srun --pty --cpus-per-task=96 --mem-per-cpu=20G --partition=hopper-prod bash -i
 conda activate shared-m4
@@ -27,6 +32,8 @@ NAME_DS_PUSH_HUB = "HuggingFaceM4/MathVista_OpenEnded"
 
 
 def filter_func_math_vista_openended_ds(example):
+    # [FUNCTION DOC] Filter predicate: True for "free_form", False for "multi_choice"; ValueError for other
+    # question_type values.
     if example["question_type"] == "free_form":
         return True
     elif example["question_type"] == "multi_choice":
@@ -36,6 +43,11 @@ def filter_func_math_vista_openended_ds(example):
 
 
 def map_func_transform_math_vista_openended_ds(example):
+    # [FUNCTION DOC] Map function: pid -> int; image = decoded_image; answer -> [answer] (None if empty, i.e.
+    # test split);
+    # appends the unit to the question if not None; instruction = text of "query" before "\nQuestion: " with
+    # "Hint: " removed (if the marker is missing, find returns -1 and the last character is dropped).
+    # Returns the example.
     example["pid"] = int(example["pid"])
     example["image"] = example["decoded_image"]
     #
@@ -55,6 +67,9 @@ def map_func_transform_math_vista_openended_ds(example):
 
 
 def prepare_math_vista_openended(split):
+    # [FUNCTION DOC] Loads MathVista split `split`, keeps free-form rows, applies the transform keeping only
+    # FEATURES columns
+    # (NUM_PROC processes) and returns the dataset.
     ds = load_dataset(NAME_DS, split=split)
     ds = ds.filter(filter_func_math_vista_openended_ds, num_proc=NUM_PROC)
     columns_to_remove = [c_n for c_n in ds.column_names if c_n not in list(FEATURES.keys())]

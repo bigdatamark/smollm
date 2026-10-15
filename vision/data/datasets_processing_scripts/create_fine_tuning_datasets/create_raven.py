@@ -1,3 +1,8 @@
+# [MODULE DOC] Script (top-level code): builds HuggingFaceM4/RAVEN from RAVEN-10000 .npz/.xml files in
+# LOCAL_PATH, one Hub
+# config per figure configuration (center_single, distribute_four, ...). Each example: 8 panels and 8 choices
+# (160x160 PIL images), structure, meta_matrix, meta_target, meta_structure, target, id and the raw XML
+# metadata. Splits train / val (-> validation) / test pushed as a DatasetDict per config.
 import glob
 import os
 
@@ -26,6 +31,9 @@ FEATURES = datasets.Features(
 
 
 def init_dict():
+    # [FUNCTION DOC] HELPER: returns a fresh mapping from every FEATURES column name to an empty list
+    # (column-wise buffer for
+    # Dataset.from_dict).
     dict_to_fill = {
         "panels": [],
         "choices": [],
@@ -41,6 +49,16 @@ def init_dict():
 
 
 def extract_all_files_for_split(split_files, split):
+    # [FUNCTION DOC] For each .npz path (names like RAVEN_<id>_<split>.npz), asserts the split, loads the
+    # arrays, splits the 16
+    # images into 8 panels / 8 choices as uint8 PIL images, adds leading axes to structure/meta_target/
+    # meta_structure, reads the sibling .xml file (path with "npz" replaced by "xml") as metadata, and
+    # appends all
+    # to a column-wise mapping which is returned. Progress printed every 1000 files. The id is kept as the
+    # string
+    # parsed from the file name (cast to int32 by the features later).
+    # Note: the "npz"->"xml" replacement applies to the whole path, so a directory containing "npz" would
+    # break.
     print(f"start extracting {len(split_files)} files")
     result_dict = init_dict()
 

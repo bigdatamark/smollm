@@ -1,3 +1,13 @@
+# [MODULE DOC] Script (top-level code, sections executed in order): renders the tables of several table-QA
+# datasets as images
+# (plotly + kaleido, random styling) to create fine-tuning datasets, each pushed privately to the Hub:
+# ROBUT sqa / wikisql / wtq (yilunzhao/robut splits, via datasets.map), TAT-QA, FinQA and MultiHiertt (local
+# JSON
+# annotation files under /fsx/leo, processed with multiprocessing Pool + process_annotation), and HiTab
+# (zhoujun/hitab, questions grouped per table). Each section redefines FEATURES_DATASET, colors and
+# font_families (module globals read by the functions defined after them). PIL size limits are disabled.
+# KNOWN ISSUE: `from random import random` binds the function, but every renderer calls random.choice and
+# random.random, which raise AttributeError; as written no section can render a table.
 import json
 import re
 from io import BytesIO
@@ -18,6 +28,11 @@ NUM_PROC = 48
 
 
 def trim(image):
+    # [FUNCTION DOC] HELPER: crops a uniform background border: compares the RGB image with a solid image of
+    # its top-left pixel
+    # color, amplifies the difference (scale 2, offset -20) and crops the original image to the difference
+    # bounding
+    # box. Returns the cropped image, or None (implicitly) when the image is uniform.
     im = image.convert("RGB")
     bg = Image.new(im.mode, im.size, im.getpixel((0, 0)))
     diff = ImageChops.difference(im, bg)
@@ -28,6 +43,11 @@ def trim(image):
 
 
 def process_list_of_strings(input_list):
+    # [FUNCTION DOC] HELPER (unused): for each item, if it is a list, joins the result of eval(item) with
+    # commas, else keeps it.
+    # KNOWN ISSUE: eval is called on a list (eval needs a string), so list items raise TypeError; the check
+    # was
+    # probably meant for strings representing lists.
     processed_list = []
 
     for item in input_list:
@@ -108,6 +128,16 @@ ds_robut_sqa = datasets.load_dataset("yilunzhao/robut", split="sqa")
 
 
 def map_transform_ds_robut_sqa(example):
+    # [FUNCTION DOC] Map function for ROBUT-sqa: builds a DataFrame from table header/rows, renders the table
+    # with plotly go.Table (random header/cell fill colors and font families) through kaleido
+    # and crops the uniform border with trim
+    # (height 130 px per row + 150, width 980, PNG). Sets image, num_rows (number of rows), answers (each
+    # answer
+    # list string eval'ed and joined with ", ") and questions (eval of the "question" string). Returns the
+    # example.
+    # Uses eval on dataset strings (code execution risk on untrusted data).
+    # KNOWN ISSUE: the module imports the function `random` (from random import random), so random.choice /
+    # random.random raise AttributeError here.
     table = example["table"]
     df = pd.DataFrame(table["rows"], columns=table["header"])
     fig = go.Figure(
@@ -211,6 +241,20 @@ font_families = [
 
 
 def process_annotation(annotation):
+    # [FUNCTION DOC] TAT-QA worker: from one annotation (table as list of rows, first row = header;
+    # questions; paragraphs) renders the table with plotly go.Table (random header/cell fill colors and font
+    # families) through kaleido
+    # and crops the uniform border with trim
+    # (PNG, 130 px per row + 150). Returns a mapping with image, table (raw rows), id (table uid), paragraphs
+    # texts,
+    # questions, derivations, scales and answers (list answers joined with ", " and lowercased, others
+    # str()), and
+    # num_rows.
+    # On any exception, prints it with the annotation and returns None.
+    # KNOWN ISSUE: None results are not filtered out, so building the column mapping afterwards (item[key] on
+    # None) raises TypeError as soon as one annotation fails.
+    # KNOWN ISSUE: the module imports the function `random` (from random import random), so random.choice /
+    # random.random raise AttributeError here.
     try:
         table = {"header": annotation["table"]["table"][0], "rows": annotation["table"]["table"][1:]}
         df = pd.DataFrame(table["rows"], columns=table["header"])
@@ -267,6 +311,9 @@ def process_annotation(annotation):
 
 
 def load_annotations(_ANNOTATIONS_PATH):
+    # [FUNCTION DOC] HELPER: reads and returns the JSON content of the annotation file at _ANNOTATIONS_PATH
+    # (UTF-8). Redefined
+    # identically for each section of the script.
     with open(_ANNOTATIONS_PATH, "r", encoding="utf-8") as file:
         annotations = json.load(file)
     return annotations
@@ -349,6 +396,13 @@ ds_robut_wikisql = datasets.load_dataset("yilunzhao/robut", split="wikisql")
 
 
 def map_transform_ds_robut_wikisql(example):
+    # [FUNCTION DOC] Map function for ROBUT-wikisql: renders the table (random colors from a list including
+    # None, random fonts;
+    # JPEG, height = 180 px per "row" + 150), sets image (trimmed) and num_rows. Returns the example.
+    # KNOWN ISSUE: num_rows is len(cells.values), i.e. the number of columns, not rows, so the height and the
+    # stored num_rows are wrong.
+    # KNOWN ISSUE: the module imports the function `random` (from random import random), so random.choice /
+    # random.random raise AttributeError here.
     table = example["table"]
     df = pd.DataFrame(table["rows"], columns=table["header"])
     fig = go.Figure(
@@ -449,6 +503,11 @@ ds_robut_wtq = datasets.load_dataset("yilunzhao/robut", split="wtq")
 
 
 def map_transform_ds_robut_wtq(example):
+    # [FUNCTION DOC] Map function for ROBUT-wtq: same as the wikisql version but 190 px per "row" + 150 and
+    # width 1000.
+    # KNOWN ISSUE: num_rows is the number of columns (len(cells.values)), not rows.
+    # KNOWN ISSUE: the module imports the function `random` (from random import random), so random.choice /
+    # random.random raise AttributeError here.
     table = example["table"]
     df = pd.DataFrame(table["rows"], columns=table["header"])
     fig = go.Figure(
@@ -549,6 +608,19 @@ font_families = [
 
 
 def process_annotation(annotation):
+    # [FUNCTION DOC] FinQA worker: table = first row header + remaining rows, renders the table with plotly
+    # go.Table (random header/cell fill colors and font families) through kaleido
+    # and crops the uniform border with trim (PNG).
+    # Returns a mapping with image, table (header/rows), id, pre_text, post_text and the qa fields question,
+    # program,
+    # gold_inds (stringified), answer (exe_ans), program_re and explanation (a missing key raises and yields
+    # None).
+    # KNOWN ISSUE: the height uses len(cells.values) (number of columns) instead of the number of rows.
+    # On any exception, prints it with the annotation and returns None.
+    # KNOWN ISSUE: None results are not filtered out, so building the column mapping afterwards (item[key] on
+    # None) raises TypeError as soon as one annotation fails.
+    # KNOWN ISSUE: the module imports the function `random` (from random import random), so random.choice /
+    # random.random raise AttributeError here.
     try:
         table = {"header": annotation["table"][0], "rows": annotation["table"][1:]}
         df = pd.DataFrame(table["rows"], columns=table["header"])
@@ -596,6 +668,9 @@ def process_annotation(annotation):
 
 
 def load_annotations(_ANNOTATIONS_PATH):
+    # [FUNCTION DOC] HELPER: reads and returns the JSON content of the annotation file at _ANNOTATIONS_PATH
+    # (UTF-8). Redefined
+    # identically for each section of the script.
     with open(_ANNOTATIONS_PATH, "r", encoding="utf-8") as file:
         annotations = json.load(file)
     return annotations
@@ -667,6 +742,16 @@ colors = [
 
 
 def translate_sequential_expressions(input_str):
+    # [FUNCTION DOC] Translates a FinQA/MultiHiertt-style program ("op(a, b), op(#0, c), ...") into one
+    # nested infix
+    # expression: "const_X" becomes X, the program is split on ", ", "#i" references are replaced by the i-th
+    # previous
+    # translated expression, and an expression containing divide/multiply/add/subtract becomes "(arg0 <sym>
+    # arg1)".
+    # Returns the last translated expression (str). IndexError on dangling references or single-argument ops.
+    # Note: splitting on ", " also splits the arguments inside each operation, so multi-step programs are
+    # mangled
+    # (arguments become separate "expressions").
     operation_symbols = {
         "divide": "/",
         "multiply": "*",
@@ -684,6 +769,8 @@ def translate_sequential_expressions(input_str):
     for expr in expressions:
         # Identify and replace references with previous results
         def replace_ref(match):
+            # [FUNCTION DOC] HELPER: re.sub callback returning the already translated expression results[i]
+            # for a "#i" match.
             index = int(match.group(1))
             return results[index]
 
@@ -706,6 +793,23 @@ def translate_sequential_expressions(input_str):
 
 
 def process_annotation(annotation):
+    # [FUNCTION DOC] MultiHiertt worker: for each HTML table of the annotation, parses it with
+    # pandas.read_html, converts cells to
+    # strings (first row = header), renders the table with plotly go.Table (random header/cell fill colors)
+    # through kaleido
+    # and crops the uniform border with trim (PNG; height from
+    # len(cells.values) i.e. column count), and collects the images and str() of each table mapping. Returns
+    # a mapping
+    # with images, tables, id, paragraphs, table_description, question, answer, program, translated_program
+    # (translate_sequential_expressions) and stringified text/table evidence indices.
+    # KNOWN ISSUE: the cell expression is a chained comparison (str != "nan" and "nan" not in str), so any
+    # cell whose
+    # text merely contains "nan" (e.g. "Financial") is blanked.
+    # On any exception, prints it with the annotation and returns None.
+    # KNOWN ISSUE: None results are not filtered out, so building the column mapping afterwards (item[key] on
+    # None) raises TypeError as soon as one annotation fails.
+    # KNOWN ISSUE: the module imports the function `random` (from random import random), so random.choice /
+    # random.random raise AttributeError here.
     try:
         images = []
         tables = []
@@ -762,6 +866,9 @@ def process_annotation(annotation):
 
 
 def load_annotations(_ANNOTATIONS_PATH):
+    # [FUNCTION DOC] HELPER: reads and returns the JSON content of the annotation file at _ANNOTATIONS_PATH
+    # (UTF-8). Redefined
+    # identically for each section of the script.
     with open(_ANNOTATIONS_PATH, "r", encoding="utf-8") as file:
         annotations = json.load(file)
     return annotations
@@ -855,6 +962,18 @@ font_families = [
 
 
 def process_annotation(table_id):
+    # [FUNCTION DOC] HiTab worker for one table_id: gathers the questions grouped for that table in the global
+    # dedup_dict_hitab_no_table into column lists (qids, questions, answers), takes the table cells from the
+    # global
+    # ds_hitab_not_rendered (first row = header), renders the table with plotly go.Table (random header/cell
+    # fill colors and font families) through kaleido
+    # and crops the uniform border with trim (PNG, width 980, height from the column count).
+    # Returns the mapping with image, table_id and table added.
+    # On any exception, prints it with the annotation and returns None.
+    # KNOWN ISSUE: None results are not filtered out, so building the column mapping afterwards (item[key] on
+    # None) raises TypeError as soon as one annotation fails.
+    # KNOWN ISSUE: the module imports the function `random` (from random import random), so random.choice /
+    # random.random raise AttributeError here.
     try:
         annotation = {
             key: [item[key] for item in dedup_dict_hitab_no_table[table_id]]

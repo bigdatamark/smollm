@@ -1,3 +1,7 @@
+# [MODULE DOC] Script (top-level code): builds HuggingFaceM4/MMMU_MCQ (private DatasetDict
+# dev/validation/test) from the
+# multiple-choice questions of HuggingFaceM4/MMMU, then reloads it to cache. Features: id, question (images
+# header + lettered choices + "Answer with the letter."), label (ClassLabel A-I, None for test), images.
 """
 srun --pty --cpus-per-task=96 --mem-per-cpu=20G --partition=hopper-prod bash -i
 conda activate shared-m4
@@ -32,6 +36,8 @@ NAME_DS_PUSH_HUB = "HuggingFaceM4/MMMU_MCQ"
 
 
 def filter_func_mmmu_mcq_ds(example):
+    # [FUNCTION DOC] Filter predicate: True for question_type "multiple-choice", False for "open", ValueError
+    # otherwise.
     if example["question_type"] == "open":
         return False
     elif example["question_type"] == "multiple-choice":
@@ -41,6 +47,10 @@ def filter_func_mmmu_mcq_ds(example):
 
 
 def format_value_to_list(value):
+    # [FUNCTION DOC] HELPER: parses a string that may hold a Python list literal (e.g. MMMU
+    # "options"/"answer"). Returns the
+    # parsed list if ast.literal_eval yields a list, otherwise (non-list literal, SyntaxError or ValueError)
+    # returns [value].
     try:
         evaluated_value = ast.literal_eval(value)
         if isinstance(evaluated_value, list):
@@ -52,6 +62,12 @@ def format_value_to_list(value):
 
 
 def map_func_transform_mmmu_mcq_ds(example):
+    # [FUNCTION DOC] Map function: the non-None image_1..image_7 columns are gathered into "images" and a
+    # header line
+    # "<image i>:<image>" per image (numbered from 1) is prepended to the question; question = images header
+    # + "\nQuestion: <q>\nChoices:\n" +
+    # "<letter>. <choice>" lines + "Answer with the letter."; label = answer letter, None when answer is "?"
+    # (test). IndexError if more than 9 options. Returns the example.
     example["images"] = [
         example[f"image_{image_number}"]
         for image_number in IMAGE_NUMBERS
@@ -81,6 +97,9 @@ def map_func_transform_mmmu_mcq_ds(example):
 
 
 def prepare_mmmu_mcq(split):
+    # [FUNCTION DOC] Loads HuggingFaceM4/MMMU split `split`, keeps MCQ rows, transforms them keeping only
+    # FEATURES columns
+    # (NUM_PROC processes) and returns the dataset.
     ds = load_dataset(NAME_DS, split=split)
     ds = ds.filter(filter_func_mmmu_mcq_ds, num_proc=NUM_PROC)
     columns_to_remove = [c_n for c_n in ds.column_names if c_n not in list(FEATURES.keys())]

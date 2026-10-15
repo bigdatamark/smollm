@@ -1,3 +1,11 @@
+# [MODULE DOC] Script (step 15_03): removes from one shard of the web-document dataset every document whose
+# URL is in
+# the Spawning opt-out list. Takes the shard/job index as sys.argv[1] (IDX_JOB, used in S3 and tmp paths).
+# Disables PIL decompression-bomb and truncated-image errors globally, configures INFO logging.
+# When run as main: recreates /scratch/storage_hugo_<IDX_JOB>/ (rm -rf + mkdir), downloads the JSON list of
+# opt-out urls with `aws s3 cp`, s5cmd-syncs the shard from S3 (3 tries), filters it with
+# OptOutFilteringDocuments (NUM_PROC_FILTERING processes), saves it (NUM_PROC_SAVING shards), syncs it to
+# the "_optoutrmvdoc2" S3 prefix, then deletes the tmp directory.
 import json
 import logging
 import os
@@ -42,18 +50,30 @@ PATH_SAVE_S3_WEB_DOCS_OPT_OUT_FILTERED = f"s3://m4-datasets-us-east-1/webdocs/we
 
 
 class OptOutFilteringDocuments:
+    # [CLASS DOC] Picklable datasets.filter callable that drops documents whose URL is opted out. Holds the
+    # path of a JSON
+    # file (list of urls) and the loaded set of urls.
     def __init__(self, path_opt_out_urls):
+        # [FUNCTION DOC] Stores path_opt_out_urls (str, path of a JSON list of url strings) and loads it into
+        # the set
+        # self.opt_out_urls. Raises on missing file / invalid JSON.
         self.path_opt_out_urls = path_opt_out_urls
         with open(path_opt_out_urls) as f:
             self.opt_out_urls = set(json.load(f))
 
     def __call__(self, example):
+        # [FUNCTION DOC] Filter predicate. Reads the document url from the example's JSON "general_metadata"
+        # ("url" key);
+        # returns False if it is in the opt-out set, True otherwise.
         document_url = json.loads(example["general_metadata"])["url"]
         if document_url in self.opt_out_urls:
             return False
         return True
 
     def __reduce__(self):
+        # [FUNCTION DOC] Pickling support for multiprocessing: rebuilds the object from path_opt_out_urls
+        # (reloading the
+        # JSON file in the worker) instead of pickling the large url set.
         return self.__class__, (self.path_opt_out_urls,)
 
 

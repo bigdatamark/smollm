@@ -1,3 +1,9 @@
+# [MODULE DOC] Script (top-level code, no functions): builds HuggingFaceM4/textvqa_support_query_sets
+# (private) from textvqa: after an unseeded shuffle of train,
+# disjoint validation_support_set (2048), test_support_set (2048) and validation_query_set (1024) are taken
+# from
+# train; test_query_set = the original validation split. Prints sizes and the (expected empty) intersections,
+# pushes each split as a config, reloads and prints the result.
 import random
 
 from datasets import load_dataset

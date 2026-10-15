@@ -1,3 +1,10 @@
+# [MODULE DOC] Script (step 15_01 of the OBELICS web-document pipeline): collects every document URL and
+# image URL of
+# OBELICS so they can be checked against the Spawning opt-out API (step 15_02).
+# When run as main: syncs the image-less OBELICS dataset from S3 to local disk (s5cmd then aws s3 sync),
+# loads it with datasets.load_from_disk, maps func_map_find_urls (NUM_PROC processes), then builds three
+# deduplicated single-column datasets (document_url / image_url / url = docs + images concatenated), saves
+# each to /scratch and uploads it to S3 via `aws s3 sync` shell commands. Paths are hard-coded constants.
 """
 srun --pty --cpus-per-task=96 --mem-per-cpu=20G --partition=hopper-prod bash -i
 """
@@ -21,6 +28,11 @@ PATH_SAVE_S3_DOC_AND_IMAGE_URLS_OBELICS = "s3://m4-datasets-us-east-1/webdocs/ds
 
 
 def func_map_find_urls(example):
+    # [FUNCTION DOC] datasets.map function. Input: an OBELICS example whose "general_metadata" is a JSON
+    # string with
+    # a "url" key and whose "metadata" is a JSON list (one entry per text/image slot; None for texts, mapping
+    # with "src" for images). Adds "document_url" (str) and "image_urls" (list of src strings, None entries
+    # skipped) to the example and returns it (the example dict is mutated in place).
     document_url = json.loads(example["general_metadata"])["url"]
     example["document_url"] = document_url
     #

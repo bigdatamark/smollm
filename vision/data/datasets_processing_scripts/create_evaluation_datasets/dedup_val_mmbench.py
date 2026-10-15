@@ -1,3 +1,8 @@
+# [MODULE DOC] Script (top-level code): removes from the validation split of
+# HuggingFaceM4/MMBench_modif_chatbot every
+# example whose image (average hash) also appears in the fine-tuning datasets listed in ALL_DS_NAMES (loaded
+# from disk under COMMON_PATH_DATASETS and concatenated), to avoid train/eval contamination. Pushes the result
+# to HuggingFaceM4/MMBench_modif_chatbot_dedup_val. Uses NUM_PROC processes.
 """
 srun --pty --cpus-per-task=96 --mem-per-cpu=20G --partition=hopper-prod bash -i
 conda activate shared-m4
@@ -50,6 +55,9 @@ all_datasets = concatenate_datasets(all_datasets)
 
 
 def compute_ahash(image, hash_size=10):
+    # [FUNCTION DOC] HELPER: perceptual average hash of a PIL image: resize to hash_size x hash_size (default
+    # 10, Lanczos),
+    # grayscale, threshold each pixel against the mean, pack the bits and return them as a hex string.
     image = image.resize((hash_size, hash_size), Image.Resampling.LANCZOS)
     image = image.convert("L")
     pixels = np.array(image)
@@ -61,6 +69,10 @@ def compute_ahash(image, hash_size=10):
 
 
 def map_compute_hash_images(example):
+    # [FUNCTION DOC] Map function: takes the first element of example["images"] if that key exists, else
+    # example["image"],
+    # and stores its average hash (hash_size 10) in example["image_hash"]. Returns the example. Raises
+    # UnboundLocalError if neither key exists.
     if "images" in example:
         image = example["images"][0]
     elif "image" in example:

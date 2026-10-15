@@ -1,3 +1,6 @@
+# [MODULE DOC] Script: lists the URLs of documents of one HTML shard that contain a "more-link" element (CSS
+# "[class~='more-link']"; truncated blog-index style pages), to be banned later by 05_filter_cm4.py.
+# Configures INFO logging. When run as main: get_args then main.
 import argparse
 import logging
 from functools import partial
@@ -18,6 +21,9 @@ logger.setLevel(logging.INFO)
 
 
 def get_args():
+    # [FUNCTION DOC] Parses CLI args: --arrow_shard_dir (Path), --shard_id (int), --extraction_dir (Path),
+    # --shard_name (str),
+    # --num_proc (int, default cpu_count(), unused by main). Returns the namespace.
     parser = argparse.ArgumentParser(description="Extract bannel urls.")
     # ---------------- Path args ----------------
     parser.add_argument(
@@ -52,11 +58,17 @@ def get_args():
 
 
 def main(args):
+    # [FUNCTION DOC] Loads the "train" split of <arrow_shard_dir>/<shard_name>, filters (32 processes,
+    # hard-coded) to documents
+    # whose "html" matches the more-link selector and writes their "url" values, one per line, to
+    # <extraction_dir>/shard_<shard_id>_banned_urls.txt (overwritten).
     html_dataset = load_from_disk(args.arrow_shard_dir / args.shard_name)["train"]
 
     css_rule = "[class~='more-link']"
 
     def filter_doc_with_matching_class(example, css_rule):
+        # [FUNCTION DOC] HELPER: filter predicate; True if example["html"] contains a node matching css_rule
+        # (selectolax).
         current_html = example["html"]
         tree = HTMLParser(current_html)
         match = tree.css_first(css_rule)
