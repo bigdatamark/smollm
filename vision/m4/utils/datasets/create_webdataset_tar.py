@@ -1,3 +1,10 @@
+# [MODULE DOC] Exports Hugging Face datasets into webdataset-style tar shards. Each example is written as
+# loose files
+# ("<idx>_<uuid>.<...>.image.jpeg", ".text.txt", ".question.txt", ".answer.txt", ".metadata.txt") into
+# "shard_<prefix><n>" directories under saving_dir (a pathlib.Path), each directory is then tarred (GNU tar,
+# sorted names), deleted, and optionally uploaded to S3 with the s5cmd CLI. Per-example save functions
+# return {"saved": <images written>, "num_img": <images seen>} so totals can be summed afterwards.
+# Running as a script exports a small hard-coded test dataset to a hard-coded local path.
 import json
 import logging
 import math
@@ -23,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 
 def check_img_exception(img):
+    # [FUNCTION DOC] HELPER: returns True (and logs the exception at INFO) if converting the PIL image to RGB
+    # fails, else False.
     try:
         _ = img.convert("RGB")
         return False
@@ -33,6 +42,13 @@ def check_img_exception(img):
 
 # Utils for web documents
 def save_web_document_example_in_files(example, idx, saving_dir):
+    # [FUNCTION DOC] Saves one web-document example (parallel lists example["texts"] / example["images"], one
+    # non-empty entry
+    # per position) into saving_dir: text entries become "<id>.<i>.text.txt", images are converted to RGB and
+    # saved as "<id>.<i>.image.jpeg" (broken images skipped). If no image was saved, all written files are
+    # deleted (text-only documents are dropped). Otherwise writes "<id>.metadata.txt" listing the file names
+    # in
+    # order. Returns {"saved", "num_img"}.
     example_id = f"{idx}_{str(uuid.uuid4())}"
     saved = 0
     num_img = 0
@@ -71,6 +87,11 @@ def save_web_document_example_in_files(example, idx, saving_dir):
 def save_web_document_example_in_files_with_num_shards(
     example, idx, saving_dir, num_examples_per_shard, save_shard_prefix
 ):
+    # [FUNCTION DOC] Computes shard index idx // num_examples_per_shard and saves the web document into
+    # saving_dir/"shard_<prefix><shard_idx>".
+    # KNOWN ISSUE: the shard directory name is not zero-padded, but export_dataset_all_shard_idx_to_tar
+    # creates
+    # zero-padded (7-digit) directories, so writes fail with FileNotFoundError (only the SFT variant pads).
     shard_idx = idx // num_examples_per_shard
     saving_dir_shard = saving_dir / f"shard_{save_shard_prefix}{shard_idx}"
 
@@ -79,6 +100,9 @@ def save_web_document_example_in_files_with_num_shards(
 
 # Utils for image caption pairs
 def save_image_caption_pair_example_in_files(example, idx, saving_dir):
+    # [FUNCTION DOC] Saves one image-caption example (keys "image", "text"): skips None/broken images (returns
+    # saved 0), else
+    # writes "<id>.image.jpeg" (RGB) and "<id>.text.txt". Returns {"saved": 0 or 1, "num_img": 1}.
     image = example["image"]
     if image is None:
         logger.info(f"Example {idx} has None as image")
@@ -101,6 +125,10 @@ def save_image_caption_pair_example_in_files(example, idx, saving_dir):
 def save_image_caption_pair_example_in_files_with_num_shards(
     example, idx, saving_dir, num_examples_per_shard, save_shard_prefix
 ):
+    # [FUNCTION DOC] Sharded variant of save_image_caption_pair_example_in_files (directory
+    # "shard_<prefix><idx//n>").
+    # KNOWN ISSUE: shard directory name is not zero-padded, mismatching the directories created by the
+    # exporter.
     shard_idx = idx // num_examples_per_shard
     saving_dir_shard = saving_dir / f"shard_{save_shard_prefix}{shard_idx}"
 
@@ -109,6 +137,10 @@ def save_image_caption_pair_example_in_files_with_num_shards(
 
 # Utils for image/question/answer triplets (in particular for specific fine-tuning)
 def save_image_question_answer_triplet_example_in_files(example, idx, saving_dir):
+    # [FUNCTION DOC] Saves one image/question/answer example (keys "image", "question", "answer") as
+    # "<id>.image.jpeg",
+    # "<id>.question.txt" and "<id>.answer.txt"; None/broken images are skipped. Returns {"saved", "num_img":
+    # 1}.
     image = example["image"]
     if image is None:
         logger.info(f"Example {idx} has None as image")
@@ -134,6 +166,9 @@ def save_image_question_answer_triplet_example_in_files(example, idx, saving_dir
 def save_image_question_answer_triplet_example_in_files_with_num_shards(
     example, idx, saving_dir, num_examples_per_shard, save_shard_prefix
 ):
+    # [FUNCTION DOC] Sharded variant of save_image_question_answer_triplet_example_in_files.
+    # KNOWN ISSUE: shard directory name is not zero-padded, mismatching the directories created by the
+    # exporter.
     shard_idx = idx // num_examples_per_shard
     saving_dir_shard = saving_dir / f"shard_{save_shard_prefix}{shard_idx}"
 
@@ -142,6 +177,11 @@ def save_image_question_answer_triplet_example_in_files_with_num_shards(
 
 # Utils for sft datasets now that they are all under the same format
 def save_sft_example_in_files(example, idx, saving_dir):
+    # [FUNCTION DOC] Saves one SFT example: each of example["images"] converted to RGB and saved as
+    # "<id>.<i>.image.jpeg"
+    # (broken ones skipped), then each entry of example["texts"] (user/assistant dict) JSON-dumped into
+    # "<id>.<i+num_img>.text.txt", then a metadata file listing the files. Returns {"saved", "num_img"}.
+    # Note: check_img_exception is redundantly called twice per image.
     example_id = f"{idx}_{str(uuid.uuid4())}"
     saved = 0
     num_img = 0
@@ -177,6 +217,8 @@ def save_sft_example_in_files(example, idx, saving_dir):
 
 
 def save_sft_example_in_files_with_num_shards(example, idx, saving_dir, num_examples_per_shard, save_shard_prefix):
+    # [FUNCTION DOC] Sharded variant of save_sft_example_in_files; the shard directory index is zero-padded to
+    # 7 digits.
     shard_idx = idx // num_examples_per_shard
     shard_idx_padded = str(shard_idx).zfill(7)
     saving_dir_shard = saving_dir / f"shard_{save_shard_prefix}{shard_idx_padded}"
@@ -186,6 +228,9 @@ def save_sft_example_in_files_with_num_shards(example, idx, saving_dir, num_exam
 
 # General utils
 def save_example_in_files(example, idx, saving_dir, ds_type):
+    # [FUNCTION DOC] Dispatches to the per-type save function based on ds_type (WEB_DOCUMENTS,
+    # IMAGE_CAPTION_PAIRS,
+    # DOCVQA/VQAV2_TASK_FINETUNING, SFT); raises ValueError for other types. Returns the save result dict.
     if ds_type == DatasetTypes.WEB_DOCUMENTS:
         saved = save_web_document_example_in_files(example, idx, saving_dir)
     elif ds_type == DatasetTypes.IMAGE_CAPTION_PAIRS:
@@ -202,6 +247,8 @@ def save_example_in_files(example, idx, saving_dir, ds_type):
 def save_example_in_files_with_num_shards(
     example, idx, saving_dir, ds_type, num_examples_per_shard, save_shard_prefix
 ):
+    # [FUNCTION DOC] Same dispatch as save_example_in_files but to the "_with_num_shards" variants (shard dir
+    # computed from idx).
     if ds_type == DatasetTypes.WEB_DOCUMENTS:
         saved = save_web_document_example_in_files_with_num_shards(
             example, idx, saving_dir, num_examples_per_shard, save_shard_prefix
@@ -235,6 +282,21 @@ def export_dataset_all_shard_idx_to_tar(
     shard_idx: Optional[int] = None,
     save_shard_idx: Optional[str] = None,
 ):
+    # [FUNCTION DOC] Main exporter. Loads and concatenates datasets from hf_datasets_paths (via m4
+    # load_hf_dataset; a
+    # DatasetDict raises ValueError). num_proc defaults to min(6, cpu count). Shard count is ceil(len /
+    # num_examples_per_shard) (1 if None), raised to min_num_shards if given; then examples-per-shard and
+    # shard
+    # count are recomputed by integer division. If shard_idx is None: creates num_shards+1 zero-padded shard
+    # directories and maps every example (with indices, num_proc workers, no cache) into its shard directory.
+    # Otherwise only shard `shard_idx` of the dataset is written into "shard_<prefix><shard_idx>". Touches
+    # "shard_<prefix>_finished.txt", logs image/saved counts, then in a pathos process pool tars every
+    # non-empty shard directory, removes it and uploads to s3_uri if given. Returns 0.
+    # save_shard_idx is deprecated: raises NotImplementedError if set. saving_dir must be a Path despite the
+    # hint.
+    # KNOWN ISSUE: the logged percentage divides by num_images and raises ZeroDivisionError when no images
+    # exist;
+    # a dataset smaller than the shard count also causes division by zero.
     if save_shard_idx is not None:
         raise NotImplementedError("Use of `save_shard_idx` has been deprecated.")
 
@@ -311,6 +373,11 @@ def export_dataset_all_shard_idx_to_tar(
 
     def tar_shard_and_send_to_s3(saving_dir_shard):
         # check if the shard exists and is not empty
+        # [FUNCTION DOC] HELPER (closure over s3_uri): if the shard directory exists and is non-empty, creates
+        # "<dir>.tar" next to
+        # it with GNU tar (sorted entries, relative paths), deletes the directory and, when s3_uri is set,
+        # copies the
+        # tar to "<s3_uri>/<tar name>" with s5cmd. Raises CalledProcessError on command failure. Returns None.
         if not os.path.exists(saving_dir_shard) or not os.listdir(saving_dir_shard):
             return
 
@@ -349,6 +416,8 @@ def export_dataset_to_tar(
     num_examples_per_shard: int,
     num_proc: Optional[int] = None,
 ):
+    # [FUNCTION DOC] Convenience wrapper: export_dataset_all_shard_idx_to_tar without S3 upload, min shards or
+    # shard index.
     return export_dataset_all_shard_idx_to_tar(
         hf_datasets_paths=hf_datasets_paths,
         saving_dir=saving_dir,
@@ -369,6 +438,9 @@ def export_dataset_shard_idx_to_tar(
     min_num_shards: Optional[int] = None,
     save_shard_idx: Optional[str] = None,
 ):
+    # [FUNCTION DOC] Deprecated wrapper (logs a warning) forwarding to export_dataset_all_shard_idx_to_tar
+    # with an empty
+    # shard prefix and the given shard_idx (default 0, so only one shard is exported).
     logger.warning(
         "`export_dataset_shard_idx_to_tar` is deprecated, please favor `export_dataset_all_shard_idx_to_tar`."
     )

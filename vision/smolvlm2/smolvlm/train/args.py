@@ -1,3 +1,7 @@
+# [MODULE DOC] Dataclasses defining the command-line arguments for SmolVLM2 training, parsed with
+# HfArgumentParser in
+# smolvlm.train.train: model options, data/mixture options, and TrainingArguments extending transformers'
+# TrainingArguments with quantization, LoRA, per-component learning rates and sequence-parallel fields.
 # arguments.py
 
 from dataclasses import dataclass, field
@@ -8,6 +12,11 @@ import transformers
 
 @dataclass
 class ModelArguments:
+    # [CLASS DOC] Model options: model_name_or_path (default "HuggingFaceTB/SmolVLM_converted_4"),
+    # trust_remote_code
+    # (False), padding_side ("right"), apply_diagonal_block_attention (False; block-diagonal attention for
+    # packing), frames_per_clip (1; frames averaged together after the vision encoder), fps (1.0, video
+    # sampling).
     """
     Arguments related to the model/config/trust_remote_code.
     """
@@ -38,6 +47,14 @@ class ModelArguments:
 
 @dataclass
 class DataArguments:
+    # [CLASS DOC] Data options: data_folder (media root, "./data"), data_mixture (YAML of sub-datasets),
+    # add_media_intro_outro,
+    # mask_user_tokens (False), mask_system_tokens (True), video_target_size (384) and image_target_size
+    # (1536)
+    # in pixels, max_frames (25), packed (sequence packing), loss_reduction ("token", "sample", "square" or
+    # "none" weighting of packed sub-samples) and loss_reduction_all_gather.
+    # KNOWN ISSUE: help texts of video_target_size, image_target_size and max_frames are copy-pasted
+    # "FPS for video sampling if needed." and do not describe these fields.
     """
     Arguments related to the data for training (e.g., paths, dataset config).
     """
@@ -81,6 +98,15 @@ class DataArguments:
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
+    # [CLASS DOC] transformers.TrainingArguments plus: cache_dir, optim ("adamw_torch"), remove_unused_columns
+    # (False),
+    # disable_flash_attn2, model_dtype (string such as "torch.bfloat16"), model_max_length (16384),
+    # quantization
+    # (bits 16/8/4, double_quant, quant_type "nf4"), LoRA (peft_enable, lora_rank 64, lora_alpha 32,
+    # lora_dropout 0.05, target_modules, lora_bias, use_dora), learning rates for vision tower (2e-6),
+    # connector
+    # (1e-5) and language model (1e-5), tune_vision_tower, sequence-parallel settings (-1 = disabled) and
+    # debug_e2e.
     cache_dir: Optional[str] = field(
         default=None,
         metadata={"help": "Cache dir for huggingface transformers."}

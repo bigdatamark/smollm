@@ -1,9 +1,16 @@
+# [MODULE DOC] CLI script that aligns two LLaVA-style JSON datasets (MammothVL and OneVision, each a list of
+# dicts) by
+# adding a "shared_id" field to every entry derived from image file names, the "id" field and subset info,
+# then reports how many shared ids occur in both and writes the updated files.
 import json
 import os
 import re
 import argparse
 
 def extract_image_key(image_field):
+    # [FUNCTION DOC] Returns the basename of a non-empty string image path, the underscore-joined basenames of
+    # the non-empty
+    # string entries of a list, or None for anything else (including lists with no usable entries).
     """
     Extract a key from the "image" field. The field may be:
       - A single string representing one image path.
@@ -26,6 +33,7 @@ def extract_image_key(image_field):
     return None
 
 def tokenize_id(id_str):
+    # [FUNCTION DOC] Splits id_str on "-", "_" and "." and returns the set of non-blank tokens.
     """
     Tokenize the id string on common delimiters: hyphens, underscores, and periods.
     Return a set of non-empty tokens.
@@ -40,6 +48,12 @@ def tokenize_id(id_str):
     return set(tokens)
 
 def create_shared_key(entry):
+    # [FUNCTION DOC] Builds the shared key from an entry: subset = "datasource" or "source" (or ""); key is
+    # the image key, else
+    # the smallest numeric id token (lexicographic sort of digit strings), else all id tokens sorted and
+    # joined
+    # with "_"; prefixed by "<subset>_" when subset is non-empty. Returns None when nothing is usable.
+    # Note: a missing or None "id" would fail in tokenize_id if it is None (only "" default is handled).
     """
     Create a shared key for an entry with the following priorities:
 
@@ -82,6 +96,9 @@ def create_shared_key(entry):
     return None
 
 def process_json_file(file_path):
+    # [FUNCTION DOC] Loads a JSON list from file_path, sets entry["shared_id"] = create_shared_key(entry) on
+    # each entry, prints
+    # total and valid counts, and returns the list.
     """
     Load a JSON file (expected to be a list of dictionaries).
     For each entry, compute the shared_id and store it in "shared_id".
@@ -106,6 +123,7 @@ def process_json_file(file_path):
     return data
 
 def write_json_file(data, file_path):
+    # [FUNCTION DOC] Writes data as indented JSON to file_path and prints the number of entries written.
     """
     Write a list of dictionaries into a JSON file with pretty indentation.
     """
@@ -114,6 +132,10 @@ def write_json_file(data, file_path):
     print(f"[INFO] Wrote {len(data)} entries to '{file_path}'")
 
 def main():
+    # [FUNCTION DOC] CLI entry: positional mammoth_file and onevision_file, --output_mammoth
+    # (mammoth_aligned.json),
+    # --output_onevision (onevision_aligned.json). Processes both files, prints the number of non-None
+    # shared_ids present in both, and writes the outputs.
     parser = argparse.ArgumentParser(
         description=(
             "Load two JSON files (each a list of dicts). For each entry, create a shared_id "

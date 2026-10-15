@@ -1,3 +1,7 @@
+# [MODULE DOC] CLI script (argv: one YAML path) that annotates a mixture YAML in place: after every
+# non-comment
+# "json_path:" line not already followed by a line containing "samples", it inserts a comment line with the
+# number of samples in that JSON file and the percentage of missing media paths in a random sample.
 import yaml
 import json
 import random
@@ -5,6 +9,10 @@ from pathlib import Path
 import os
 
 def validate_media_paths(json_path, json_data, sample_size=100):
+    # [FUNCTION DOC] Picks up to sample_size (default 100) random items from json_data (list of dicts),
+    # collects their "image"
+    # and "video" values (string or list), resolves each relative to the JSON file's directory and counts
+    # missing files (printing each missing path). Returns failure percentage (0 when no paths were checked).
     """
     Validate paths for a sample of elements from the dataset.
     Returns percentage of failed paths.
@@ -40,6 +48,13 @@ def validate_media_paths(json_path, json_data, sample_size=100):
     return (failed_paths / total_paths * 100) if total_paths > 0 else 0
 
 def process_yaml(yaml_path):
+    # [FUNCTION DOC] Reads the YAML text line by line; for each eligible "json_path:" line loads the JSON
+    # (path taken verbatim
+    # after "json_path:", relative to the current working directory), computes count and failure rate, prints
+    # a summary, and inserts "    # <n> samples, <x>% path validation failures" (or "    # Error processing
+    # file: <err>" on any exception) after it. Overwrites yaml_path with the result.
+    # KNOWN ISSUE: quoted json_path values are not unquoted, so they fail to open; the parsed `data` is
+    # unused.
     """
     Process the YAML file, count samples, and validate paths.
     """

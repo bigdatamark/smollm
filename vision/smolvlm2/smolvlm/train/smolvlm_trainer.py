@@ -1,3 +1,5 @@
+# [MODULE DOC] Custom Hugging Face Trainer for SmolVLM2 with per-component learning rates and simplified
+# saving.
 import os
 import torch
 import logging
@@ -11,6 +13,9 @@ from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 logger = logging.getLogger(__name__)
 
 class SmolVLMTrainer(Trainer):
+    # [CLASS DOC] transformers.Trainer subclass overriding create_optimizer (separate parameter groups for the
+    # vision
+    # encoder, the connector and the language model) and save_model.
     """
     A specialized Trainer that supports:
       - Distinct LR for vision tower vs. connector vs. LLM.
@@ -18,6 +23,17 @@ class SmolVLMTrainer(Trainer):
     """
 
     def create_optimizer(self):
+        # [FUNCTION DOC] Builds (once) and returns self.optimizer. Trainable parameters are split by name:
+        # containing
+        # "vision_model" -> vision group (args.vision_tower_lr), "connector" -> connector group
+        # (args.connector_lr), else language model (args.language_model_lr). Each component with lr > 0 yields
+        # a
+        # weight-decay group (non-bias, non-LayerNorm params, args.weight_decay) and a no-decay group. If no
+        # groups result, falls back to all trainable params with args.learning_rate. Logs the groups and
+        # instantiates
+        # the optimizer class from Trainer.get_optimizer_cls_and_kwargs(args).
+        # Note: a component with lr <= 0 is excluded from the optimizer but its params keep requires_grad;
+        # tune_vision_tower is not consulted here.
         if self.optimizer is not None:
             return self.optimizer  # Already created
 
@@ -53,6 +69,9 @@ class SmolVLMTrainer(Trainer):
         def make_group(param_names, lr_value):
             # returns two subgroups: {decay: True}, {decay: False}
             # so that weight decay is only applied for non-bias,non-LN
+            # [FUNCTION DOC] HELPER: returns [] if lr_value <= 0, else two param-group dicts (decay / no
+            # decay) with that lr for the
+            # named parameters. Membership tests on lists make this quadratic in parameter count.
             if lr_value <= 0:
                 return []
             decay = {
@@ -84,6 +103,8 @@ class SmolVLMTrainer(Trainer):
             
         # Function to log details of each parameter group
         def log_param_groups(groups: List[Dict[str, Any]]):
+            # [FUNCTION DOC] HELPER: logs number of params, weight decay and lr of each group ("unnamed_group"
+            # since no names are set).
             logger.info("Parameter Groups Configuration:")
             for group in groups:
                 group_name = group.get("name", "unnamed_group")
@@ -107,6 +128,14 @@ class SmolVLMTrainer(Trainer):
         return self.optimizer
 
     def save_model(self, output_dir: Optional[str] = None, _internal_call: bool = False, state_dict=None):
+        # [FUNCTION DOC] Saves to output_dir (default args.output_dir). With DeepSpeed delegates to
+        # Trainer.save_model. Otherwise
+        # uses the given state_dict or the model's state_dict and, if args.should_save, calls
+        # model.save_pretrained(output_dir, state_dict=...). Tokenizer/processor and training args are not
+        # saved.
+        # KNOWN ISSUE: the fallback branch calls PreTrainedModel.unwrap_model, which does not exist (it is
+        # only
+        # reached for models without state_dict, so effectively dead code that would raise AttributeError).
         """
         Saves the model. Supports big models or PEFT seamlessly if not using DeepSpeed.
         """

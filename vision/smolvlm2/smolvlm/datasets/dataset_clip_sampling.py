@@ -1,3 +1,10 @@
+# [MODULE DOC] Clip-based variant of smolvlm.datasets.dataset used when frames_per_clip > 1 (SmolLMM): videos
+# are sampled
+# into clips of frames_per_clip consecutive frames, each clip gets a single image placeholder preceded by a
+# "Clip from MM:SS to MM:SS:" text, and the model averages the clip's frame embeddings. Same loaders/masking
+# helpers otherwise; the processor is called with allow_mismatch=True (SmolLMMProcessor). Prompt constants:
+# DEFAULT_SYSTEM_MESSAGE, DEFAULT_VIDEO_INTRO (clip count and duration), DEFAULT_IMAGE_INTRO,
+# DEFAULT_MEDIA_OUTTRO, FRAME_TIMESTAMP_MESSAGE_BASE and FRAME_TIMESTAMP_MESSAGE (with a {clip_ts} slot).
 import os
 import math
 import random
@@ -54,6 +61,10 @@ FRAME_TIMESTAMP_MESSAGE = FRAME_TIMESTAMP_MESSAGE_BASE + "{clip_ts}:"
 
 def sample_clip_indices(frames_per_clip: int, video_duration: float, sampling_fps: float, video_fps: float, max_clips: int):
     # Total number of frames in the video and effective clip duration.
+    # [FUNCTION DOC] Earlier implementation of clip sampling (step-based or repeated-frame sampling with
+    # spacing and padding);
+    # returns (flat frame indices, per-clip (start_sec, end_sec)).
+    # KNOWN ISSUE: dead code, immediately shadowed by the second sample_clip_indices definition below.
     tot_frames = int(video_duration * video_fps)
     clip_dur = frames_per_clip / sampling_fps
     
@@ -66,6 +77,8 @@ def sample_clip_indices(frames_per_clip: int, video_duration: float, sampling_fp
     clips, timestamps = [], []
     
     def pad(arr, target, pad_val):
+        # [FUNCTION DOC] HELPER: right-pads a numpy int array with pad_val up to target length (unchanged if
+        # already long enough).
         return arr if arr.size >= target else np.concatenate((arr, np.full(target - arr.size, pad_val, dtype=np.int64)))
     
     if r > 0.5:
@@ -110,6 +123,15 @@ def sample_clip_indices(
     video_fps: float,
     max_clips: int
 ):
+    # [FUNCTION DOC] Returns (flat frame indices, list of (start_sec, end_sec) per clip) for a video of
+    # video_duration seconds
+    # at video_fps. Clip count = min(total_frames // frames_per_clip, max_clips), at least 1. If the video is
+    # shorter than the time needed at sampling_fps for all requested frames, indices are taken every
+    # video_fps/sampling_fps frames (capped, never repeated); otherwise desired frames are spaced uniformly
+    # over
+    # the whole video. Only complete clips are kept (trailing frames dropped); returns ([], []) if no frames
+    # or no
+    # complete clip can be formed. Indices are not deduplicated, so uniform spacing can repeat frames.
     """
     This function returns *up to* (frames_per_clip * max_clips) frame indices in total,
     grouped into some number of clips <= max_clips. Each clip is size frames_per_clip,
@@ -221,6 +243,12 @@ def load_video(
     target_fps: float = 2.0,
     frames_per_clip: int =1,   
 ) -> Tuple[List[Image.Image], List[str]]:
+    # [FUNCTION DOC] Decodes a video with decord and samples clip frames via sample_clip_indices (max_clips =
+    # max_frames, so up
+    # to max_frames * frames_per_clip frames). Returns (RGB PIL frames, one "MM:SS to MM:SS" string per clip,
+    # duration seconds). Raises RuntimeError on open/read failure or zero frames.
+    # KNOWN ISSUE: if sampling yields no indices (e.g. a video shorter than one clip), get_batch receives an
+    # empty list; the docstring/annotation still describe per-frame timestamps and a 2-tuple.
     """
     Loads a video from `path` using decord, sampling up to `max_frames` frames.
     After deduplicating indices (e.g., to handle rounding collisions), each frame
@@ -283,6 +311,12 @@ def load_image_directory_as_frames(
     max_frames: int = 50,
     frames_per_clip: int = 1,
 ) -> Tuple[List[Image.Image], List[str]]:
+    # [FUNCTION DOC] Directory-of-numbered-images variant of load_video using sample_clip_indices at
+    # source_fps; returns
+    # (frames, per-clip "MM:SS to MM:SS" strings, duration). Falls back to index 0 when no clip can be formed
+    # (then no timestamps are produced); skips unreadable images with an error log. Raises RuntimeError for
+    # missing/empty/unnumbered directories or no loadable frames.
+    # Note: skipped images or the fallback make the frame count disagree with clips * frames_per_clip.
     """
     Treats a directory of images as if they were consecutive frames in a 
     pseudo-video recorded at `source_fps`, then samples frames to achieve 
@@ -380,6 +414,7 @@ def load_image_directory_as_frames(
 # Image Loader
 ##############################################################################
 def load_single_image(img_path: str) -> Image.Image:
+    # [FUNCTION DOC] Opens an image file and returns an RGB copy (PIL).
     jpeg = Image.open(img_path)
     img = jpeg.copy().convert('RGB')
     return img
@@ -389,6 +424,10 @@ def load_single_image(img_path: str) -> Image.Image:
 # Helper Functions for Masking
 ##############################################################################
 def find_global_img_patterns(tokens: List[str]) -> List[int]:
+    # [FUNCTION DOC] HELPER: returns positions of every 5-token window equal to "<", "global", "-", "img", ">"
+    # (a
+    # "<global-img>" tag that was split into pieces by the tokenizer), flattened.
+    # Note: the loop stops one window early, so a pattern ending at the last token is missed.
     mask_positions = []
     for i in range(len(tokens) - 4):
         if (
@@ -403,6 +442,8 @@ def find_global_img_patterns(tokens: List[str]) -> List[int]:
 
 
 def find_row_col_patterns(tokens: List[str]) -> List[int]:
+    # [FUNCTION DOC] HELPER: returns positions of every 9-token window that joins (space-separated) to
+    # "< row _ R _ col _ C >" with single digits 1-9 (a split "<row_R_col_C>" tag). Same off-by-one end bound.
     pattern = re.compile(r'^< row _ [1-9] _ col _ [1-9] >$')
     mask_positions = []
     for i in range(len(tokens) - 8):
@@ -418,6 +459,9 @@ def _search_subsequence(
     pattern: List[int],
     start: int = 0
 ) -> int:
+    # [FUNCTION DOC] HELPER: returns the first index >= start where the token-id list `pattern` occurs in the
+    # 1-D tensor
+    # `sequence` (naive scan over a Python list), or -1 if not found or pattern is empty.
     """
     Searches for the first occurrence of 'pattern' in 'sequence'
     starting at offset 'start'. Returns the index of that occurrence,
@@ -441,6 +485,10 @@ def _mask_system_tokens(
     labels: torch.Tensor,
     tokenizer
 ):
+    # [FUNCTION DOC] HELPER: masks system turns in place: for each occurrence of the token ids of "System:"
+    # sets labels to
+    # IGNORE_INDEX from it up to (not including) the next "<end_of_utterance>" ids, or to the end of the
+    # sequence. The end-of-utterance token itself stays supervised. Returns None.
     """
     Identifies every occurrence of "System:" in `input_ids` (tokenized form),
     then masks (sets to IGNORE_INDEX) from the first token of "System:" up to 
@@ -482,6 +530,8 @@ def _mask_user_tokens(
     labels: torch.Tensor,
     tokenizer
 ):
+    # [FUNCTION DOC] HELPER: same as _mask_system_tokens but for "User:" spans (removes user text from the
+    # loss).
     """
     Identifies every occurrence of "User:" in `input_ids`,
     then masks (sets to IGNORE_INDEX) from that token to the next "<end_of_utterance>" 
@@ -522,6 +572,12 @@ def _mask_user_tokens(
 # Dataset
 ##############################################################################
 class SupervisedDataset(Dataset):
+    # [CLASS DOC] Torch Dataset for one mixture entry: loads a JSON/JSONL list of LLaVA-style records
+    # ("conversations"
+    # with from/value turns, optional "image"/"video", "type", system message), subsamples it, and at access
+    # time
+    # loads media, builds an OpenAI-style chat (system/user/assistant with text/image content blocks), applies
+    # the processor's chat template and processor, and builds labels with special/system/user tokens masked.
     def __init__(
         self,
         dataset_args: Dict[str, Any],
@@ -530,6 +586,14 @@ class SupervisedDataset(Dataset):
         training_args: TrainingArguments,
         model_args: ModelArguments,
     ):
+        # [FUNCTION DOC] dataset_args: mixture entry dict with "json_path" (required), "path" (media subdir
+        # under
+        # data_args.data_folder), "name", "modality", "source_fps" (default 1) and "sampling_strategy"
+        # (default "all").
+        # Reads masking/intro flags, max_frames, video/image target sizes and data_folder from data_args and
+        # fps /
+        # frames_per_clip from model_args; loads the records and applies the sampling strategy. Raises
+        # FileNotFoundError/ValueError from _load_data. Logs configuration.
         """
         A dataset class that loads text/images/multi-image/videos, 
         tokenizes them via `processor`, and optionally masks user/system text.
@@ -587,6 +651,9 @@ class SupervisedDataset(Dataset):
         )
 
     def _load_data(self, json_path: str) -> List[Dict[str, Any]]:
+        # [FUNCTION DOC] HELPER: loads a ".json" file (list) or ".jsonl" file (one JSON object per line) and
+        # returns the list;
+        # raises FileNotFoundError if missing and ValueError for other extensions.
         if not os.path.isfile(json_path):
             raise FileNotFoundError(f"File not found: {json_path}")
 
@@ -605,6 +672,12 @@ class SupervisedDataset(Dataset):
         return data
 
     def _apply_sampling_strategy(self, strategy: str):
+        # [FUNCTION DOC] HELPER: applies "kind:amount" to the record list in place; "all" or strings without
+        # ":" do nothing.
+        # amount is an int count or "<pct>%" (ceil of pct of total, at least 1). kind "first" keeps the head,
+        # "end"
+        # the tail, "random" shuffles with random.seed(42) then keeps the head; unknown kinds are ignored.
+        # Side effect: reseeds the global Python random module.
         if strategy == "all":
             return
         if ":" not in strategy:
@@ -631,10 +704,17 @@ class SupervisedDataset(Dataset):
         logger.info(f"[{self.name}] after subsampling '{strategy}': {len(self.list_data_dict)} remain.")
     
     def __len__(self) -> int:
+        # [FUNCTION DOC] Returns the number of (sampled) records.
         return len(self.list_data_dict)
         
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
         # TODO: define number of retries somewhere else
+        # [FUNCTION DOC] Returns _get_item(i), retrying up to 3 times with 1 s sleeps (prints each failure),
+        # then up to 3 random
+        # other indices, then a final attempt on i that re-raises the exception.
+        # KNOWN ISSUE: random.seed(42) is called before every fallback choice, so all fallback attempts pick
+        # the same
+        # index (and the global RNG is reset on every failure).
         num_base_retries = 3
 
         # try the current sample first
@@ -667,6 +747,12 @@ class SupervisedDataset(Dataset):
             raise e
             
     def _get_item(self, idx: int) -> Dict[str, torch.Tensor]:
+        # [FUNCTION DOC] Same as dataset.SupervisedDataset._get_item but loads videos/frame folders as clips
+        # (passing
+        # frames_per_clip), the video intro states the clip count in words (len(frames)/frames_per_clip, a
+        # float, so
+        # num2words renders e.g. "two point zero") and the processor is called with allow_mismatch=True.
+        # KNOWN ISSUE: image records without an "image" field execute raise("..."), which raises TypeError.
         sources = self.list_data_dict[idx]
         if isinstance(idx, int):
             sources = [sources]
@@ -803,6 +889,13 @@ class SupervisedDataset(Dataset):
 
 
     def _convert_llava_to_openai_format(self, llava_entry: Dict[str, str]) -> Dict[str, Any]:
+        # [FUNCTION DOC] HELPER: converts a LLaVA turn {"from", "value"} to {"role", "content"}: human ->
+        # user, gpt/assistant ->
+        # assistant, system -> system, others -> user. In user turns "<video>" becomes "<image>"; in other
+        # turns
+        # "<video>"/"<image>" are replaced by "video tag"/"image tag". The text is split on "<image>" into
+        # stripped
+        # text blocks and {"type": "image"} blocks (empty chunks dropped; falls back to one text block).
         role_map = {"human": "user", "gpt": "assistant", "assistant": "assistant", "system": "system"}
         speaker = llava_entry.get("from", "human").lower()
         role = role_map.get(speaker, "user")
@@ -844,6 +937,15 @@ class SupervisedDataset(Dataset):
         frames: List[Image.Image],
         timestamps: List[Optional[str]],
     ) -> List[Dict[str, Any]]:
+        # [FUNCTION DOC] HELPER: places placeholders per clip. Warns if clips * frames_per_clip != number of
+        # frames for videos. In
+        # the first user message without image/video blocks: image -> one image block prepended; video -> for
+        # each
+        # clip a "Clip from <ts>:" text block plus one image block prepended. Otherwise, for videos, the first
+        # image/video block is replaced by the per-clip sequence; any other blocks (including later
+        # placeholders)
+        # are kept unchanged. Returns the mutated conversation.
+        # Note: extra placeholders in the user text are kept, which can produce more image tokens than clips.
         """
         Post-processes a conversation to handle missing or expanded "image"/"video" tokens 
         based on the loaded frames. If there's no explicit placeholder but frames exist, 
@@ -935,6 +1037,13 @@ class SupervisedDataset(Dataset):
         return conversation
 
     def _mask_special_tokens(self, input_ids: torch.Tensor, labels: torch.Tensor):
+        # [FUNCTION DOC] HELPER: sets labels to IGNORE_INDEX in place where input_ids equal the pad token,
+        # "<image>" (if in
+        # additional_special_tokens), "<global-img>" (if in vocab) or any "<row_R_col_C>" vocab token, and at
+        # positions of tag patterns split into sub-tokens (find_global_img_patterns / find_row_col_patterns).
+        # KNOWN ISSUE: the warning message formats the builtin len instead of the number of positions, and
+        # uses the
+        # deprecated logger.warn.
         labels[input_ids == self.tokenizer.pad_token_id] = IGNORE_INDEX
         
         if DEFAULT_IMAGE_TOKEN in self.tokenizer.additional_special_tokens:

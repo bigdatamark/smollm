@@ -1,8 +1,14 @@
+# [MODULE DOC] Debug helper for multi-process (multi-GPU) runs: a print replacement serialized via a file
+# lock.
 import builtins
 import fcntl
 
 
 def printflock(*args, **kwargs):
+    # [FUNCTION DOC] Drop-in replacement for print taking the same args/kwargs. Opens this module's own source
+    # file for
+    # reading, takes an exclusive fcntl flock on it, calls builtins.print, and always releases the lock, so
+    # concurrent processes on the same machine never interleave their output. Returns None. Unix-only (fcntl).
     """
     This is a wrapper around the built-in Python `print` which calls `flock` before calling
     `print` and unlocks it immediately after. This wrapper is useful for when each rank needs to

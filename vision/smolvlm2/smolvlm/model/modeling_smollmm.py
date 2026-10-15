@@ -1,3 +1,7 @@
+# [MODULE DOC] SmolLMM model: Idefics3 variant that can average consecutive video frame embeddings
+# ("frames_per_clip")
+# so that several frames share one image placeholder, with an out-of-place image/text embedding merger.
+# Used by smolvlm.train.train when frames_per_clip > 1.
 import torch
 from torch import nn
 from transformers import Idefics3Model, Idefics3ForConditionalGeneration
@@ -10,11 +14,15 @@ from transformers.models.idefics3.modeling_idefics3 import IDEFICS3_INPUTS_DOCST
 logger = logging.get_logger(__name__)
 
 class SmolLMModel(Idefics3Model):
+    # [CLASS DOC] Idefics3Model subclass with frames_per_clip (from config, default 1), a custom inputs_merger
+    # and a forward
+    # that averages groups of frames before merging.
     """
     A subclass of Idefics3Model. We do *not* remove or block the call to inputs_merger
     in forward. Instead, we override inputs_merger here with custom logic.
     """
     def __init__(self, config):
+        # [FUNCTION DOC] Builds the Idefics3 model and stores config.frames_per_clip (default 1).
         super().__init__(config)
         self.frames_per_clip = getattr(config, "frames_per_clip", 1)
 
@@ -24,6 +32,22 @@ class SmolLMModel(Idefics3Model):
         inputs_embeds: torch.Tensor,
         image_hidden_states: torch.Tensor
     ) -> torch.Tensor:
+        # [FUNCTION DOC] Out-of-place replacement of <image> token embeddings by image embeddings (avoids
+        # in-place masked
+        # assignment, friendlier to autograd/DeepSpeed). inputs_embeds is (B, T, D), image_hidden_states (N,
+        # S, D)
+        # with S embeddings per image; raises ValueError if D differs. For each sample: with no <image> tokens
+        # the
+        # text embeddings are concatenated with a zero-length slice of image_hidden_states (keeps the vision
+        # tower in
+        # the graph) without consuming an image; otherwise the token count must be a multiple of S (ValueError
+        # otherwise), positions are chunked in groups of S, and each chunk consumes the next image block
+        # (global
+        # offset across the batch), placing row i of the block at the i-th position. Returns the stacked (B,
+        # T, D).
+        # KNOWN ISSUE: if image_hidden_states has zero images (N == 0), text-only samples fail on indexing
+        # [0], and
+        # more image chunks than available images raise IndexError rather than a clear error.
         """
         Merge text embeddings with image embeddings out-of-place (no in-place indexing).
     
@@ -164,6 +188,26 @@ class SmolLMModel(Idefics3Model):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, Idefics3BaseModelOutputWithPast]:
+        # [FUNCTION DOC] Idefics3Model.forward re-implemented. Resolves output/cache flags from config
+        # (disables cache
+        # under gradient checkpointing in training), requires input_ids or inputs_embeds (ValueError), creates
+        # a
+        # DynamicCache when use_cache, embeds input_ids if needed. pixel_values (B, max_images, 3, H, W) and
+        # image_hidden_states are mutually exclusive (ValueError). With pixel_values: casts to model dtype,
+        # drops
+        # all-zero padding images (keeping one if none are real), builds/filters the pixel attention mask,
+        # derives a
+        # patch-level mask by unfolding into patch_size tiles, runs vision_model and connector.
+        # Then splits connector outputs per sample (by count of real images): if a sample's <image> token
+        # count
+        # differs from valid_images * image_seq_len, has more than one image and frames_per_clip > 1, its
+        # images are
+        # reshaped into groups of frames_per_clip consecutive frames and mean-pooled (ValueError if the image
+        # count is
+        # not divisible); per-sample embeddings are concatenated back.
+        # Precomputed image_hidden_states are moved to the model dtype/device. On the first step (no cached
+        # tokens) image embeddings are merged with inputs_merger. Runs text_model and returns a tuple (outputs
+        # plus image_hidden_states) or Idefics3BaseModelOutputWithPast with image_hidden_states.
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -329,12 +373,19 @@ class SmolLMModel(Idefics3Model):
 
 
 class SmolLMMForConditionalGeneration(Idefics3ForConditionalGeneration):
+    # [CLASS DOC] Idefics3ForConditionalGeneration whose inner model is SmolLMModel (frame-averaging variant).
     """
     A subclass of Idefics3ForConditionalGeneration that uses MyIdefics3Model
     instead of the default Idefics3Model.
     """
 
     def __init__(self, config):
+        # [FUNCTION DOC] Builds the parent model, then replaces self.model with the custom class and
+        # re-creates lm_head as a
+        # bias-free Linear(text hidden_size -> vocab_size), then calls post_init() (re-initializes/ties
+        # weights).
+        # Pretrained weights are loaded afterwards by from_pretrained. The parent Idefics3Model is built and
+        # discarded (extra memory/time at init).
         super().__init__(config)
         # Instead of the original self.model = Idefics3Model(config),
         # we point to our custom class.

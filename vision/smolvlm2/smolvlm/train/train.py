@@ -1,3 +1,9 @@
+# [MODULE DOC] Main SmolVLM2 fine-tuning script: parses ModelArguments/DataArguments/TrainingArguments, loads
+# a SmolVLM
+# (or frame-averaging SmolLMM) model with optional bitsandbytes quantization and LoRA, freezes/unfreezes
+# components, builds the supervised data module and runs SmolVLMTrainer with auto-resume. On import sets env
+# vars CUDA_DEVICE_ORDER=PCI_BUS_ID and PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True; peft and
+# BitsAndBytesConfig imports are optional (set to None when missing).
 import os
 import math
 import logging
@@ -48,6 +54,10 @@ os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
 
 
 def trainer_save_model_safe(trainer: SmolVLMTrainer):
+    # [FUNCTION DOC] Saves the final model: with DeepSpeed calls trainer.save_model(); otherwise copies the
+    # model state dict
+    # to CPU and calls trainer._save(args.output_dir, state_dict=...) (private Trainer API; saves on rank
+    # according to Trainer's own checks).
     """
     Safely saves the model if not in DeepSpeed ZeRO stage-3.
     """
@@ -61,6 +71,7 @@ def trainer_save_model_safe(trainer: SmolVLMTrainer):
 
 
 def get_nb_trainable_parameters(model: torch.nn.Module) -> Tuple[int, int]:
+    # [FUNCTION DOC] Returns (trainable parameter count, total parameter count) summed over named_parameters.
     """
     Returns (trainable_params, total_params) across the entire model.
     """
@@ -74,6 +85,14 @@ def get_nb_trainable_parameters(model: torch.nn.Module) -> Tuple[int, int]:
 
 
 def set_trainable_params(model: torch.nn.Module, training_args: TrainingArguments):
+    # [FUNCTION DOC] Sets requires_grad False on all parameters, then unfreezes by name:
+    # "vision_model"/"vision_tower" if
+    # training_args.tune_vision_tower; "connector"/"modality_projection"/"merger" if tune_mm_connector; all
+    # others if tune_language_model (these flags are attributes set dynamically by train()). Logs
+    # per-component
+    # and overall trainable counts.
+    # Note: SmolVLMTrainer.create_optimizer groups by "vision_model"/"connector" only, so params named
+    # "modality_projection"/"merger"/"vision_tower" get the language-model learning rate.
     """
     Freezes all parameters, then selectively unfreezes based on user flags:
      - tune_vision_tower => unfreeze vision tower
@@ -124,6 +143,10 @@ def set_trainable_params(model: torch.nn.Module, training_args: TrainingArgument
 
 
 def enable_gradient_checkpointing(model: torch.nn.Module, training_args: TrainingArguments):
+    # [FUNCTION DOC] Disables use_cache, enables non-reentrant gradient checkpointing, and if the model has
+    # model.llm makes
+    # input embeddings require grad (via llm.enable_input_require_grads or a forward hook on the input
+    # embeddings) so checkpointed segments receive gradients. training_args is unused.
     """
     Enables gradient checkpointing if specified in TrainingArguments.
     If the model's LLM submodule supports enabling input grads, we do so (like Qwen does).
@@ -144,6 +167,7 @@ def enable_gradient_checkpointing(model: torch.nn.Module, training_args: Trainin
             # fallback approach
             logger.info("Attaching a forward hook to require grad on embeddings output.")
             def make_inputs_require_grad(module, input, output):
+                # [FUNCTION DOC] HELPER (forward hook): marks the embedding output as requiring grad.
                 output.requires_grad_(True)
             input_embed = model.get_input_embeddings() if hasattr(model, "get_input_embeddings") else None
             if input_embed is not None:
@@ -154,6 +178,15 @@ def prepare_model(
     model_args: ModelArguments,
     training_args: TrainingArguments
 ):
+    # [FUNCTION DOC] Loads AutoConfig, picks compute dtype (fp16 / bf16 / fp32 from training args), sets
+    # linear rope scaling
+    # with factor ceil(model_max_length / max_position_embeddings) when the requested length is longer,
+    # disables
+    # cache, builds a BitsAndBytesConfig for 4/8 bits (skipping lm_head), selects attention implementation
+    # ("sdpa" if disable_flash_attn2 else "flash_attention_2"), and loads SmolLMMForConditionalGeneration
+    # (when
+    # frames_per_clip > 1, also stored in config) or SmolVLMForConditionalGeneration with from_pretrained.
+    # Returns the model. model_dtype argument is not used.
     """
     Loads and configures the smolVLM model (Idefics3ForConditionalGeneration),
     applying rope scaling if needed, plus optional bitsandbytes quant config.
@@ -223,6 +256,10 @@ def prepare_model(
 
 
 def apply_peft(model: torch.nn.Module, training_args: TrainingArguments) -> torch.nn.Module:
+    # [FUNCTION DOC] Wraps the model with LoRA: raises ValueError if peft is missing; target modules default
+    # to
+    # q/k/v/o_proj; runs prepare_model_for_kbit_training for 4/8 bits; applies LoraConfig (rank, alpha,
+    # dropout, bias, CAUSAL_LM) via get_peft_model, prints trainable params and returns the PEFT model.
     """
     Applies LoRA/PEFT if training_args.peft_enable is True.
     Also calls `prepare_model_for_kbit_training` if bits=4 or 8.
@@ -261,6 +298,7 @@ def apply_peft(model: torch.nn.Module, training_args: TrainingArguments) -> torc
 
 
 def auto_resume_or_start(training_args: TrainingArguments) -> bool:
+    # [FUNCTION DOC] Returns True if output_dir contains any "checkpoint-*" entry (resume), else False.
     """
     Detect if there's a previous checkpoint to resume from.
     Return True if we found a checkpoint. Otherwise, we start fresh.
@@ -270,6 +308,21 @@ def auto_resume_or_start(training_args: TrainingArguments) -> bool:
 
 
 def train():
+    # [FUNCTION DOC] Entry point. Configures INFO logging and parses args. If packing with diagonal block
+    # attention, applies
+    # the varlen flash-attention patch; warns on mismatched packing/attention flags. Seeds RNGs. On global
+    # rank
+    # 0 with wandb reporting, sets WANDB_PROJECT="smolvlmvideo", calls wandb.init and then sets
+    # WANDB_MODE=offline.
+    # Sets tune_* flags from component learning rates (> 1e-9), prepares the model, sets trainable params,
+    # optionally enables gradient checkpointing and LoRA, loads the processor (SmolLMMProcessor when
+    # frames_per_clip > 1 else AutoProcessor), builds the data module, trains (resuming when checkpoints
+    # exist),
+    # saves trainer state and the final model.
+    # KNOWN ISSUE: calls apply_peft_if_needed, which is undefined (the function is apply_peft), so
+    # peft_enable=True raises NameError.
+    # KNOWN ISSUE: dist.get_rank() is called without checking that torch.distributed is initialized, which
+    # raises in single-process runs that report to wandb.
     """
     Main fine-tuning entry point for your smolVLM model,
     with optional LoRA + bitsandbytes, and prints which submodules are frozen/unfrozen.

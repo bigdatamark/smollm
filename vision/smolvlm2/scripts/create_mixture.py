@@ -1,3 +1,9 @@
+# [MODULE DOC] CLI script that rewrites "sampling_strategy" values ("random:<pct>%") of every entry in a
+# training
+# mixture YAML (top-level "datasets" list of mappings with name/path/json_path/modality) based on target
+# percentages per modality, a short-video down-weighting factor, and a split between OneVision and MammothVL
+# copies of the same dataset. Reads input YAML, writes output YAML (default updated_datasets.yaml).
+# Note: the usage docstring refers to the script as update_yaml_sampling.py.
 """
 Usage:
     python update_yaml_sampling.py input.yaml --output_yaml updated.yaml \
@@ -16,6 +22,9 @@ from collections import defaultdict
 # -------------------------------------------------------------------
 
 def always_full(dataset_entry):
+    # [FUNCTION DOC] Returns True if name, path or json_path (lowercased) contains "gpt", "visualwebinstruct"
+    # or "vision_flan".
+    # Note: "gpt" also matches names such as "sharegpt", which then always get 100%.
     """
     Return True if the dataset entry should always be sampled at 100%.
     We check for keywords like "gpt", "visualwebinstruct", or "vision_flan".
@@ -27,6 +36,12 @@ def always_full(dataset_entry):
     return False
 
 def base_sampling_fraction(dataset_entry, text_percent, image_percent, multiimage_percent, video_percent, short_video_factor):
+    # [FUNCTION DOC] Returns the target fraction in [0,1] for an entry from its lowercase "modality": text ->
+    # text_percent/100;
+    # video -> video_percent/100, multiplied by short_video_factor when name (else json_path) matches
+    # "_<X>_<Y>_s" with Y <= 60; image -> image_percent/100; "multiimage" modality or "multiimage" in the name
+    # ->
+    # multiimage_percent/100; anything else -> 1.0.
     """
     Compute the overall target fraction (a float in [0,1]) for the dataset entry
     based on its modality and video duration if applicable.
@@ -64,6 +79,7 @@ def base_sampling_fraction(dataset_entry, text_percent, image_percent, multiimag
         return 1.0
 
 def format_sampling(fraction):
+    # [FUNCTION DOC] Formats a fraction as "random:<percent rounded to 2 decimals>%".
     """
     Convert a fraction (0 to 1) into a sampling_strategy string.
     For example, 0.33 becomes "random:33.0%".
@@ -76,6 +92,9 @@ def format_sampling(fraction):
 # -------------------------------------------------------------------
 
 def compute_aligned_name(dataset_entry):
+    # [FUNCTION DOC] Returns the lowercase part of "name" after the first ":" (e.g. "sharegpt" for
+    # "mammoth:sharegpt"), or the
+    # whole lowercased name if there is no colon. Used to group copies of the same dataset.
     """
     Compute an "aligned name" for the dataset entry by looking at its name.
     We expect names to be of the form "mammoth:sharegpt" or "onevision:sharegpt".
@@ -91,6 +110,7 @@ def compute_aligned_name(dataset_entry):
         return name.lower()
 
 def is_onevision(dataset_entry):
+    # [FUNCTION DOC] Returns True if the lowercased, stripped name starts with "onevision:".
     """
     Return True if the dataset entry is from OneVision. We assume the name starts with "onevision:".
     """
@@ -98,6 +118,7 @@ def is_onevision(dataset_entry):
     return name.startswith("onevision:")
 
 def is_mammoth(dataset_entry):
+    # [FUNCTION DOC] Returns True if the lowercased, stripped name starts with "mammoth:".
     """
     Return True if the dataset entry is from MammothVL. We assume the name starts with "mammoth:".
     """
@@ -109,10 +130,12 @@ def is_mammoth(dataset_entry):
 # -------------------------------------------------------------------
 
 def load_yaml(file_path):
+    # [FUNCTION DOC] Reads and returns a YAML file parsed with yaml.safe_load (UTF-8).
     with open(file_path, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
 
 def write_yaml(data, file_path):
+    # [FUNCTION DOC] Writes data as YAML (safe_dump, key order preserved) to file_path.
     with open(file_path, 'w', encoding='utf-8') as f:
         yaml.safe_dump(data, f, sort_keys=False)
 
@@ -121,6 +144,12 @@ def write_yaml(data, file_path):
 # -------------------------------------------------------------------
 
 def update_sampling_strategies(data, text_percent, image_percent, multiimage_percent, video_percent, short_video_factor, mammoth_fraction):
+    # [FUNCTION DOC] Mutates and returns `data`. Exits the process (status 1) with an error print if data
+    # lacks a "datasets"
+    # list. Groups entries by aligned name; for each entry: always_full -> "random:100%"; otherwise the base
+    # fraction, and in groups with more than one entry OneVision entries get fraction*(1-mammoth_fraction),
+    # Mammoth entries fraction*mammoth_fraction, others the full fraction. Writes format_sampling result into
+    # "sampling_strategy".
     """
     Update each dataset entry's sampling_strategy according to these rules:
       - If always_full applies, use "random:100%".
@@ -170,6 +199,10 @@ def update_sampling_strategies(data, text_percent, image_percent, multiimage_per
     return data
 
 def main():
+    # [FUNCTION DOC] CLI entry: positional input_yaml; --output_yaml, --text_percent (14), --image_percent
+    # (50),
+    # --multiimage_percent (5), --video_percent (36), --short_video_factor (0.5), --mammoth_fraction (0.3).
+    # Loads, updates, writes the YAML and prints the output path.
     parser = argparse.ArgumentParser(description=(
         "Update dataset sampling strategies in a YAML file. For datasets that are shared (i.e. have the same aligned name), "
         "split the overall target between the OneVision and MammothVL versions based on --mammoth_fraction."

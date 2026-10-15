@@ -1,3 +1,9 @@
+# [MODULE DOC] Qwen2-VL-style multimodal input helpers: rounding helpers, smart_resize of image sizes to
+# multiples of a
+# factor within a pixel budget, frame-count selection and video reading (decord or torchvision backends),
+# image/video fetching from paths/URLs/base64, and a thin prompt tokenization helper. On import it enables
+# PIL loading of truncated images and raises PIL's MAX_IMAGE_PIXELS to 1e9 (global side effects).
+# VIDEO_READERS maps backend names to reader functions.
 import os
 import re
 import math
@@ -26,14 +32,18 @@ logger = logging.getLogger(__name__)
 # Basic helper logic: rounding, resizing, frames, etc.
 ###############################################################################
 def round_by_factor(number: float, factor: int) -> int:
+    # [FUNCTION DOC] Returns number rounded to the nearest multiple of factor (Python round, banker's rounding
+    # at .5).
     """Round 'number' to the nearest integer multiple of 'factor'."""
     return round(number / factor) * factor
 
 def ceil_by_factor(number: float, factor: int) -> int:
+    # [FUNCTION DOC] Returns the smallest multiple of factor >= number.
     """Ceil 'number' to the nearest integer multiple of 'factor'."""
     return math.ceil(number / factor) * factor
 
 def floor_by_factor(number: float, factor: int) -> int:
+    # [FUNCTION DOC] Returns the largest multiple of factor <= number.
     """Floor 'number' to the nearest integer multiple of 'factor'."""
     return math.floor(number / factor) * factor
 
@@ -45,6 +55,11 @@ def smart_resize(
     max_pixels: int,
     max_ratio: float,
 ) -> Tuple[int, int]:
+    # [FUNCTION DOC] Returns (h, w) multiples of factor close to (height, width): raises ValueError if the
+    # long/short side
+    # ratio exceeds max_ratio; rounds each side to a multiple of factor (at least factor); if the area exceeds
+    # max_pixels scales both down by sqrt(area/max_pixels) and floors, if below min_pixels scales up and
+    # ceils.
     """
     Rescale (height, width) so that:
       - aspect ratio <= max_ratio,
@@ -78,6 +93,14 @@ def _smart_nframes(
     fps_min_frames: int,
     fps_max_frames: int
 ) -> int:
+    # [FUNCTION DOC] HELPER: returns the number of frames to sample. Raises ValueError if config has both
+    # "nframes" and "fps".
+    # With "nframes": rounds it to a multiple of frame_factor. Otherwise frames = total_frames / video_fps *
+    # fps
+    # (config "fps" or default_fps), clamped to [ceil(min_frames), floor(max_frames)] (config overrides of
+    # fps_min_frames and min(fps_max_frames, total_frames)) and rounded to frame_factor. Raises ValueError if
+    # the
+    # result is not within [frame_factor, total_frames].
     """
     Decide how many frames to pick from a video based on either:
        - 'nframes' in config
@@ -109,6 +132,9 @@ def _read_video_torchvision(
     fps_min_frames: int,
     fps_max_frames: int
 ) -> torch.Tensor:
+    # [FUNCTION DOC] HELPER: reads config["video"] with torchvision.io.read_video between config "video_start"
+    # (default 0)
+    # and "video_end" seconds as a TCHW uint8 tensor and returns nframes uniformly spaced frames.
     """
     Use torchvision.io.read_video to read and return a TCHW video tensor.
     """
@@ -133,6 +159,9 @@ def _read_video_decord(
     fps_min_frames: int,
     fps_max_frames: int
 ) -> torch.Tensor:
+    # [FUNCTION DOC] HELPER: reads config["video"] with decord (imported lazily), picks nframes uniformly
+    # spaced frame
+    # indices and returns them as a TCHW uint8 tensor.
     """
     Use decord to read and return a TCHW video tensor.
     """
@@ -153,6 +182,7 @@ VIDEO_READERS = {
 }
 
 def pick_video_reader() -> str:
+    # [FUNCTION DOC] Returns "decord" if the decord package is importable, else "torchvision".
     """Pick decord if installed, otherwise torchvision."""
     try:
         import importlib.util
@@ -172,6 +202,12 @@ def _fetch_image(
     max_pixels: int,
     max_ratio: float
 ) -> Image.Image:
+    # [FUNCTION DOC] HELPER: loads the image from config "image" or "image_url": a PIL image, an http(s) URL
+    # (downloaded with
+    # requests), "file://" path, "data:image...base64," data URI or local path; raises ValueError for missing,
+    # malformed base64 or unsupported types. Converts to RGB and resizes with smart_resize using either
+    # config "resized_height"/"resized_width" or the image size with optional config min_pixels/max_pixels
+    # overrides. Returns the resized PIL image. Network access for URLs.
     """
     Load a single image (from local path, URL, or base64) 
     and resize it via 'smart_resize' constraints.
@@ -230,6 +266,13 @@ def _fetch_video(
     fps_min_frames: int,
     fps_max_frames: int
 ) -> Union[torch.Tensor, List[Image.Image]]:
+    # [FUNCTION DOC] HELPER: if config["video"] is a path, reads it with the preferred backend, computes a
+    # per-frame pixel
+    # budget max(min(max_pixels, total_pixels / T * frame_factor), 1.05 * min_pixels) (config overrides
+    # allowed), smart-resizes (or uses resized_height/width) and returns a bicubic, antialiased float TCHW
+    # tensor. If it is a list of frame paths, loads each with _fetch_image and pads by repeating the last
+    # frame
+    # to a multiple of frame_factor, returning a list of PIL images. Other types raise ValueError.
     """
     If config['video'] is a str => read entire video => TCHW tensor,
     If config['video'] is a list => treat them as frame paths => list of PIL Images.
@@ -281,4 +324,8 @@ def _fetch_video(
 
 
 def tokenizer_image_token(prompt, tokenizer, return_tensors=None):
+    # [FUNCTION DOC] Tokenizes prompt and returns the first row of input_ids (a 1-D tensor when
+    # return_tensors="pt").
+    # KNOWN ISSUE: with return_tensors None, input_ids for a single string is a flat list, so indexing [0]
+    # returns only the first token id rather than the sequence.
     return tokenizer(prompt, return_tensors=return_tensors).input_ids[0]

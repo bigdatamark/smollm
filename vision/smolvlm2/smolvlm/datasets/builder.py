@@ -1,3 +1,7 @@
+# [MODULE DOC] Builds the SmolVLM2 training data pipeline from a mixture YAML: one SupervisedDataset per
+# sub-dataset
+# entry, concatenated (optionally greedily packed into multi-sample sequences with integer-coded
+# sub-sequence ids for varlen attention), a summary table per modality, and a padding collator.
 import os
 import math
 import random
@@ -25,6 +29,9 @@ logger = logging.getLogger(__name__)
 ##############################################################################
 
 def len2weight(num_effective_tokens: int, mode: str) -> float:
+    # [FUNCTION DOC] Returns the loss weight of a packed sub-sample with num_effective_tokens supervised
+    # tokens: 0.0 if none;
+    # "token" -> 1.0; "sample" -> 1/n; "square" -> 1/sqrt(n) (InternVL default); anything else -> 1.0.
     """
     Returns the sub-sample weight given the sub-sequence length.
     """
@@ -44,6 +51,18 @@ def len2weight(num_effective_tokens: int, mode: str) -> float:
 
 
 class PackedConcatDataset(ConcatDataset):
+    # [CLASS DOC] ConcatDataset that greedily packs consecutive sub-samples into one item of up to cutoff_len
+    # tokens.
+    # Each item: input_ids, labels, attention_mask (sub-sequence ids 1..k per token, for the varlen patch),
+    # loss_weight (per-token float from len2weight) and, if any sub-sample has images, pixel_values
+    # concatenated
+    # along the frame dimension. No padding is done here.
+    # KNOWN ISSUE: packing is driven by an internal cursor that ignores idx, so it is incompatible with
+    # shuffling
+    # samplers and multi-worker DataLoaders (each worker copy packs from its own cursor, duplicating data),
+    # and
+    # __len__ reports the number of sub-samples, so the cursor is exhausted (IndexError) before an epoch's
+    # indices are consumed.
     """
     Merges multiple short sub-samples from an underlying ConcatDataset into a
     single “packed” sample, up to a `cutoff_len` tokens. Assigns integer-coded
@@ -76,6 +95,9 @@ class PackedConcatDataset(ConcatDataset):
         data_args,
         model_max_length: int = 2048
     ):
+        # [FUNCTION DOC] Wraps the given datasets; cutoff_len = max(model_max_length, 1); pad_token_id from
+        # data_args (default 0,
+        # unused); packed_cursor starts at 0. Logs the cutoff.
         super().__init__(datasets)
         self.data_args = data_args
         self.cutoff_len = max(model_max_length, 1)
@@ -89,9 +111,19 @@ class PackedConcatDataset(ConcatDataset):
 
     def __len__(self):
         # Underlying total number of sub-samples
+        # [FUNCTION DOC] Returns the total number of underlying sub-samples (not the number of packed items).
         return super().__len__()
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        # [FUNCTION DOC] Builds the next packed item starting at packed_cursor (idx ignored; raises IndexError
+        # when exhausted).
+        # Adds sub-samples until adding the next would exceed cutoff_len (a single over-long first sample is
+        # still
+        # taken whole) or the count reaches cutoff_len; advances the cursor. Computes per-sub-sequence loss
+        # weights
+        # from the number of labels != IGNORE_INDEX using data_args.loss_reduction. Prints the running token
+        # count
+        # for every sub-sample (stdout side effect). Returns the dict described in the class doc.
         """
         We ignore 'idx' because each call to __getitem__ gets the “next” packed sample,
         from self.packed_cursor onward.
@@ -193,6 +225,12 @@ def pad_sequence_varlen(
     batch_first: bool = True,
     padding_value: float = 0.0
 ) -> torch.Tensor:
+    # [FUNCTION DOC] Pads a list of 1-D tensors to the longest length with padding_value, preserving
+    # dtype/device of the first
+    # sequence. Returns (batch, max_len) if batch_first else (max_len, batch); an empty long tensor for an
+    # empty
+    # list. Functionally the same as torch pad_sequence for 1-D inputs (keeps integer sub-sequence ids
+    # intact).
     """
     Similar signature to torch.nn.utils.rnn.pad_sequence, but treats each Tensor
     as a 1D sequence of any integer-coded or float tokens, and uses integer-coded
@@ -232,6 +270,7 @@ def pad_sequence_varlen(
 ##############################################################################
 
 class DataCollatorForSupervisedDataset:
+    # [CLASS DOC] Collator padding text fields and pixel data for SupervisedDataset/PackedConcatDataset items.
     """
     Collates examples containing text-only or text+image/video data.
 
@@ -250,6 +289,10 @@ class DataCollatorForSupervisedDataset:
         image_size: Optional[int] = None,
         func_pad_sequence = pad_sequence,
     ):
+        # [FUNCTION DOC] pad_token_id: padding id for input_ids; model_max_length: optional truncation length;
+        # image_size: side used
+        # for the dummy pixel tensor when no example has images; func_pad_sequence: padding function
+        # (torch pad_sequence or pad_sequence_varlen). Labels are padded with IGNORE_INDEX.
         self.pad_token_id = pad_token_id
         self.ignore_index = IGNORE_INDEX
         self.model_max_length = model_max_length
@@ -261,6 +304,16 @@ class DataCollatorForSupervisedDataset:
         # PART A: Pad the text data (input_ids, attention_mask, labels)
         ################################################################
         
+        # [FUNCTION DOC] Pads input_ids (pad id), attention_mask (0; created from input_ids != pad when
+        # absent) and labels
+        # (IGNORE_INDEX) to the batch max and truncates to model_max_length. Pixel values: pads each example's
+        # (frames, C, H, W) tensor with zeros to (max_frames, C, max_h, max_w); text-only examples get
+        # all-zero
+        # tensors (max_frames=1, image_size sides if no example has images). Returns {"input_ids",
+        # "attention_mask", "labels", "pixel_values" (B, F, C, H, W)}.
+        # KNOWN ISSUE: the padded pixel_attention_mask is computed but never returned, and the packed
+        # dataset's
+        # loss_weight is dropped, so loss reduction weighting is never applied.
         attention_masks_list = []
         for ex in examples:
             # If "attention_mask" is missing, we generate it on the fly
@@ -361,6 +414,9 @@ class DataCollatorForSupervisedDataset:
 # Summaries
 ##############################################################################
 def display_overview(summary_data: Dict[str, Any], total_count: int) -> None:
+    # [FUNCTION DOC] Prints a per-modality overview: total samples and percentage of total_count, then a
+    # fancy_grid table
+    # (tabulate) of each dataset's name, count and percentage.
     print("=== Overview ===")
     print(f"Aggregate Sample Count: {total_count}\n")
     for category, info in summary_data.items():
@@ -389,6 +445,14 @@ def build_datasets(
     processor: ProcessorMixin,
     split: str = "train",
 ):
+    # [FUNCTION DOC] Imports SupervisedDataset from dataset_clip_sampling when model_args.frames_per_clip > 1,
+    # else from
+    # dataset. Loads the mixture YAML (mapping of category -> list of dataset arg dicts), builds one dataset
+    # per
+    # entry, prints the overview grouped by modality, and returns a PackedConcatDataset (data_args.packed) or
+    # a
+    # ConcatDataset. Side effect: sets training_args.sample_lens (sample counts) and training_args.data_info.
+    # split is unused.
     """
     1) Load a YAML describing multiple sub-datasets.
     2) Create a list of SupervisedDataset objects.
@@ -462,6 +526,10 @@ def make_supervised_data_module(
     training_args: TrainingArguments,
     model_args: ModelArguments,
 ):
+    # [FUNCTION DOC] Returns dict(train_dataset=build_datasets(...), eval_dataset=None, data_collator=...)
+    # with a
+    # DataCollatorForSupervisedDataset using the tokenizer pad id and model_max_length, image size
+    # data_args.video_target_size, and pad_sequence_varlen when packed (torch pad_sequence otherwise).
     """
     Creates train_dataset, eval_dataset, and data_collator.
     If data_args.packed => we do integer-coded subseq_ids approach,

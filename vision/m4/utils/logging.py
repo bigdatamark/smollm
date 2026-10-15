@@ -1,3 +1,8 @@
+# [MODULE DOC] Library-level logging setup for m4, modelled on transformers.utils.logging. Keeps a single
+# stderr
+# StreamHandler on the library root logger ("m4"), guarded by a threading lock, with default level from env
+# var M4_VERBOSITY (debug/info/warning/error/critical; default WARNING). Re-exports logging level constants
+# and, on import, monkey-patches logging.Logger with a warning_once method (global side effect).
 import functools
 import logging
 import os
@@ -31,6 +36,9 @@ _tqdm_active = True
 
 
 def _get_default_logging_level():
+    # [FUNCTION DOC] HELPER: returns the level for M4_VERBOSITY if set to a known name; logs a warning on the
+    # root logger for
+    # unknown values and falls back to _default_log_level (WARNING).
     """
     If M4_VERBOSITY env var is set to one of the valid choices return that as the new default level. If it is
     not - fall back to `_default_log_level`
@@ -47,14 +55,20 @@ def _get_default_logging_level():
 
 
 def _get_library_name() -> str:
+    # [FUNCTION DOC] HELPER: returns the top-level package name from this module's __name__ (e.g. "m4").
     return __name__.split(".")[0]
 
 
 def _get_library_root_logger() -> logging.Logger:
+    # [FUNCTION DOC] HELPER: returns the logging.Logger for the library root name.
     return logging.getLogger(_get_library_name())
 
 
 def _configure_library_root_logger() -> None:
+    # [FUNCTION DOC] HELPER: idempotently (under _lock) creates the global _default_handler (StreamHandler to
+    # stderr, flush
+    # bound to sys.stderr.flush), attaches it to the library root logger, sets the default level and disables
+    # propagation. Mutates module global _default_handler.
     global _default_handler
 
     with _lock:
@@ -72,6 +86,9 @@ def _configure_library_root_logger() -> None:
 
 
 def _reset_library_root_logger() -> None:
+    # [FUNCTION DOC] HELPER: under _lock, if a default handler exists removes it from the library root logger,
+    # resets the
+    # level to NOTSET and clears the global _default_handler.
     global _default_handler
 
     with _lock:
@@ -85,10 +102,14 @@ def _reset_library_root_logger() -> None:
 
 
 def get_log_levels_dict():
+    # [FUNCTION DOC] Returns the mapping of level names to logging level ints.
     return log_levels
 
 
 def get_logger(name: Optional[str] = None) -> logging.Logger:
+    # [FUNCTION DOC] Returns logging.getLogger(name), defaulting name to the library name, after ensuring the
+    # library root
+    # logger is configured.
     """
     Return a logger with the specified name.
 
@@ -103,6 +124,7 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
 
 
 def get_verbosity() -> int:
+    # [FUNCTION DOC] Configures the library logger if needed and returns its effective level as an int.
     """
     Return the current level for the 🤗 M4's root logger as an int.
 
@@ -126,6 +148,7 @@ def get_verbosity() -> int:
 
 
 def set_verbosity(verbosity: int) -> None:
+    # [FUNCTION DOC] Configures the library logger if needed and sets its level to the given int.
     """
     Set the verbosity level for the 🤗 M4's root logger.
 
@@ -145,26 +168,32 @@ def set_verbosity(verbosity: int) -> None:
 
 
 def set_verbosity_info():
+    # [FUNCTION DOC] Sets library verbosity to INFO.
     """Set the verbosity to the `INFO` level."""
     return set_verbosity(INFO)
 
 
 def set_verbosity_warning():
+    # [FUNCTION DOC] Sets library verbosity to WARNING.
     """Set the verbosity to the `WARNING` level."""
     return set_verbosity(WARNING)
 
 
 def set_verbosity_debug():
+    # [FUNCTION DOC] Sets library verbosity to DEBUG.
     """Set the verbosity to the `DEBUG` level."""
     return set_verbosity(DEBUG)
 
 
 def set_verbosity_error():
+    # [FUNCTION DOC] Sets library verbosity to ERROR.
     """Set the verbosity to the `ERROR` level."""
     return set_verbosity(ERROR)
 
 
 def disable_default_handler() -> None:
+    # [FUNCTION DOC] Removes the default handler from the library root logger (asserts it exists after
+    # configuration).
     """Disable the default handler of the HuggingFace M4's root logger."""
 
     _configure_library_root_logger()
@@ -174,6 +203,7 @@ def disable_default_handler() -> None:
 
 
 def enable_default_handler() -> None:
+    # [FUNCTION DOC] Re-adds the default handler to the library root logger (asserts it exists).
     """Enable the default handler of the HuggingFace M4's root logger."""
 
     _configure_library_root_logger()
@@ -183,6 +213,7 @@ def enable_default_handler() -> None:
 
 
 def add_handler(handler: logging.Handler) -> None:
+    # [FUNCTION DOC] Adds the given handler to the library root logger; asserts handler is not None.
     """adds a handler to the HuggingFace M4's root logger."""
 
     _configure_library_root_logger()
@@ -192,6 +223,9 @@ def add_handler(handler: logging.Handler) -> None:
 
 
 def remove_handler(handler: logging.Handler) -> None:
+    # [FUNCTION DOC] Removes the given handler from the library root logger.
+    # KNOWN ISSUE: the assertion requires the handler to NOT already be attached (inverted condition), so
+    # removing an attached handler raises AssertionError and the removal is a no-op otherwise.
     """removes given handler from the HuggingFace M4's root logger."""
 
     _configure_library_root_logger()
@@ -201,6 +235,7 @@ def remove_handler(handler: logging.Handler) -> None:
 
 
 def disable_propagation() -> None:
+    # [FUNCTION DOC] Sets propagate False on the library root logger.
     """
     Disable propagation of the library log outputs. Note that log propagation is disabled by default.
     """
@@ -210,6 +245,9 @@ def disable_propagation() -> None:
 
 
 def enable_propagation() -> None:
+    # [FUNCTION DOC] Sets propagate True on the library root logger (may cause double logging if the root
+    # logger also has
+    # handlers).
     """
     Enable propagation of the library log outputs. Please disable the HuggingFace M4's default handler to
     prevent double logging if the root logger has been configured.
@@ -220,6 +258,9 @@ def enable_propagation() -> None:
 
 
 def enable_explicit_format() -> None:
+    # [FUNCTION DOC] Sets the formatter "[LEVEL|file:line] time >> message" on every handler of the library
+    # root logger.
+    # Note: does not call _configure_library_root_logger first.
     """
     Enable explicit formatting for every HuggingFace M4's logger. The explicit formatter is as follows:
     ```
@@ -235,6 +276,7 @@ def enable_explicit_format() -> None:
 
 
 def reset_format() -> None:
+    # [FUNCTION DOC] Clears the formatter (sets None) on every handler of the library root logger.
     """
     Resets the formatting for HuggingFace M4's loggers.
 
@@ -248,6 +290,10 @@ def reset_format() -> None:
 
 @functools.lru_cache(None)
 def warning_once(self, *args, **kwargs):
+    # [FUNCTION DOC] Logger method installed as logging.Logger.warning_once: calls self.warning(*args,
+    # **kwargs), but is
+    # wrapped in an unbounded functools.lru_cache so identical (logger, args) combinations warn only once.
+    # Arguments must be hashable (unhashable kwargs raise TypeError); the cache holds references forever.
     """
     This method is identical to `logger.warning()`, but will emit the warning with the same message only once
 

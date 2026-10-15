@@ -1,3 +1,7 @@
+# [MODULE DOC] CLI script that makes a saved/loaded HF dataset self-contained: image columns that reference
+# files by path
+# are rewritten to hold the raw bytes, then the dataset is saved to disk (via a temp dir renamed at the end).
+# Sets datasets logging verbosity to INFO on import.
 import argparse
 import logging
 from functools import partial
@@ -14,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 
 def get_args():
+    # [FUNCTION DOC] Parses CLI args: --dataset-path (Path), --save-path (Path), --num-proc (int, default 1),
+    # --batch-size
+    # (int, default None) and returns the namespace.
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-path", type=Path)
     parser.add_argument("--save-path", type=Path)
@@ -24,6 +31,11 @@ def get_args():
 
 
 def extract_bytes_and_format(path: Optional[str], bytes: Optional[bytes]):
+    # [FUNCTION DOC] HELPER: given an undecoded image record, returns {"path": <file name or None>, "bytes":
+    # <bytes>}. If path is
+    # set, reads the file bytes and keeps only the file name (so datasets can infer the format from the
+    # extension); otherwise uses the provided bytes with path None.
+    # KNOWN ISSUE: if both path and bytes are None, raises UnboundLocalError.
     if path is not None:
         with open(path, "rb") as f:
             image_bytes = f.read()
@@ -36,6 +48,9 @@ def extract_bytes_and_format(path: Optional[str], bytes: Optional[bytes]):
 
 
 def store_bytes_only_for_images(exs, columns_to_change):
+    # [FUNCTION DOC] HELPER: batched map function; for each column in columns_to_change replaces every
+    # non-None image record
+    # with extract_bytes_and_format(record). Mutates and returns the batch mapping.
     for col_name in columns_to_change:
         new_values = [extract_bytes_and_format(**image) if image is not None else None for image in exs[col_name]]
         exs[col_name] = new_values
@@ -43,6 +58,11 @@ def store_bytes_only_for_images(exs, columns_to_change):
 
 
 def change_format(ds: Dataset, columns_to_change: List, batch_size: int, num_proc: int):
+    # [FUNCTION DOC] Casts each column in columns_to_change to an undecoded datasets.Image, runs a batched map
+    # embedding image
+    # bytes, then casts the columns back to their original feature types. Returns the new Dataset.
+    # KNOWN ISSUE: the map always uses columns_to_change=["image"] rather than the detected columns, so other
+    # image columns are not converted and a dataset without an "image" column raises KeyError.
     state = {}
     for col_name in columns_to_change:
         state[col_name] = ds.features[col_name]
@@ -60,12 +80,14 @@ def change_format(ds: Dataset, columns_to_change: List, batch_size: int, num_pro
 
 
 def get_image_columns(ds: Dataset):
+    # [FUNCTION DOC] Returns the names of columns whose feature type is datasets.Image.
     return [
         column_name for column_name, feature_type in ds.features.items() if isinstance(feature_type, datasets.Image)
     ]
 
 
 def process_ds(ds: Dataset, batch_size: int, num_proc: int):
+    # [FUNCTION DOC] Detects image columns and converts them with change_format (logs progress).
     logger.info(" ===== Identifying images columns =====")
     columns_to_change = get_image_columns(ds)
 
@@ -74,6 +96,9 @@ def process_ds(ds: Dataset, batch_size: int, num_proc: int):
 
 
 def process_ds_wrapped(ds: Union[DatasetDict, Dataset], batch_size: int, num_proc: int):
+    # [FUNCTION DOC] Applies process_ds to a Dataset or to every split of a DatasetDict (returning a new
+    # DatasetDict); raises
+    # ValueError for other types.
     if isinstance(ds, DatasetDict):
         new_ds = DatasetDict()
         for key in ds.keys():
@@ -86,6 +111,10 @@ def process_ds_wrapped(ds: Union[DatasetDict, Dataset], batch_size: int, num_pro
 
 
 def main():
+    # [FUNCTION DOC] Script entry point: configures logging, parses args, loads the dataset with
+    # load_dataset(dataset_path),
+    # processes it, saves to "<save_path parent>/tmp-<name>" and renames that to save_path.
+    # Note: an empty dataset is logged as "not saving" but is still saved.
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",

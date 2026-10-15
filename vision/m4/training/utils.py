@@ -1,3 +1,11 @@
+# [MODULE DOC] Grab-bag of m4 training utilities: special-token constants and OpenCLIP normalization stats,
+# model
+# freezing, Nougat-style document image augmentations (albumentations), image transforms and image splitting
+# for vision encoders, tokenizer construction, NVML energy readings, analytic TFLOPs estimators, memory
+# reporting, accelerate/DeepSpeed (ZeRO) helpers, state-dict loading, tensor statistics for activation
+# tracking, a SIGTERM listener and LoRA unloading. Module-level `nougat_transform` is a composed random
+# augmentation pipeline (bitmap, erosion/dilation, affine, shift-scale-rotate, grid/elastic distortion,
+# brightness/contrast, JPEG compression, noise, blur) applied to PIL images, returning a numpy array.
 import dataclasses
 import gc
 import json
@@ -40,6 +48,7 @@ logger = logging.getLogger(__name__)
 
 
 class LoggingTypes(Enum):
+    # [CLASS DOC] Enum of where gradient/parameter statistics are logged: "jsonl", "wandb" or "print".
     """Types of logging to use for the gradient and parameter statistics"""
 
     JSONL = "jsonl"
@@ -48,6 +57,7 @@ class LoggingTypes(Enum):
 
 
 class VisionEncoderTypes(Enum):
+    # [CLASS DOC] Enum of supported vision encoder families: siglip, clip, vit.
     """Types of vision encoders"""
 
     siglip = "siglip"
@@ -56,18 +66,26 @@ class VisionEncoderTypes(Enum):
 
 
 class JSONEncoderForDataclasses(json.JSONEncoder):
+    # [CLASS DOC] json.JSONEncoder subclass that serializes dataclass instances as dicts (via
+    # dataclasses.asdict).
     """
     Use to serialize dataclass object, like so:
     json.dump(data, fp, indent=2, cls=JSONEncoderForDataclasses)
     """
 
     def default(self, obj):
+        # [FUNCTION DOC] Returns asdict(obj) for dataclass instances, otherwise defers to the base encoder
+        # (raises TypeError).
         if dataclasses.is_dataclass(obj):
             return dataclasses.asdict(obj)
         return super().default(obj)
 
 
 def freeze_model(model, module_exceptions=[]):
+    # [FUNCTION DOC] Sets requires_grad False on every module of `model`, except modules whose type is one of
+    # the names in
+    # module_exceptions ("LayerNorm", "Linear", "Embedding" mapped to nn classes), which get requires_grad
+    # True.
     mapping = {
         "LayerNorm": nn.LayerNorm,
         "Linear": nn.Linear,
@@ -87,13 +105,20 @@ def freeze_model(model, module_exceptions=[]):
 
 
 def alb_wrapper(transform):
+    # [FUNCTION DOC] HELPER: wraps an albumentations transform into a callable taking a PIL image/array and
+    # returning the
+    # transformed numpy array.
     def f(im):
+        # [FUNCTION DOC] Converts im to a numpy array, applies the wrapped transform and returns
+        # result["image"].
         return transform(image=np.asarray(im))["image"]
 
     return f
 
 
 class Erosion(alb.ImageOnlyTransform):
+    # [CLASS DOC] Albumentations image-only transform performing morphological erosion with a random
+    # elliptical kernel.
     """
     Apply erosion operation to an image.
 
@@ -112,6 +137,9 @@ class Erosion(alb.ImageOnlyTransform):
     """
 
     def __init__(self, scale, always_apply=False, p=0.5):
+        # [FUNCTION DOC] scale: int (fixed size) or 2-element tuple/list (min, max) for kernel size;
+        # always_apply and p are passed
+        # to the base transform. Asserts a tuple/list has length 2.
         super().__init__(always_apply=always_apply, p=p)
         if type(scale) is tuple or type(scale) is list:
             assert len(scale) == 2
@@ -120,6 +148,12 @@ class Erosion(alb.ImageOnlyTransform):
             self.scale = (scale, scale)
 
     def apply(self, img, **params):
+        # [FUNCTION DOC] Erodes img with an elliptical kernel whose width/height are drawn with numpy randint
+        # in [scale0, scale1)
+        # and returns the result.
+        # KNOWN ISSUE: with an int scale (low == high) numpy randint raises ValueError; the upper bound is
+        # exclusive
+        # so the max kernel size is never used, contrary to the docstring.
         kernel = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE, tuple(np.random.randint(self.scale[0], self.scale[1], 2))
         )
@@ -128,6 +162,8 @@ class Erosion(alb.ImageOnlyTransform):
 
 
 class Dilation(alb.ImageOnlyTransform):
+    # [CLASS DOC] Albumentations image-only transform performing morphological dilation with a random
+    # elliptical kernel.
     """
     Apply dilation operation to an image.
 
@@ -146,6 +182,7 @@ class Dilation(alb.ImageOnlyTransform):
     """
 
     def __init__(self, scale, always_apply=False, p=0.5):
+        # [FUNCTION DOC] Same argument handling as Erosion.__init__ (int or 2-element tuple/list scale).
         super().__init__(always_apply=always_apply, p=p)
         if type(scale) is tuple or type(scale) is list:
             assert len(scale) == 2
@@ -154,6 +191,8 @@ class Dilation(alb.ImageOnlyTransform):
             self.scale = (scale, scale)
 
     def apply(self, img, **params):
+        # [FUNCTION DOC] Dilates img with a random elliptical kernel sized in [scale0, scale1) and returns it.
+        # KNOWN ISSUE: same randint problem as Erosion.apply (int scale raises ValueError; max is exclusive).
         kernel = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE, tuple(np.random.randint(self.scale[0], self.scale[1], 2))
         )
@@ -162,6 +201,7 @@ class Dilation(alb.ImageOnlyTransform):
 
 
 class Bitmap(alb.ImageOnlyTransform):
+    # [CLASS DOC] Albumentations image-only transform setting every pixel value below `lower` to `value`.
     """
     Apply a bitmap-style transformation to an image.
 
@@ -178,11 +218,14 @@ class Bitmap(alb.ImageOnlyTransform):
     """
 
     def __init__(self, value=0, lower=200, always_apply=False, p=0.5):
+        # [FUNCTION DOC] Stores value (default 0) and lower threshold (default 200); always_apply/p go to the
+        # base transform.
         super().__init__(always_apply=always_apply, p=p)
         self.lower = lower
         self.value = value
 
     def apply(self, img, **params):
+        # [FUNCTION DOC] Returns a copy of img where elements < lower are replaced by value.
         img = img.copy()
         img[img < self.lower] = self.value
         return img
@@ -238,6 +281,10 @@ def _convert_to_rgb(image):
     # `image.convert("RGB")` would only work for .jpg images, as it creates
     # a wrong background for transparent images. The call to `alpha_composite`
     # handles this case
+    # [FUNCTION DOC] HELPER: converts a PIL image to RGB. RGB images are returned unchanged; others are
+    # converted to RGBA and
+    # alpha-composited over an opaque white background so transparent areas become white, then converted to
+    # RGB.
     if image.mode == "RGB":
         return image
     image_rgba = image.convert("RGBA")
@@ -248,6 +295,9 @@ def _convert_to_rgb(image):
 
 
 class ConditionalResize(object):
+    # [CLASS DOC] Callable resize transform for PIL images used by the siglip pipeline, with optional random
+    # scale-up during
+    # training to oversample large images.
     def __init__(
         self,
         max_image_size,
@@ -257,6 +307,10 @@ class ConditionalResize(object):
         interpolation=transforms.InterpolationMode.BILINEAR,
         eval=False,
     ):
+        # [FUNCTION DOC] Stores max_image_size, min_image_size (default 378, unused), scale_up_frequency
+        # (default 0.7),
+        # scale_up_max (default 3.0), interpolation (bilinear) and eval flag. Raises ValueError when training
+        # (not eval) with a scale_up_frequency but scale_up_max None.
         self.scale_up_frequency = scale_up_frequency
         self.scale_up_max = scale_up_max
         self.max_image_size = max_image_size
@@ -271,6 +325,13 @@ class ConditionalResize(object):
             )
 
     def __call__(self, image, scale_up_factor=None):
+        # [FUNCTION DOC] Computes a target size: applies scale_up_factor if given, else (training only) with
+        # probability
+        # scale_up_frequency multiplies by a triangular random factor in [1.5, scale_up_max]; then clamps the
+        # longest side to max_image_size keeping aspect ratio and raises ValueError if still too large.
+        # KNOWN ISSUE: the computed size is then discarded and the image is always resized to a square
+        # max_image_size x max_image_size, so the aspect-ratio and scale-up logic has no effect
+        # (min_image_size unused).
         new_width, new_height = image.size
         aspect_ratio = new_width / new_height
         if scale_up_factor is not None:
@@ -317,6 +378,15 @@ def build_image_transform(
     scale_up_frequency=None,
     scale_up_max=None,
 ):
+    # [FUNCTION DOC] Builds the per-image transform for a vision encoder. Raises ValueError if both image_size
+    # and
+    # max_image_size are given, if scale_up_* is given with a fixed image_size, or for unknown encoder types.
+    # CLIP/ViT: Compose of RGB conversion; eval -> bicubic resize to image_size square; train -> for
+    # OCR/DocVQA
+    # datasets bicubic resize + nougat_transform, otherwise RandomResizedCrop (scale 0.9-1.0); then ToTensor
+    # and
+    # OpenCLIP mean/std normalization. SigLIP: returns the nested `transform` function. Returns a callable.
+    # Note: nougat_transform returns a numpy array which ToTensor accepts (HWC uint8).
     if image_size is not None and max_image_size is not None:
         raise ValueError(
             f"`image_size` ({image_size}) and `max_image_size` ({max_image_size}) can't be specified at the same."
@@ -362,6 +432,12 @@ def build_image_transform(
     elif vision_encoder_type == VisionEncoderTypes.siglip:
 
         def transform(img, scale_up_factor=None):
+            # [FUNCTION DOC] SigLIP transform for one image: builds a ConditionalResize (when max_image_size
+            # is set, passing
+            # scale_up_factor) or a bilinear square resize to image_size, composes RGB conversion, resize,
+            # ToTensor and
+            # normalization with mean/std 0.5, and returns the resulting tensor. A new ConditionalResize is
+            # built per call.
             conditional_resize = ConditionalResize(
                 max_image_size=max_image_size,
                 min_image_size=min_image_size,
@@ -405,6 +481,20 @@ def image_splitting(
     pre_split_scale_up_frequency=0.0,
     scale_up_factor=None,
 ):
+    # [FUNCTION DOC] Splits a PIL image into crops for a vision encoder of side E =
+    # vision_encoder_max_image_size.
+    # Size selection: if scale_up_factor (not 1) is given, scales width/height by it; else with probability
+    # pre_split_scale_up_frequency picks a random number of sub-images N along the longest side (1/2/3 with
+    # probabilities .5/.3/.2 when max_image_size <= 1092, else 2/3/4/5 with .4/.3/.2/.1) and sets the longest
+    # side to N*E with the other side rounded up to a multiple of E. Then the longest side is clamped to
+    # max_image_size (or rounded up to a multiple of E), the other side derived from the aspect ratio and
+    # rounded
+    # up to a multiple of E; zero sizes fall back to E x E. Image is resized (Lanczos).
+    # If either side exceeds E, the image is cut row-major into ceil(h/E) x ceil(w/E) near-equal crops and the
+    # global image is resized to E x E; otherwise split counts are 0. Returns (list of crops followed by the
+    # global image, num_splits_h, num_splits_w).
+    # Note: when clamped to max_image_size that side is not rounded to a multiple of E, so crops may be
+    # uneven.
     """
     Image splitting strategy.
     1) If one side of the original image is larger than `max_image_size`, resize it to `max_image_size` while preserving the aspect ratio.
@@ -514,6 +604,19 @@ def get_tokenizer(
     model_vocab_size=None,
     is_fine_tuning=False,
 ):
+    # [FUNCTION DOC] Loads a fast AutoTokenizer (legacy=False) and adds tokens. tokenizer_params,
+    # tokenizer_add_tokens and
+    # tokenizer_add_special_tokens are Python-literal strings evaluated with eval (a dict, a list of
+    # str/AddedToken, and an optional dict). If model_vocab_size exceeds the tokenizer length, pads the vocab
+    # with "<fake_token_i>" tokens (raising ValueError if tokenizer_params contains
+    # additional_special_tokens).
+    # Adds existing additional special tokens plus the new tokens as additional_special_tokens and merges the
+    # special-tokens dict. Then asserts layout: fine-tuning requires the last added token to be
+    # "<end_of_utterance>" and present in the last additional_vocab_size ids; pretraining requires the last
+    # two
+    # to be "<fake_token_around_image>", "<image>" in that range. Finally runs check_valid_tokenizer.
+    # Returns the tokenizer.
+    # KNOWN ISSUE: eval of config strings executes arbitrary code; only safe with trusted configs.
     """
     We artificially separate `tokenizer_add_tokens` and `tokenizer_add_special_tokens` is a dictionary whose keys only takes into account special tokens (eos, pad, cls, etc.).
     On the contrary, `tokenizer_add_tokens` is a list of string of `AddedToken`.
@@ -576,6 +679,9 @@ def get_tokenizer(
 
 
 def pynmvl_handle(accelerator):
+    # [FUNCTION DOC] Returns an NVML device handle for the accelerator's local process index (initializing
+    # NVML), or None
+    # without CUDA.
     if not torch.cuda.is_available():
         return None
 
@@ -584,6 +690,8 @@ def pynmvl_handle(accelerator):
 
 
 def pynvml_get_total_energy_in_joules(handle):
+    # [FUNCTION DOC] Returns total GPU energy consumption in joules (NVML millijoules / 1000) for the handle,
+    # or 0 without CUDA.
     if not torch.cuda.is_available():
         return 0
     return pynvml.nvmlDeviceGetTotalEnergyConsumption(handle) / 1000
@@ -603,6 +711,14 @@ def compute_tflops_per_batch_per_gpu(
     count_backward=False,
     use_grad_checkpointing=False,
 ):
+    # [FUNCTION DOC] Analytic estimate of TFLOPs for a transformer stack on one GPU per batch. With
+    # multiply-add factor 2, sums
+    # per-layer: Q projection (b*q*h^2), K/V projections (b*k*2*h*kv_in_dim), QK^T and attention-times-V
+    # (b*q*k*h each), softmax (q*k, no batch factor), output projection (b*q*h^2) and FFN (2 or, with swiglu,
+    # 3
+    # matrices of h x h*ff_exp_factor; 0 if no ff_exp_factor). Adds the LM head (b*q*h*vocab) if vocab_size.
+    # Multiplies by (1 forward + 2 if count_backward + 1 if use_grad_checkpointing) and divides by 1e12.
+    # Returns a 0-d torch tensor. grad_acc_size is accepted but unused.
     multiply_add_factor = torch.tensor(2)
     query_transformation = multiply_add_factor * batch_size * q_seq_len * hidden_size**2
     # k_seq_len == v_seq_len
@@ -661,6 +777,9 @@ def compute_linear_tflops_per_batch_per_gpu(
     count_backward=False,
     use_grad_checkpointing=False,
 ):
+    # [FUNCTION DOC] TFLOPs of one linear layer: 2*batch*seq*in*out times (1 + 2 if backward + 1 if grad
+    # checkpointing)
+    # divided by 1e12; returns a 0-d tensor.
     forward_factor = 1
     backward_factor = 2 if count_backward else 0
     grad_checkpointing_factor = 1 if use_grad_checkpointing else 0
@@ -682,6 +801,14 @@ def compute_perceiver_tflops_per_batch_per_gpu(
     count_backward=False,
     use_grad_checkpointing=False,
 ):
+    # [FUNCTION DOC] TFLOPs estimate for a perceiver resampler: queries (q_seq_len latents) attend over vision
+    # embeddings
+    # concatenated with latents (k = vision_embed_seq_len + q_seq_len). Counts Q projection on latents, K/V on
+    # vision embeddings only, attention matrix, softmax, attention-times-V, output projection and a 2-matrix
+    # FFN
+    # of width q_k_v_input_dim*ff_exp_factor; scaled per layer by num_layers and by
+    # forward/backward/checkpoint
+    # factors as above; divided by 1e12. Returns a 0-d tensor.
     multiply_add_factor = torch.tensor(2)
     query_transformation = multiply_add_factor * batch_size * q_seq_len * q_k_v_input_dim * attention_hidden_size
     # k_seq_len == v_seq_len
@@ -726,6 +853,10 @@ def compute_perceiver_tflops_per_batch_per_gpu(
 def mem_usage_formatted(logging_type=LoggingTypes.PRINT):
     # adapted from deepspeed's see_memory_usage
 
+    # [FUNCTION DOC] Empties the CUDA cache, runs gc.collect, and reports CUDA allocated/max
+    # allocated/reserved/max reserved (GB)
+    # and used CPU virtual memory (GB and percent). Returns a dict of formatted strings, or with
+    # LoggingTypes.PRINT a single "k: v | ..." string. Resets CUDA peak memory stats as a side effect.
     torch.cuda.empty_cache()
 
     # python doesn't do real-time garbage collection so do it explicitly to get the correct usage reports
@@ -750,11 +881,14 @@ def mem_usage_formatted(logging_type=LoggingTypes.PRINT):
 
 
 def is_deepspeed_used():
+    # [FUNCTION DOC] Returns True if accelerate is initialized with a DeepSpeed plugin.
     deepspeed_plugin = get_deepspeed_plugin()
     return deepspeed_plugin is not None
 
 
 def get_deepspeed_stage():
+    # [FUNCTION DOC] Returns the ZeRO stage from the DeepSpeed plugin config ("zero_optimization.stage"), or 0
+    # if unused.
     deepspeed_plugin = get_deepspeed_plugin()
     if deepspeed_plugin is None:
         return 0
@@ -766,10 +900,15 @@ def get_deepspeed_stage():
 
 
 def is_deepspeed_zero3_used():
+    # [FUNCTION DOC] Returns True if the ZeRO stage is 3.
     return get_deepspeed_stage() == 3
 
 
 def accelerate_torch_dtype():
+    # [FUNCTION DOC] Returns the torch dtype to use for from_pretrained: None if accelerate is not
+    # initialized; from the
+    # DeepSpeed config (fp16 -> float16, bf16 -> bfloat16, else None) when DeepSpeed is used, otherwise from
+    # AcceleratorState.mixed_precision.
     """
     derive and return `torch_dtype` to be used in `from_pretrained` from either Deepspeed config or if
     Deepspeed isn't used than accelerator state
@@ -800,10 +939,12 @@ def accelerate_torch_dtype():
 
 
 def is_accelerate_initialized():
+    # [FUNCTION DOC] Returns whether the accelerate global state has been initialized.
     return accelerate.state.is_initialized()
 
 
 def get_deepspeed_plugin():
+    # [FUNCTION DOC] Returns AcceleratorState().deepspeed_plugin when accelerate is initialized, else None.
     if is_accelerate_initialized():
         return AcceleratorState().deepspeed_plugin
     else:
@@ -811,10 +952,12 @@ def get_deepspeed_plugin():
 
 
 def get_deepspeed_engine(accelerator):
+    # [FUNCTION DOC] Returns the DeepSpeed engine wrapped by an accelerate Accelerator.
     return accelerator.deepspeed_engine_wrapped.engine
 
 
 def is_deepspeed_zero_init_enabled():
+    # [FUNCTION DOC] Returns True if the DeepSpeed plugin has ZeRO-3 zero.Init enabled; False otherwise.
     deepspeed_plugin = get_deepspeed_plugin()
     if deepspeed_plugin is not None:
         return deepspeed_plugin.is_zero3_init_enabled()
@@ -826,6 +969,10 @@ def is_deepspeed_zero_init_enabled():
 def hf_trainer_disable_zero3_init_context_manager():
     # monkey patch hack to emulate a context that has zero_init disabled as it's used in
     # modeling_utils.py in transformers for from_config and from_pretrained.
+    # [FUNCTION DOC] Context manager that temporarily monkey-patches
+    # transformers.modeling_utils.is_deepspeed_zero3_enabled to
+    # return False (disabling zero.Init in from_pretrained/from_config), restoring it on exit.
+    # KNOWN ISSUE: no try/finally, so an exception inside the block leaves the patch in place.
     import transformers.modeling_utils  # noqa
 
     orig = transformers.modeling_utils.is_deepspeed_zero3_enabled
@@ -835,6 +982,9 @@ def hf_trainer_disable_zero3_init_context_manager():
 
 
 def deepspeed_zero_init_disabled_context_manager():
+    # [FUNCTION DOC] Returns a list with one context manager disabling ZeRO-3 init: the DeepSpeed plugin's
+    # zero3_init_context_manager(enable=False) if a plugin exists, else
+    # hf_trainer_disable_zero3_init_context_manager().
     """
     returns either a context list that includes one that will disable zero.Init or an empty context list
     """
@@ -846,6 +996,11 @@ def deepspeed_zero_init_disabled_context_manager():
 
 
 def deepspeed_gathered_parameters_context_manager(params, modify=True):
+    # [FUNCTION DOC] Returns [deepspeed.zero.GatheredParameters(params, modifier_rank=0 if modify else None)]
+    # when ZeRO-3
+    # init is enabled (gathers sharded params; with modify, rank 0's changes are re-scattered on exit), else
+    # [].
+    # Meant to be used with transformers ContextManagers.
     """
     Under zero.Init returns a context manager that will gather the sharded param, otherwise returns an empty list
 
@@ -881,6 +1036,13 @@ def deepspeed_gathered_parameters_context_manager(params, modify=True):
 # as it appears to be a private function
 def load_state_dict_into_model(model_to_load, state_dict, start_prefix):
     # Convert old format to new format if needed from a PyTorch state_dict
+    # [FUNCTION DOC] Loads state_dict into model_to_load (adapted from transformers). Renames keys containing
+    # "gamma"/"beta"
+    # to "weight"/"bias" (mutating the caller's dict), copies it preserving _metadata, then recursively calls
+    # each module's _load_from_state_dict with prefix start_prefix. Under ZeRO-3 init, gathers the module's
+    # direct parameters present in the state dict and loads on rank 0 only. Returns the list of error
+    # messages.
+    # Note: the gamma/beta substring rename also affects unrelated keys containing those substrings.
     old_keys = []
     new_keys = []
     for key in state_dict.keys():
@@ -906,6 +1068,10 @@ def load_state_dict_into_model(model_to_load, state_dict, start_prefix):
     # PyTorch's `_load_from_state_dict` does not copy parameters in a module's descendants
     # so we need to apply the function recursively.
     def load(module: torch.nn.Module, state_dict, prefix=""):
+        # [FUNCTION DOC] HELPER (recursive closure): loads entries with this module's prefix into `module` if
+        # any key starts with
+        # the prefix (using DeepSpeed gathering under ZeRO-3), then recurses into children with
+        # "prefix<name>.".
         local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
         args = (state_dict, prefix, local_metadata, True, [], [], error_msgs)
         # Parameters of module and children will start with prefix. We can exit early if there are none in this
@@ -941,6 +1107,9 @@ def load_state_dict_into_model(model_to_load, state_dict, start_prefix):
 
 
 def get_stats(var, ctx):
+    # [FUNCTION DOC] Returns a dict of statistics for tensor var, keys prefixed with ctx: min/max/mean/std of
+    # values and of
+    # absolute values, L2 and L1 norms divided by numel, and nonzero count (all Python numbers). {} for None.
     if var is None:
         return {}
     var = var.float()
@@ -961,6 +1130,8 @@ def get_stats(var, ctx):
 
 
 def get_stats_format(ctx):
+    # [FUNCTION DOC] Returns the format spec for each get_stats key with prefix ctx: "e" (scientific) for all,
+    # "" for nonzero.
     return {
         f"{ctx}_var_min": "e",
         f"{ctx}_var_max": "e",
@@ -978,16 +1149,26 @@ def get_stats_format(ctx):
 
 # Handling SIGTERM signals (in case our job gets pre-empted)
 class SigtermListener:
+    # [CLASS DOC] Installs a SIGTERM handler so preempted jobs can stop gracefully; poll kill_now in the
+    # training loop.
     def __init__(self):
+        # [FUNCTION DOC] Sets kill_now False and registers exit_gracefully as the process-wide SIGTERM handler
+        # (replacing any).
         self.kill_now = False
         signal.signal(signal.SIGTERM, self.exit_gracefully)
 
     def exit_gracefully(self, *args):
+        # [FUNCTION DOC] Signal handler: sets kill_now True (args ignored).
         self.kill_now = True
 
 
 # Mostly copied from https://github.com/huggingface/peft/blob/v0.7.1/src/peft/tuners/mixed/model.py#L103
 def lora_replace_module(parent, child_name, new_module, child) -> None:
+    # [FUNCTION DOC] HELPER (from peft): replaces parent.child_name with new_module. Unwraps child (base_layer
+    # or
+    # quant_linear_module); if new_module has no base_layer, shares child's weight and bias with it; copies
+    # bitsandbytes `state` if present (moving new_module to the child's device); moves submodules whose name
+    # contains "lora" or "ranknum" to the child's weight device. Returns None.
     setattr(parent, child_name, new_module)
     # It's not necessary to set requires_grad here, as that is handled by
     # _mark_only_adapters_as_trainable
@@ -1021,6 +1202,10 @@ def lora_replace_module(parent, child_name, new_module, child) -> None:
 
 # Inspired by _unload_and_optionally_merge https://github.com/huggingface/peft/blob/v0.7.1/src/peft/tuners/mixed/model.py#L256
 def lora_unload(model):
+    # [FUNCTION DOC] Removes LoRA wrappers without merging: for every non-lora module path, resolves (parent,
+    # target, name)
+    # with peft _get_submodules (skipping AttributeError) and, when target has base_layer, replaces it by its
+    # base layer. LoRA weights are discarded, not merged. Mutates and returns the model.
     key_list = [key for key, _ in model.named_modules() if "lora" not in key]
     for key in key_list:
         try:

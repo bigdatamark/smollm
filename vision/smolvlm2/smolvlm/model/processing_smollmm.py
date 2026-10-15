@@ -1,3 +1,6 @@
+# [MODULE DOC] Idefics3Processor subclass for SmolLMM that tolerates a mismatch between the number of <image>
+# tokens in
+# the text and the number of images, enabling several video frames per <image> placeholder.
 import re
 from itertools import accumulate
 from typing import TYPE_CHECKING, Dict, List, Optional, Union
@@ -23,6 +26,9 @@ logger = logging.get_logger(__name__)
 
 
 class SmolLMMProcessor(Idefics3Processor):
+    # [CLASS DOC] Idefics3Processor with an extra allow_mismatch flag on __call__ and frame-grouping logic;
+    # decoding and
+    # other methods are inherited unchanged.
     """
     A subclass of Idefics3Processor that adds an `allow_mismatch` argument
     to skip the 1:1 match check between #<image> tokens and #images.
@@ -38,6 +44,27 @@ class SmolLMMProcessor(Idefics3Processor):
         allow_mismatch: bool = False,  # <--- NEW ARG
         **kwargs: Unpack[Idefics3ProcessorKwargs],
     ) -> BatchEncoding:
+        # [FUNCTION DOC] Processes text and/or images into a BatchFeature. Raises ValueError if both are None.
+        # Counts <image>
+        # tokens per text sample. Images: a single image becomes [[img]]; a flat list is checked against the
+        # token
+        # count (ValueError unless allow_mismatch, else a warning) and regrouped per sample: if there are k
+        # times
+        # more images than tokens, each sample gets n_tokens*k consecutive images, otherwise images are split
+        # by the
+        # cumulative token counts; without text the list becomes one sample. URLs are loaded, the image
+        # processor
+        # runs, and with text each <image> occurrence is replaced by the Idefics3 image prompt string
+        # (rows/cols tiles, image_seq_len tokens each, fake tokens around, global image tag) before
+        # tokenizing.
+        # Text-only input with <image> tokens raises ValueError. image_seq_len overrides self.image_seq_len.
+        # KNOWN ISSUE: placeholder i is expanded with image_prompt_strings[i-1], so the first <image> uses the
+        # last image's prompt string (off by one; harmless only when all images have identical rows/cols).
+        # KNOWN ISSUE: frame regrouping uses start index i*frames_per_token*n_images_in_text[i] instead of a
+        # cumulative
+        # offset, which is wrong when samples have different <image> counts.
+        # KNOWN ISSUE: the "invalid input images" check requires images not to be a list, so nested lists are
+        # never validated and the error is effectively unreachable.
         """
         Process input for Idefics3. If `allow_mismatch=True`, we skip the error when
         #<image> tokens != #images.

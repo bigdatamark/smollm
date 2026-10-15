@@ -1,3 +1,7 @@
+# [MODULE DOC] Monkey patch for transformers' flash_attention_2 varlen path supporting sequence packing: the
+# attention
+# mask is interpreted as integer-coded sub-sequence ids (e.g. 1,1,1,2,2,0,0 where 0 = padding) so that
+# each packed sub-sequence attends only within itself (block-diagonal attention).
 # varlen_packing.py
 # ---------------------------------------------------
 # A universal patch for "flash_attention_2" to handle
@@ -12,6 +16,11 @@ from transformers.utils import logging
 logger = logging.get_logger(__name__)
 
 def _get_seqlens_in_batch(mask_1d: torch.Tensor) -> torch.Tensor:
+    # [FUNCTION DOC] HELPER: flattens mask_1d, drops zeros and returns an int32 CPU tensor with the length of
+    # each contiguous
+    # run of equal ids (a new run starts whenever the id changes). Empty tensor if there are no nonzero
+    # entries.
+    # Uses a Python loop with .item() per token (slow, forces GPU sync).
     """
     Convert a 1D integer-coded mask (like [1,1,1,2,2,2,2,3,3,3,0,0,...])
     into sub-sequence lengths. We assume sub-sequence IDs appear in ascending
@@ -53,6 +62,14 @@ def _get_seqlens_in_batch(mask_1d: torch.Tensor) -> torch.Tensor:
 
 
 def get_unpad_data(attention_mask: torch.Tensor):
+    # [FUNCTION DOC] Replacement for transformers' _get_unpad_data. Returns (indices of nonzero tokens in the
+    # flattened
+    # mask, cu_seqlens cumulative sub-sequence boundaries starting at 0, max sub-sequence length as int).
+    # 1-D masks: computed for the single row. 2-D (batch, seq) masks: processed row by row with flat indices
+    # offset by row*seq_len and cu_seqlens continued across rows. All-padding input returns empty indices,
+    # cu_seqlens [0] and 0. Tensors are placed on the mask's device. Other ranks raise ValueError.
+    # KNOWN ISSUE: in the 1-D path, cumsum of int32 lengths yields int64 and concatenation promotes cu_seqlens
+    # to int64, while flash-attention expects int32 (the 2-D path builds int32 correctly).
     """
     Our custom override for varlen "flash_attention_2". 
     Typically `_get_unpad_data` returns:
@@ -137,6 +154,10 @@ def get_unpad_data(attention_mask: torch.Tensor):
 
 
 def apply_varlen_patch():
+    # [FUNCTION DOC] Replaces transformers.modeling_flash_attention_utils._get_unpad_data with get_unpad_data
+    # (global,
+    # process-wide side effect) and returns the original function; logs a warning and returns None if the
+    # module or function is unavailable.
     """
     Monkey-patch HF's `_get_unpad_data` with `_my_get_unpad_data_varlen`.
     This modifies the varlen logic for "flash_attention_2".

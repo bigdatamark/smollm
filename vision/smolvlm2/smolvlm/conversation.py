@@ -1,3 +1,10 @@
+# [MODULE DOC] LLaVA-style conversation templates: a Conversation dataclass that stores a chat history and
+# renders it
+# into a prompt string for several separator styles, plus image helpers for a Gradio demo. Defines the
+# templates conv_qwen (ChatML), conv_plain (plain concatenation, the default_conversation) and
+# conv_chatml_direct (MPT style) and the registry conv_templates mapping names
+# ("default", "plain", "chatml_direct", "qwen_1_5", "qwen_2") to them. Running as a script prints the
+# default prompt.
 import dataclasses
 from enum import auto, Enum
 from typing import List, Any, Dict, Union, Tuple
@@ -9,6 +16,9 @@ from transformers import AutoTokenizer
 
 
 class SeparatorStyle(Enum):
+    # [CLASS DOC] Enum of prompt rendering styles: SINGLE, TWO, MPT, PLAIN, CHATML, LLAMA_2, LLAMA_3, QWEN,
+    # GEMMA
+    # (QWEN has no rendering branch in get_prompt).
     """Different separator style."""
 
     SINGLE = auto()
@@ -24,6 +34,11 @@ class SeparatorStyle(Enum):
 
 @dataclasses.dataclass
 class Conversation:
+    # [CLASS DOC] Dataclass holding a conversation: system prompt, roles (user, assistant), messages (list of
+    # [role, msg]
+    # where msg is a string, None for an open turn, or a tuple (text, image(s), image_process_mode)), offset
+    # (index of the first message shown in UIs), sep_style, sep/sep2 separators, version tag, optional
+    # tokenizer (needed for LLAMA_3), stop_str/stop_token_ids generation stop criteria and skip_next flag.
     """A class that keeps all conversation history."""
 
     system: str
@@ -45,6 +60,26 @@ class Conversation:
     skip_next: bool = False
 
     def get_prompt(self):
+        # [FUNCTION DOC] Renders the messages into a prompt string. If the first message is a tuple its text
+        # is normalized: for
+        # "mmtag" versions "<image>" is removed and two synthetic turns ("<Image><image></Image>",
+        # "Received.") are
+        # prepended; otherwise "<image>" is moved to the start followed by a newline.
+        # Note: in that case the first message is replaced by the bare text, losing the tuple.
+        # Styles: SINGLE "system sep role: msg sep ..."; TWO alternates sep/sep2; CHATML "system sep\n" then
+        # "role\nmsg sep\n" with "<image>" repeated per image for tuple messages (returns immediately);
+        # LLAMA_3 uses
+        # tokenizer.apply_chat_template with a system message and generation prompt (ValueError if no
+        # tokenizer);
+        # MPT "role msg sep"; GEMMA like MPT but asserts roles alternate; LLAMA_2 wraps system in <<SYS>> and
+        # user
+        # turns in [INST]...[/INST] with sep2 after assistant turns; PLAIN concatenates messages with
+        # alternating
+        # sep/sep2. Empty messages render just the role prefix. Unknown style raises ValueError.
+        # KNOWN ISSUE: PLAIN (conv_plain, the default) has sep2 None, so a second (assistant) message raises
+        # TypeError when concatenating.
+        # KNOWN ISSUE: LLAMA_3 unpacks tuple messages into 2 items while every other branch expects 3-tuples.
+        # KNOWN ISSUE: LLAMA_2 uses lstrip(self.sep), which strips a character set, not the separator prefix.
         messages = self.messages
         if len(messages) > 0 and type(messages[0][1]) is tuple:
             messages = self.messages.copy()
@@ -178,12 +213,26 @@ class Conversation:
         return ret
 
     def append_message(self, role, message):
+        # [FUNCTION DOC] Appends [role, message] to the message list (mutates self.messages).
         self.messages.append([role, message])
 
     def process_image(self, image, image_process_mode, return_pil=False, image_format="PNG"):
+        # [FUNCTION DOC] Prepares one image for display: "Pad" pads to a square with expand2square,
+        # "Default"/"Crop" leave it,
+        # "Resize" resizes to 336x336, other modes raise ValueError. Non-PIL inputs (paths/file objects) are
+        # opened
+        # and converted to RGB. Then resizes so the shortest edge is min(672/aspect, 448, current short side)
+        # and
+        # the long edge keeps the aspect ratio. Returns the PIL image if return_pil, else a base64 string of
+        # the
+        # image encoded as image_format (default PNG).
+        # Note: padding/resizing modes are applied before a path is opened, so they only work for PIL inputs.
         if image_process_mode == "Pad":
 
             def expand2square(pil_img, background_color=(122, 116, 104)):
+                # [FUNCTION DOC] HELPER: pads a PIL image to a square canvas of its longest side filled with
+                # background_color (default
+                # (122, 116, 104)), centering the original; returns square images unchanged.
                 width, height = pil_img.size
                 if width == height:
                     return pil_img
@@ -227,6 +276,12 @@ class Conversation:
             return img_b64_str
 
     def get_images(self, return_pil=False, return_path=False):
+        # [FUNCTION DOC] Collects images from user turns (even positions after offset) whose message is a
+        # tuple (text, image or
+        # list of images, mode). Returns a list.
+        # KNOWN ISSUE: when not return_path and the item is an image file, the processed image is computed but
+        # never
+        # appended, so only non-image items (or everything when return_path=True) are returned.
         images = []
         for i, (role, msg) in enumerate(self.messages[self.offset :]):
             if i % 2 == 0:
@@ -242,14 +297,23 @@ class Conversation:
         return images
 
     def is_image_file(self, filename):
+        # [FUNCTION DOC] Returns True if filename ends (case-insensitively) with a common image extension.
         image_extensions = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"]
         return any(filename.lower().endswith(ext) for ext in image_extensions)
 
     def is_video_file(self, filename):
+        # [FUNCTION DOC] Returns True if filename ends (case-insensitively) with a common video extension.
         video_extensions = [".mp4", ".mov", ".avi", ".mkv", ".wmv", ".flv", ".mpeg", ".mpg"]
         return any(filename.lower().endswith(ext) for ext in video_extensions)
 
     def to_gradio_chatbot(self):
+        # [FUNCTION DOC] Converts messages after offset to Gradio chatbot pairs [user_msg, bot_msg]. For tuple
+        # user turns, normalizes
+        # "<image>" placement, embeds image files as inline base64 JPEG <img> HTML tags prepended to the text,
+        # and
+        # adds video files as separate ((path,), None) entries. Assistant turns fill the second slot of the
+        # last pair.
+        # Returns the list.
         ret = []
         for i, (role, msg) in enumerate(self.messages[self.offset :]):
             if i % 2 == 0:
@@ -288,9 +352,16 @@ class Conversation:
         return ret
 
     def copy(self):
+        # [FUNCTION DOC] Returns a new Conversation with a copied message list (inner pairs copied) and the
+        # same system, roles,
+        # offset, separators and version. tokenizer, stop criteria and skip_next are not copied (reset to
+        # defaults).
         return Conversation(system=self.system, roles=self.roles, messages=[[x, y] for x, y in self.messages], offset=self.offset, sep_style=self.sep_style, sep=self.sep, sep2=self.sep2, version=self.version)
 
     def dict(self):
+        # [FUNCTION DOC] Returns a JSON-friendly dict of system, roles, messages, offset, sep, sep2; when
+        # get_images() is non-empty
+        # tuple messages are reduced to their text.
         if len(self.get_images()) > 0:
             return {
                 "system": self.system,
@@ -310,6 +381,8 @@ class Conversation:
         }
 
 def safe_load_tokenizer(tokenizer_id):
+    # [FUNCTION DOC] Returns AutoTokenizer.from_pretrained(tokenizer_id), or None if loading raises any
+    # exception.
     try:
         return AutoTokenizer.from_pretrained(tokenizer_id)
     except Exception:
