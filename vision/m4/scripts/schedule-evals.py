@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+# [MODULE DOC] Cron-style CLI that detects crashed evaluation jobs: for every opt_step-* checkpoint under
+# checkpoints_path it deletes any start_run_evals_* marker file older than 9 hours so the eval scheduler will
+# relaunch the evaluation.
 
 #
 # This tool checks if evaluation is needed
@@ -28,6 +31,8 @@ reasonable_eval_time_in_secs = 9 * 60 * 60
 
 
 def run_cmd(cmd, check=True):
+    # [FUNCTION DOC] HELPER: runs a command list via subprocess capturing UTF-8 output; returns stripped
+    # stdout; with check (default True) failure raises EnvironmentError with stderr. Unused here.
     try:
         response = subprocess.run(
             cmd,
@@ -43,17 +48,22 @@ def run_cmd(cmd, check=True):
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses positional checkpoints_path; returns the namespace.
     parser = argparse.ArgumentParser()
     parser.add_argument("checkpoints_path", type=str, help="base dir with checkpoints")
     return parser.parse_args()
 
 
 def exit(msg):
+    # [FUNCTION DOC] HELPER: prints msg and exits with status 0 (shadows the builtin).
     print(msg)
     sys.exit()
 
 
 def check_eval_crash(path):
+    # [FUNCTION DOC] For checkpoint directory path, removes each of the four start_run_evals_{0_shots,4_shots,
+    # perplexity_validation,0_shots_a_la_flamingo} marker files whose mtime is older than
+    # reasonable_eval_time_in_secs, printing a message. Returns nothing.
     """Heuristics to decide whether to restart this opt_step-XXX checkpoint evaluation or not"""
     eval_start_paths = map(
         lambda x: path / x,
@@ -73,6 +83,8 @@ def check_eval_crash(path):
 
 
 def main():
+    # [FUNCTION DOC] Entry point: validates checkpoints_path (FileNotFoundError), exits if no checkpoints,
+    # sorts them by step number and calls check_eval_crash on each.
     args = get_args()
 
     checkpoints_path = Path(args.checkpoints_path)

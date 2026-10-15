@@ -1,3 +1,6 @@
+# [MODULE DOC] Exploration script extracting (image, text) pairs from raw HTML documents with the DOM
+# simplification + TextMediaPairsExtractor pipeline. Run as CLI, every boolean option is a store_true flag (so
+# all default to False on the command line, unlike the function defaults which are True).
 import argparse
 
 import jsonlines
@@ -34,6 +37,16 @@ def extract_image_text_pairs(
     save_txt_format=False,
     return_pairs=False,
 ):
+    # [FUNCTION DOC] Builds a DOMTreeSimplificator (strip/remove/unwrap/unnest/remake options), a
+    # PreExtractionSimplificator (only_text_image_nodes, format_texts, merge_consecutive_text_nodes) and a
+    # TextMediaPairsExtractor (also_extract_images_not_in_simplified_dom_tree, extract_clip_scores). Streams
+    # documents from load_dataset_html() and extracts pairs until at least num_min_images_to_consider (default
+    # 1000) images AND num_min_docs_to_consider (default 1000) documents are reached, printing progress every
+    # 100 docs. Each pair is a mapping (keys such as document_url, src, alt_text, extracted_text, clip
+    # scores). print_results prints counts (alt text >= 3 words, with extracted text); save_file writes
+    # outputs/image_text_pairs.jsonl; save_txt_format writes a readable outputs/image_text_pairs.txt. Returns
+    # the list of pairs if return_pairs, else None. StopIteration propagates if the dataset runs out first;
+    # the outputs directory must already exist.
     dom_tree_simplificator = DOMTreeSimplificator(
         strip_multiple_linebreaks=strip_multiple_linebreaks,
         strip_multiple_spaces=strip_multiple_spaces,
@@ -60,6 +73,8 @@ def extract_image_text_pairs(
     )
 
     def extraction_from_one_example(example):
+        # [FUNCTION DOC] HELPER: runs the extractor on example["html"] with example["url"] and returns the
+        # list of pairs.
         html_str = example["html"]
         url = example["url"]
         extraction = extractor(html_str, url)

@@ -1,3 +1,7 @@
+# [MODULE DOC] CLI script computing a reference distribution of CLIP image/caption similarity scores on a
+# known-good dataset (red_caps, sbu_captions or laion/laion400m), saved as a .npy under
+# m4/sourcing/data_collection/outputs/ clip_scores_<name>_<nb_pairs>.npy. Used to calibrate CLIP-score
+# filtering thresholds. Downloads data and images.
 import argparse
 import re
 
@@ -9,6 +13,16 @@ from m4.sourcing.data_collection.utils import compute_clip_score, fetch_single_i
 
 
 def get_scores(dataset_name, save_filename, nb_pairs):
+    # [FUNCTION DOC] Streams dataset_name (train split, shuffled with seed 42 and a 10k buffer), and for each
+    # example fetches the image URL (1 s timeout) and computes the CLIP score of its caption (truncated to 50
+    # words) until nb_pairs scores are collected. red_caps examples whose URL contains several http links are
+    # skipped; fetch failures are skipped; ValueError/RuntimeError during scoring are printed and skipped.
+    # Prints progress, attempt counts and scipy.stats.describe of the scores, then saves the list with np.save
+    # to save_filename. Returns nothing.
+    # KNOWN ISSUE: an unknown dataset_name leaves dataset unbound (NameError); the progress message is printed
+    # on every failed attempt while counter_successful is a multiple of 100 (including 0).
+    # KNOWN ISSUE: compute_clip_score is called with images=, but its parameter is named image, so every call
+    # raises TypeError (not caught).
     if dataset_name == "red_caps":
         dataset = load_dataset(
             "red_caps",

@@ -1,4 +1,16 @@
 #!/usr/bin/env python
+# [MODULE DOC] CLI script converting a DeepSpeed ZeRO training checkpoint (opt_step-N directory) to a
+# HuggingFace checkpoint.
+# Positional args: checkpoint_dir; optional output_dir (default checkpoint_dir/unwrapped_model). --num_proc
+# (default 48) threads. Steps: read unwrapped_model/config.json and map model_type to m4 config/modeling
+# classes
+# (ValueError if unsupported); rsync accelerator_state to "accelerator_state_modif" excluding the
+# bf16_zero_pp_rank* optimizer shards, then rewrite those shards in parallel with optimizer state stripped;
+# consolidate an fp32 state dict with deepspeed, instantiate the model in bf16 and save_pretrained. If an
+# unwrapped_adapter directory exists, wraps the model in PEFT, loads the state dict with "base_model.model."
+# prefixes, saves the adapter to unwrapped_adapter and the unloaded base model to output_dir. Finally deletes
+# the _modif directory via shell rm. Prepends the repo root to sys.path so m4 is importable.
+# KNOWN ISSUE: shell commands are built with unquoted paths through os.system, so paths with spaces break.
 
 # This script combines the 2 steps of
 # 1. calling zero_to_fp32.py to reconsolidate the shared deepspeed checkpoint
@@ -38,6 +50,11 @@ from m4.testing_utils import read_json_file
 
 
 def delete_optim_state_params(path_bf16_zero_pp_file, old_directory, new_directory):
+    # [FUNCTION DOC] HELPER: torch.load a ZeRO shard file, drop the nested "optimizer_state_dict" entry inside
+    # its
+    # "optimizer_state_dict" mapping (if present), and torch.save it to the same path with old_directory
+    # replaced
+    # by new_directory. Returns nothing.
     data = torch.load(path_bf16_zero_pp_file)
     data["optimizer_state_dict"].pop("optimizer_state_dict", None)
     modif_path = path_bf16_zero_pp_file.replace(old_directory, new_directory)

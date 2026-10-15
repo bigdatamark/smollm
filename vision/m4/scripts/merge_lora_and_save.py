@@ -1,3 +1,8 @@
+# [MODULE DOC] CLI script merging a LoRA adapter into its base model. Reads
+# opt_step_dir/unwrapped_model/config.json to pick the m4 modeling class (ValueError if unsupported), loads
+# the base model in bf16 and the PEFT adapter from unwrapped_adapter, merges (safe_merge, progress bar) and
+# saves the merged model to output_dir/unwrapped_model; optionally copies opt_step_dir/tokenizer to
+# output_dir/tokenizer. Adds the repo root to sys.path.
 import argparse
 import os
 import shutil
@@ -16,6 +21,10 @@ from m4.testing_utils import read_json_file
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses positional opt_step_dir, output_dir and save_tokenizer; returns the
+    # namespace.
+    # KNOWN ISSUE: save_tokenizer is a positional argument with action store_true, so it cannot be passed as a
+    # flag and is effectively always set; copytree then fails if the output tokenizer dir already exists.
     parser = argparse.ArgumentParser()
     parser.add_argument("opt_step_dir", type=str, help="opt_step_dir with unwrapped_model and unwrapped_adapter")
     parser.add_argument(
@@ -26,6 +35,8 @@ def get_args():
 
 
 def main():
+    # [FUNCTION DOC] Runs the merge described in the module doc. Creates the output directory; raises on load
+    # or copy failures.
     args = get_args()
 
     source_dir = Path(args.opt_step_dir)

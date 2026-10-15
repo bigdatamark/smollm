@@ -1,3 +1,8 @@
+# [MODULE DOC] CLI pipeline step for image deduplication in the web-document dataset. Parses paths/parameters,
+# seeds Python's random module (unless --seed is negative), builds a WebDocumentImageDeduplication processor
+# with all paths and runs only overlap_train_eval_deduplication(reload_files=True) (the other dedup steps are
+# commented out and are expected to have been run in earlier invocations). Sets PIL MAX_IMAGE_PIXELS to None
+# to avoid decompression bomb errors.
 import argparse
 from multiprocessing import cpu_count
 from random import seed as random_seed
@@ -12,6 +17,11 @@ Image.MAX_IMAGE_PIXELS = None
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: defines and parses the CLI options (train/valid web-document dataset paths,
+    # num_proc default cpu_count, output paths for the url->position map, the train image dataset, the
+    # to-be-deduplicated JSON, the evaluation-task image dataset and the deduplicated dataset, the extraction
+    # image dataset path, seed default 0, hamming_distance_threshold default 3, type_dedup "remove_image" or
+    # "remove_all_doc"); returns the namespace.
     parser = argparse.ArgumentParser(description="Deduplicate images in web documents.")
     parser.add_argument(
         "--path_web_document_dataset_train",

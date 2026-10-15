@@ -1,3 +1,9 @@
+# [MODULE DOC] CLI script applying the same "vision_model.vision_model" -> "vision_model" key rename to raw
+# DeepSpeed ZeRO "model_states" files in --checkpoint_path (default a hardcoded
+# accelerator_state/pytorch_model dir), so ZeRO checkpoints remain resumable after the SigLIP refactor. Files
+# are overwritten in place.
+# KNOWN ISSUE: --save (type=str) is passed through but ignored by convert_and_save_checkpoints, which always
+# saves.
 import argparse
 import os
 from collections import OrderedDict
@@ -11,6 +17,8 @@ KEYS_TO_MODIFY_MAPPING = {
 
 
 def rename_state_dict(state_dict):
+    # [FUNCTION DOC] HELPER: returns an OrderedDict copy of state_dict with KEYS_TO_MODIFY_MAPPING substrings
+    # replaced in each key.
     model_state_dict = OrderedDict()
 
     for key, value in state_dict.items():
@@ -24,6 +32,9 @@ def rename_state_dict(state_dict):
 
 
 def convert_and_save_checkpoints(checkpoint_path, save=False):
+    # [FUNCTION DOC] For every file in checkpoint_path whose name contains "model_states": torch.load it,
+    # rename keys of each top-level OrderedDict value and of OrderedDict items inside top-level lists,
+    # torch.save back to the same path and print it. The save parameter is unused.
     for filename in os.listdir(checkpoint_path):
         if "model_states" in filename:
             partial_zero_checkpoint = torch.load(checkpoint_path + "/" + filename)

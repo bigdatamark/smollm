@@ -1,9 +1,12 @@
+# [MODULE DOC] Filter predicate for LAION-style (image, caption) pairs, combining checks from
+# FilteringFunctions.
 import json
 
 from m4.sourcing.data_collection.processors import FilteringFunctions
 
 
 class LaionPairFiltering:
+    # [CLASS DOC] Picklable callable returning True to keep a pair; intended for Dataset.filter.
     def __init__(
         self,
         cond_check_size_image,
@@ -25,6 +28,11 @@ class LaionPairFiltering:
         path_common_words,
         common_word_ratio_min_cutoff,
     ):
+        # [FUNCTION DOC] Stores the cond_check_* switches and their thresholds: original image width/height
+        # min/max and aspect-ratio max; caption word count min/max; word repetition n-gram length and max
+        # ratio; special character max ratio (using strip_characters as the special character set);
+        # common-word min ratio. Loads the common words JSON from path_common_words (file read; errors
+        # propagate).
         self.cond_check_size_image = cond_check_size_image
         self.original_width_min_cutoff = original_width_min_cutoff
         self.original_width_max_cutoff = original_width_max_cutoff
@@ -47,6 +55,9 @@ class LaionPairFiltering:
         self.common_word_ratio_min_cutoff = common_word_ratio_min_cutoff
 
     def __call__(self, pair):
+        # [FUNCTION DOC] Takes pair with "text" (caption) and "image" (PIL image). Applies enabled checks in
+        # order: image size/aspect ratio (rendered sizes not checked), number of words, word repetition ratio,
+        # special character ratio, common word ratio. Returns False on the first failing check, else True.
         text = pair["text"]
         image = pair["image"]
         image_metadata = {"original_width": image.size[0], "original_height": image.size[1]}
@@ -104,6 +115,8 @@ class LaionPairFiltering:
         return True
 
     def __reduce__(self):
+        # [FUNCTION DOC] HELPER: pickling support for multiprocessing: rebuilds the object from its
+        # constructor arguments (reloading the common words file).
         return (
             self.__class__,
             (

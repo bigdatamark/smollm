@@ -1,3 +1,4 @@
+# [MODULE DOC] Perceptual-hash (pHash) based near-duplicate image detection over HuggingFace image datasets.
 import numpy as np
 from PIL import Image
 from scipy.fftpack import dct
@@ -5,9 +6,17 @@ from tqdm import tqdm
 
 
 class ImageDeduplicator:
+    # [CLASS DOC] Namespace of static methods for computing pHashes and finding duplicates against a reference
+    # set.
     @staticmethod
     def perceptual_hashing(image_dataset, num_proc):
+        # [FUNCTION DOC] Maps the dataset (num_proc processes) to replace its "image" column by "hash": a
+        # 64-element 0/1 array from the DCT pHash. Returns the new dataset.
+        # KNOWN ISSUE: Image.ANTIALIAS was removed in Pillow 10, so this fails with recent Pillow versions.
         def func_map_perceptual_hashing(example):
+            # [FUNCTION DOC] HELPER: grayscale, resize to 32x32, 2D DCT, keep the top-left 8x8 coefficients,
+            # threshold them against the median of those coefficients excluding the DC term; stores the
+            # flattened 0/1 array in example["hash"] and returns it.
             img = example["image"]
             img = img.convert("L")  # Convert to grayscale
             img = img.resize((32, 32), Image.ANTIALIAS)  # Resize to 32x32
@@ -26,10 +35,15 @@ class ImageDeduplicator:
 
     @staticmethod
     def hamming_distance(array_1, array_2):
+        # [FUNCTION DOC] HELPER: number of positions where the two equal-length sequences differ (extra
+        # elements of the longer are ignored).
         return len([1 for el_1, el_2 in zip(array_1, array_2) if el_1 != el_2])
 
     @staticmethod
     def brute_force_search_to_reference(hash_image_dataset, hash_image_dataset_ref, hamming_distance_threshold):
+        # [FUNCTION DOC] O(N*M) comparison: returns the list of row indices i of hash_image_dataset whose hash
+        # is at Hamming distance strictly below hamming_distance_threshold from at least one hash in
+        # hash_image_dataset_ref. Shows a tqdm bar.
         # Compare every hash in `hash_image_dataset` to every hash of the reference
         # dataset `hash_image_dataset_ref`, and returns the indices of the rows that are
         # duplicates of an image inside the reference dataset.

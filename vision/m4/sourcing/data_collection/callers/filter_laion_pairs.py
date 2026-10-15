@@ -1,3 +1,8 @@
+# [MODULE DOC] CLI pipeline step filtering a LAION-style image/text pair dataset: loads it from disk, reads
+# thresholds from a YAML config, builds LaionPairFiltering (image size/aspect ratio, caption word count, word
+# repetition, special character ratio and common-word ratio checks; common words loaded from
+# --path_common_words), applies it with Dataset.filter over num_proc processes and saves the kept rows.
+# Disables PIL's decompression-bomb limit and allows loading truncated images; configures INFO logging.
 import argparse
 import logging
 from multiprocessing import cpu_count
@@ -26,6 +31,8 @@ logger.setLevel(logging.INFO)
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses input dataset path, output dir, num_proc (default cpu_count), filter
+    # config YAML path and common words JSON path; returns the namespace.
     parser = argparse.ArgumentParser(description="Image/text pair filtering.")
     parser.add_argument(
         "--path_image_text_pair_dataset",

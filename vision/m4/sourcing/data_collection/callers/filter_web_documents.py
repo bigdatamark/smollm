@@ -1,3 +1,10 @@
+# [MODULE DOC] CLI pipeline step filtering web documents in two passes using thresholds from a YAML config:
+# first WebDocumentFilteringNodeLevel is mapped over the dataset (removes individual images/paragraphs failing
+# format, size, word count, repetition, special-character, stopword, flagged-word, punctuation, common-word,
+# language-id and KenLM perplexity checks), then WebDocumentFilteringDocLevel is used as a Dataset.filter to
+# drop whole documents (number of images/words and the same text statistics at document level). Resources
+# (common words, FastText lang-id, SentencePiece and KenLM models) are loaded from the given paths. Saves the
+# result with num_proc shards. Disables PIL's decompression-bomb limit; INFO logging.
 import argparse
 import logging
 from multiprocessing import cpu_count
@@ -32,6 +39,8 @@ logger.setLevel(logging.INFO)
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses input/output dataset paths, num_proc (default cpu_count), filter config
+    # YAML path and paths to the common words, lang-id, SentencePiece and KenLM models; returns the namespace.
     parser = argparse.ArgumentParser(description="Web document filtering.")
     parser.add_argument(
         "--path_web_document_dataset",

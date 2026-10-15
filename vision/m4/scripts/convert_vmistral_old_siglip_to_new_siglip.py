@@ -1,3 +1,10 @@
+# [MODULE DOC] CLI script migrating a VMistral checkpoint built with the old nested SigLIP wrapper to the new
+# SigLIP layout: loads <checkpoint_path>/unwrapped_model, builds a fresh model from its config with
+# vision_config.vision_model_name set to --new_siglip_model_path, copies weights after renaming
+# "vision_model.vision_model" key fragments to "vision_model", optionally saves to --new_checkpoint_path and
+# reloads the result to print it.
+# KNOWN ISSUE: --save is declared type=str with default True, so any value passed (even "False") is truthy;
+# help strings of the arguments are copy-pasted and wrong.
 import argparse
 
 from m4.models.vmistral.configuration_vmistral import VMistralConfig
@@ -10,6 +17,8 @@ KEYS_TO_MODIFY_MAPPING = {
 
 
 def rename_state_dict(state_dict):
+    # [FUNCTION DOC] HELPER: returns a new dict with the same values where every key has each
+    # KEYS_TO_MODIFY_MAPPING substring replaced by its target.
     model_state_dict = {}
 
     for key, value in state_dict.items():
@@ -23,10 +32,13 @@ def rename_state_dict(state_dict):
 
 
 def save_model_and_config(new_checkpoint_path, new_model):
+    # [FUNCTION DOC] HELPER: save_pretrained new_model (weights and config) into new_checkpoint_path.
     new_model.save_pretrained(new_checkpoint_path)
 
 
 def check_loaded_model(new_checkpoint_path):
+    # [FUNCTION DOC] HELPER: reloads VMistralForCausalLM from new_checkpoint_path (is_resume=False,
+    # new_model=False) and prints it; raises if the directory was not saved.
     new_model = VMistralForCausalLM.from_pretrained(
         new_checkpoint_path, is_resume=False, new_model=False, trust_remote_code=True
     )
@@ -34,6 +46,10 @@ def check_loaded_model(new_checkpoint_path):
 
 
 def convert_checkpoint(checkpoint_path, new_checkpoint_path, new_siglip_model_path, save=False):
+    # [FUNCTION DOC] Performs the migration described in the module doc. checkpoint_path is a string opt_step
+    # directory, save (default False) controls writing to new_checkpoint_path. load_state_dict is strict, so
+    # any unmatched key raises. Always calls check_loaded_model, which fails when save is false and nothing
+    # exists at the target.
     model_name = checkpoint_path + "/unwrapped_model"
     model = VMistralForCausalLM.from_pretrained(model_name, is_resume=False, new_model=False, trust_remote_code=True)
 

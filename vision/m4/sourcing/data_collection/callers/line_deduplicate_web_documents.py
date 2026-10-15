@@ -1,3 +1,8 @@
+# [MODULE DOC] CLI pipeline step running line-level deduplication on one shard of a sharded web-document
+# dataset via WebDocumentLineDeduplication: lists the shard sub-datasets, then line_deduplicate_web_documents
+# (removes text lines repeated within the same domain) using precomputed domain->positions and
+# domain->duplicated-texts JSON files (the steps computing those are commented out). Disables PIL's
+# decompression-bomb limit.
 import argparse
 
 from PIL import Image
@@ -10,6 +15,8 @@ Image.MAX_IMAGE_PIXELS = None
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses the sharded dataset path, the two JSON paths, the shard id (default 2),
+    # num_proc (default 1) and the output path for the line-deduplicated shards; returns the namespace.
     parser = argparse.ArgumentParser(description="Line deduplicate web documents.")
     parser.add_argument(
         "--path_sharded_dataset",

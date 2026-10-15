@@ -1,3 +1,5 @@
+# [MODULE DOC] Extraction of (image, text) pairs from HTML pages: images are located in the simplified DOM,
+# fetched, annotated with nearby text and optionally scored with CLIP.
 import logging
 
 from m4.sourcing.data_collection.utils import (
@@ -12,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 class TextMediaPairsExtractor:
+    # [CLASS DOC] Callable combining a DOMTreeSimplificator and a PreExtractionSimplificator to produce image
+    # metadata mappings.
     def __init__(
         self,
         dom_tree_simplificator,
@@ -19,12 +23,16 @@ class TextMediaPairsExtractor:
         also_extract_images_not_in_simplified_dom_tree=False,
         extract_clip_scores=True,
     ):
+        # [FUNCTION DOC] Stores the two simplificators, also_extract_images_not_in_simplified_dom_tree
+        # (default False) and extract_clip_scores (default True).
         self.dom_tree_simplificator = dom_tree_simplificator
         self.pre_extraction_simplificator = pre_extraction_simplificator
         self.also_extract_images_not_in_simplified_dom_tree = also_extract_images_not_in_simplified_dom_tree
         self.extract_clip_scores = extract_clip_scores
 
     def __call__(self, html_str, page_url):
+        # [FUNCTION DOC] Returns the list of image mappings found in the simplified tree of html_str (page_url
+        # used to resolve relative URLs), followed, if enabled, by images present only in the raw tree.
         images_in_simplified_dom_tree = self._extraction(html_str, page_url)
 
         images_not_in_simplified_dom_tree = []
@@ -36,6 +44,12 @@ class TextMediaPairsExtractor:
         return images_in_simplified_dom_tree + images_not_in_simplified_dom_tree
 
     def _extraction(self, html_str, page_url, diff_level_paths_max_cutoff=5):
+        # [FUNCTION DOC] HELPER: simplifies html_str, gets the flat node list from the pre-extraction
+        # simplificator, and for every img node whose image can be fetched (1 s timeout, network) records
+        # original_width/height, lowercase format, the first paragraph (split on blank line) of an immediately
+        # following text node as extracted_text, optional CLIP scores and image_in_simplified_dom_tree=True.
+        # Unfetchable images are dropped. diff_level_paths_max_cutoff is unused. Returns the list of
+        # media_info mappings.
         selectolax_tree = self.dom_tree_simplificator(html_str, type_return="selectolax_tree")
         list_nodes = self.pre_extraction_simplificator(selectolax_tree, page_url=page_url)
 
@@ -59,6 +73,10 @@ class TextMediaPairsExtractor:
         return images_in_simplified_dom_tree
 
     def _extract_images_not_in_simplified_dom_tree(self, html_str, page_url, images_in_simplified_dom_tree):
+        # [FUNCTION DOC] HELPER: parses the raw HTML, simplifies every img node with simplify_media_node,
+        # keeps those whose src is not already in images_in_simplified_dom_tree, fetches each (1 s timeout)
+        # adding size, format, optional CLIP scores and image_in_simplified_dom_tree=False, and returns those
+        # that were fetched successfully.
         selectolax_tree = make_selectolax_tree(html_str)
         all_images = [
             selectolax_node for selectolax_node in selectolax_tree.root.traverse() if selectolax_node.tag == "img"
@@ -88,6 +106,10 @@ class TextMediaPairsExtractor:
         return images_not_in_simplified_dom_tree
 
     def _get_clip_scores(self, media_info, image):
+        # [FUNCTION DOC] HELPER: collects the non-empty texts among formatted_filename, alt_text and
+        # extracted_text, computes their CLIP scores against image, and stores each as clip_score_image_<key>
+        # in media_info. Returns media_info (unchanged if no texts). ValueError is logged as a warning, any
+        # other exception as an error; neither propagates.
         """If possible, modifies `media_info`to add clip scores on available texts"""
         texts = []
         for text_key in ["formatted_filename", "alt_text", "extracted_text"]:

@@ -1,3 +1,9 @@
+# [MODULE DOC] One-off script raising the SigLIP input resolution of a VMistral checkpoint (hardcoded tr_266
+# opt_step-80000) to 980: loads the model, bicubically interpolates
+# model.vision_model.embeddings.position_embedding.weight from its square grid to (980 // patch_size) per side
+# (ValueError on size mismatch), updates vision_config.image_size and vision_model_name to the 980 navit
+# SigLIP, builds a new model from that config, loads the modified state dict (strict), saves it to
+# <out_dir>/unwrapped_model and copies the tokenizer directory.
 import math
 import os
 import shutil

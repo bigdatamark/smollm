@@ -1,3 +1,8 @@
+# [MODULE DOC] Web document extraction pipeline for Common Crawl HTML: turns HTML pages into interleaved
+# documents (parallel lists "texts" and "images" where each position holds either a text or an image),
+# collects image URLs, downloads them with img2dataset (webdataset tars), builds a URL-indexed image dataset,
+# replaces URLs by image bytes and saves/shards the result. Module-level functions do the work;
+# CommonCrawlWebDocumentExtractor chains them with stored config. Configures INFO logging at import.
 import glob
 import json
 import logging
@@ -22,6 +27,7 @@ logger.setLevel(logging.INFO)
 
 
 def write_file(path_file, to_write):
+    # [FUNCTION DOC] HELPER: writes the string to_write to path_file, overwriting it.
     f = open(path_file, "w")
     f.truncate(0)
     f.write(to_write)
@@ -38,7 +44,16 @@ def html_to_web_documents(
     extraction_suffix="",
     remove_columns=True,
 ):
+    # [FUNCTION DOC] Maps func_html_to_web_documents over dataset (num_proc processes).
+    # html_column_name/url_column_name (defaults "html" /"url") select inputs; extraction_suffix is appended
+    # to output column names; remove_columns (default True) drops all input columns. Returns the new dataset
+    # with texts, images, metadata (JSON string) and general_metadata (JSON).
     def func_html_to_web_documents(example):
+        # [FUNCTION DOC] HELPER: simplifies one page and builds aligned lists: a text node gives (text, ""
+        # image, None metadata), an img node gives (None text, src URL, media_info). Other nodes (e.g. figure)
+        # are ignored. general_metadata holds url and WARC location fields when all are present. On any
+        # simplification exception prints "EXCEPTION" and writes empty lists (general_metadata becomes an
+        # empty JSON list). Returns the mutated example.
         html_str = example[html_column_name]
         page_url = example[url_column_name]
         general_metadata = {}
@@ -93,7 +108,10 @@ def html_to_web_documents(
 
 
 def get_image_urls(dataset, num_proc, path_save_file_image_urls):
+    # [FUNCTION DOC] Collects all non-empty image URLs of the dataset's "images" column (num_proc processes),
+    # deduplicates them (order not preserved) and writes them one per line to path_save_file_image_urls.
     def func_get_image_urls(example):
+        # [FUNCTION DOC] HELPER: sets example["urls"] to the non-empty entries of example["images"].
         example["urls"] = [el for el in example["images"] if el]
         return example
 
@@ -115,6 +133,9 @@ def download_images(
     num_proc,
     thread_count,
 ):
+    # [FUNCTION DOC] Runs the img2dataset command line via os.system on the URL file, writing webdataset
+    # shards to path_save_dir_downloaded_images with the given processes, threads, samples per shard,
+    # image_size and resize_mode. Exit status is ignored. A DNS resolver should be configured beforehand.
     # Before calling this method, set up a DNS solver
     # https://github.com/rom1504/img2dataset#setting-up-a-bind9-resolver
     logger.info("Starting downloading the images")
@@ -135,7 +156,14 @@ def create_dataset_images_from_tar(
     path_save_file_map_url_idx,
     path_save_dir_dataset_images,
 ):
+    # [FUNCTION DOC] Processes each tar in tar_paths in a pathos process pool (num_proc): each becomes a
+    # temporary dataset of (url, image bytes) saved under path_save_dir_tmp_datasets_images/<tar index>. Then
+    # writes a JSON mapping url -> global row index (concatenation order) to path_save_file_map_url_idx,
+    # concatenates the temporary datasets, saves to path_save_dir_dataset_images and returns it.
     def process_one_tar(args):
+        # [FUNCTION DOC] HELPER: args is (tar_path, idx_tar). Reads .jpg members (bytes) and .json members
+        # (status, url); for successful downloads maps url -> image bytes, saves them as a Dataset to the temp
+        # dir and returns the list of URLs in saved order.
         (tar_path, idx_tar) = args
         with tarfile.open(tar_path) as tar_file:
             tar_members = tar_file.getmembers()
@@ -195,6 +223,8 @@ def create_dataset_images(
     path_save_file_map_url_idx,
     path_save_dir_dataset_images,
 ):
+    # [FUNCTION DOC] Finds all *.tar files in path_save_dir_downloaded_images and delegates to
+    # create_dataset_images_from_tar; returns the image dataset.
     tar_paths = glob.glob(os.path.join(path_save_dir_downloaded_images, "*.tar"))
     dataset_images = create_dataset_images_from_tar(
         tar_paths=tar_paths,
@@ -207,6 +237,11 @@ def create_dataset_images(
 
 
 def urls_to_images(dataset, dataset_images, map_url_idx, num_proc, some_urls_are_already_retrieved=False):
+    # [FUNCTION DOC] Replaces image URLs with image bytes in dataset using dataset_images and map_url_idx (url
+    # -> row). Without some_urls_are_already_retrieved (default False) the "images" column holds URLs: they
+    # are copied to "images_urls" and replaced by images; with it, the dataset must already have "images_urls"
+    # and "images" (ValueError otherwise) and only missing images are filled. Adds num_found/num_not_found
+    # counts; casts images to Sequence(Image()). Maps with num_proc, cache disabled. Returns the new dataset.
     if some_urls_are_already_retrieved:
         if "images_urls" not in dataset.features or "images" not in dataset.features:
             raise ValueError(
@@ -214,12 +249,16 @@ def urls_to_images(dataset, dataset_images, map_url_idx, num_proc, some_urls_are
             )
 
     def retrieve_image(url):
+        # [FUNCTION DOC] HELPER: returns {"path": None, "bytes": ...} for url from dataset_images, or None if
+        # the URL was not downloaded.
         if url not in map_url_idx:
             return None
         image = {"path": None, "bytes": dataset_images[map_url_idx[url]]["image"]}
         return image
 
     def func_urls_to_images_urls_in_images_col(example):
+        # [FUNCTION DOC] HELPER: copies images (URLs) to images_urls, replaces each non-empty URL by
+        # retrieve_image (None for text slots), and sets num_found and num_not_found (URLs not resolved).
         example["images_urls"] = deepcopy(example["images"])
         num_urls = sum([(url is not None and url != "") for url in example["images_urls"]])
 
@@ -233,6 +272,8 @@ def urls_to_images(dataset, dataset_images, map_url_idx, num_proc, some_urls_are
         return example
 
     def func_urls_to_images_urls_in_images_urls_col(example):
+        # [FUNCTION DOC] HELPER: keeps existing images and fills None entries from images_urls via
+        # retrieve_image; sets num_found and num_not_found.
         num_urls = sum([(url is not None and url != "") for url in example["images_urls"]])
 
         example["images"] = [
@@ -272,7 +313,12 @@ def urls_to_images(dataset, dataset_images, map_url_idx, num_proc, some_urls_are
 
 
 def save_split_sharded_already_splitted_dataset(dataset, path_save_dir_sharded_dataset, shard_size):
+    # [FUNCTION DOC] Saves a DatasetDict with "train" and "valid" splits as contiguous shards of about
+    # shard_size rows under path_save_dir_sharded_dataset/<split>/shard_<i>, plus a dataset_dict.json listing
+    # the splits.
     def save_split_ds(split_dataset, split_name):
+        # [FUNCTION DOC] HELPER: shards split_dataset into ceil(len / shard_size) contiguous pieces and saves
+        # each to <dir>/<split_name>/shard_<idx>.
         num_shards = math.ceil(len(split_dataset) / shard_size)
         for idx in tqdm(range(num_shards)):
             shard = split_dataset.shard(num_shards=num_shards, index=idx, contiguous=True)
@@ -297,6 +343,9 @@ def save_split_sharded_already_splitted_dataset(dataset, path_save_dir_sharded_d
 
 
 def save_split_sharded_dataset(dataset, path_save_dir_sharded_dataset, shard_size):
+    # [FUNCTION DOC] Shards a single dataset into ceil(len / shard_size) contiguous shards; the first two
+    # shards go to the "valid" directory and the rest to "train" under path_save_dir_sharded_dataset; writes
+    # dataset_dict.json.
     os.makedirs(path_save_dir_sharded_dataset, exist_ok=True)
 
     f = open(os.path.join(path_save_dir_sharded_dataset, "dataset_dict.json"), "w")
@@ -320,6 +369,8 @@ def save_split_sharded_dataset(dataset, path_save_dir_sharded_dataset, shard_siz
 
 
 class CommonCrawlWebDocumentExtractor:
+    # [CLASS DOC] Stateful orchestrator holding the dataset and all paths/parameters; each method runs one
+    # pipeline step and updates self.dataset (and self.dataset_images / self.map_url_idx).
     def __init__(
         self,
         html_dataset,
@@ -340,6 +391,8 @@ class CommonCrawlWebDocumentExtractor:
         path_save_dir_sharded_dataset,
         shard_size,
     ):
+        # [FUNCTION DOC] Stores html_dataset as self.dataset plus the simplificators and every path/parameter
+        # (see the module functions for their meaning).
         self.dataset = html_dataset
 
         self.dom_tree_simplificator = dom_tree_simplificator
@@ -361,6 +414,7 @@ class CommonCrawlWebDocumentExtractor:
         self.shard_size = shard_size
 
     def html_to_web_documents(self):
+        # [FUNCTION DOC] Replaces self.dataset by its web-document extraction.
         self.dataset = html_to_web_documents(
             dataset=self.dataset,
             dom_tree_simplificator=self.dom_tree_simplificator,
@@ -369,11 +423,13 @@ class CommonCrawlWebDocumentExtractor:
         )
 
     def get_image_urls(self):
+        # [FUNCTION DOC] Writes the unique image URLs of self.dataset to the configured file.
         get_image_urls(
             dataset=self.dataset, num_proc=self.num_proc, path_save_file_image_urls=self.path_save_file_image_urls
         )
 
     def download_images(self):
+        # [FUNCTION DOC] Runs img2dataset with the configured parameters.
         download_images(
             path_save_file_image_urls=self.path_save_file_image_urls,
             path_save_dir_downloaded_images=self.path_save_dir_downloaded_images,
@@ -385,6 +441,7 @@ class CommonCrawlWebDocumentExtractor:
         )
 
     def create_dataset_images(self):
+        # [FUNCTION DOC] Builds the image dataset from downloaded tars and stores it in self.dataset_images.
         self.dataset_images = create_dataset_images(
             path_save_dir_downloaded_images=self.path_save_dir_downloaded_images,
             path_save_dir_tmp_datasets_images=self.path_save_dir_tmp_datasets_images,
@@ -394,6 +451,11 @@ class CommonCrawlWebDocumentExtractor:
         )
 
     def urls_to_images(self, reload_files=False):
+        # [FUNCTION DOC] Loads map_url_idx from its JSON file; if reload_files (default False) reloads
+        # self.dataset and self.dataset_images from disk; then replaces URLs by images using
+        # num_proc_urls_to_images processes.
+        # KNOWN ISSUE: when not reloading, missing attributes only trigger a printed hint, then the following
+        # call raises AttributeError anyway.
         with open(self.path_save_file_map_url_idx) as f:
             self.map_url_idx = json.load(f)
         # Useful when this method is called independently without
@@ -420,11 +482,14 @@ class CommonCrawlWebDocumentExtractor:
         )
 
     def save_dataset(self):
+        # [FUNCTION DOC] Saves self.dataset to path_save_dir_dataset with num_proc shards.
         logger.info("Starting saving the dataset")
         self.dataset.save_to_disk(self.path_save_dir_dataset, num_proc=self.num_proc)
         logger.info("Finished saving the dataset")
 
     def save_commit_hash(self):
+        # [FUNCTION DOC] Writes the current git HEAD sha (repo found from the CWD upward) to
+        # <path_save_dir_dataset>/commit_hash.txt.
         logger.info("Starting writing the commit hash")
         repo = git.Repo(search_parent_directories=True)
         sha = repo.head.object.hexsha
@@ -432,6 +497,8 @@ class CommonCrawlWebDocumentExtractor:
         logger.info("Finished writing the commit hash")
 
     def save_split_sharded_dataset(self, reload_files=False):
+        # [FUNCTION DOC] Optionally reloads self.dataset from disk (reload_files, default False), then shards
+        # it into valid (first two shards) and train directories.
         # Useful when this method is called independently without
         # the previous ones, so we need to load some files
         if reload_files:

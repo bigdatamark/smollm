@@ -1,3 +1,6 @@
+# [MODULE DOC] CLI script padding the additional (new-token) embedding and LM-head matrices of a single-file
+# safetensors checkpoint (opt_step_dir/unwrapped_model/model.safetensors) so their row count is a multiple of
+# 128; new rows are the mean of the base and additional rows. Rewrites the file in place.
 import argparse
 import json
 from pathlib import Path
@@ -8,6 +11,7 @@ from safetensors.torch import save_file
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses positional opt_step_dir; returns the namespace.
     parser = argparse.ArgumentParser()
     parser.add_argument("opt_step_dir", type=str, help="opt_step_dir with unwrapped_model")
     return parser.parse_args()
@@ -16,6 +20,11 @@ def get_args():
 
 
 def main():
+    # [FUNCTION DOC] Pads model.embed_tokens.additional_embedding.weight using model.embed_tokens.weight for
+    # the mean, saves, then does the same for additional_fc.weight with lm_head.weight, printing new row
+    # counts.
+    # KNOWN ISSUE: the LM-head call passes only one argument to pad_to_multiple_of_128, raising TypeError
+    # after the embedding was already rewritten; lm_head is loaded but never used.
     args = get_args()
     source_dir = Path(args.opt_step_dir) / "unwrapped_model"
 
@@ -36,14 +45,19 @@ def main():
         tensor_files_mapping[k] = "model.safetensors"
 
     def load(weight_name):
+        # [FUNCTION DOC] HELPER: reads tensor weight_name from its mapped safetensors file and returns it.
         tensor_file = tensor_files_mapping[weight_name]
         with safe_open(source_dir / tensor_file, framework="pt") as f:
             return f.get_tensor(weight_name)
 
     def init_new(matrix, matrix_additional):
+        # [FUNCTION DOC] HELPER: stacks matrix and matrix_additional row-wise and returns their column-wise
+        # mean as a 1-row tensor.
         return torch.vstack([matrix, matrix_additional]).mean(dim=0, keepdim=True)
 
     def pad_to_multiple_of_128(tensor, embedding_matrix):
+        # [FUNCTION DOC] HELPER: returns tensor unchanged if its row count is a multiple of 128, otherwise
+        # appends copies of the mean row (init_new of embedding_matrix and tensor) until it is.
         current_size = tensor.size(0)
         target_size = ((current_size + 127) // 128) * 128  # Round up to next multiple of 128
         padding_needed = target_size - current_size
@@ -56,6 +70,8 @@ def main():
         return torch.vstack([tensor, padding])
 
     def save_modified(weight_name, new_weight):
+        # [FUNCTION DOC] HELPER: reloads every tensor of the file containing weight_name, replaces that tensor
+        # with new_weight and rewrites the whole file with pt metadata.
         tensor_file = tensor_files_mapping[weight_name]
         all_tensors = {}
         with safe_open(source_dir / tensor_file, framework="pt") as f:

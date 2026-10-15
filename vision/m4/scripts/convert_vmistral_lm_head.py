@@ -1,3 +1,7 @@
+# [MODULE DOC] One-off script renaming tensors in a hardcoded VMistral safetensors checkpoint in place: any
+# key containing "lm_head.additional_fc" is rewritten to use "additional_fc" instead. Every model*.safetensors
+# shard is rewritten (printing its keys) and model.safetensors.index.json gets its weight_map keys renamed
+# accordingly.
 import glob
 import json
 

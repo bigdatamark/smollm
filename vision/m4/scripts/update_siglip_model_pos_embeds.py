@@ -1,3 +1,9 @@
+# [MODULE DOC] One-off script resizing a standalone SigLIP checkpoint (hardcoded so400m-14-384 dir) to a new
+# image size of 700: loads model.safetensors, reshapes vision_model.embeddings.position_embedding.weight into
+# its square grid, bicubically interpolates it (float32, with the +0.1 DINO trick) to (700 // patch_size) per
+# side, flattens it back, raises ValueError if the resulting grid is not the expected size, saves the new
+# safetensors to the output dir and writes config.json with vision_config.image_size = 700. Prints shapes
+# before/after.
 import json
 import math
 import os

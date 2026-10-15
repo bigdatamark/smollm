@@ -1,4 +1,12 @@
 #!/usr/bin/env python
+# [MODULE DOC] CLI tool (header comment is copy-pasted from convert-checkpoints.py) that, for the given
+# run_name and list of opt-step numbers, downloads checkpoints from s3://m4-exps/<run_name>/opt_step-N to the
+# cluster temp checkpoint folder under
+# /fsx/m4/experiments/.../s3_async_temporary_checkpoint_folder/<run_name>/. Unconverted checkpoints are fully
+# downloaded, converted with <repo_path>/m4/models/zero_checkpoint_to_hf.py and their unwrapped_model (and
+# unwrapped_adapter if present) uploaded back to s3; already converted ones only get unwrapped_model,
+# tokenizer and (if present) unwrapped_adapter downloaded. Uses boto3 and the s5cmd binary; needs AWS
+# credentials.
 
 #
 # This tool converts any deepspeed checkpoints found at given path to hf format
@@ -17,6 +25,9 @@ import boto3
 
 
 def check_s3_directory(directory_path):
+    # [FUNCTION DOC] HELPER: returns True if any object exists in bucket m4-exps under prefix directory_path
+    # (a trailing slash is added), False otherwise. Only the first list page is examined; boto3 errors
+    # propagate.
     s3 = boto3.client("s3")
 
     # Add a trailing slash to the directory path
@@ -34,6 +45,8 @@ def check_s3_directory(directory_path):
 
 
 def check_s3_file(file_key):
+    # [FUNCTION DOC] HELPER: returns True if head_object succeeds for file_key in bucket m4-exps, False on any
+    # exception.
     s3 = boto3.client("s3")
 
     try:
@@ -44,6 +57,8 @@ def check_s3_file(file_key):
 
 
 def run_cmd(cmd, check=True):
+    # [FUNCTION DOC] HELPER: runs a command list via subprocess capturing UTF-8 output; returns stripped
+    # stdout; with check (default True) failure raises EnvironmentError with stderr.
     try:
         response = subprocess.run(
             cmd,
@@ -59,6 +74,9 @@ def run_cmd(cmd, check=True):
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses positional run_name, opt_step_num_list (one or more) and repo_path, plus
+    # -f/--force (unused); returns the namespace.
+    # KNOWN ISSUE: repo_path is a positional after a nargs="+" list, so argparse assigns the last value to it.
     parser = argparse.ArgumentParser()
     parser.add_argument("run_name", type=str, help="run name")
     parser.add_argument("opt_step_num_list", nargs="+", help="list of opt-steps to download")
@@ -69,11 +87,16 @@ def get_args():
 
 
 def exit(msg):
+    # [FUNCTION DOC] HELPER: prints msg and exits with status 0. Unused.
     print(msg)
     sys.exit()
 
 
 def cmd_retry_loop(cmd, max_retries=5):
+    # [FUNCTION DOC] HELPER: runs cmd via run_cmd up to max_retries (default 5) times, printing and returning
+    # stdout on success.
+    # KNOWN ISSUE: any EnvironmentError is retried (not only InvalidDigest); if every attempt fails, returning
+    # the never-assigned response raises UnboundLocalError.
     # s5cmd will fail with an error like this when MD5 checksum doesn't match on upload (it won't retry)
     # ERROR "cp data4.tar s3://m4-datasets/cm4-test/data4.tar": InvalidDigest: The Content-MD5
     # you specified was invalid. status code: 400, request id: SZEHBJ4QQ33JSMH7, host id:
@@ -97,6 +120,12 @@ def cmd_retry_loop(cmd, max_retries=5):
 
 
 def main():
+    # [FUNCTION DOC] Entry point implementing the download/convert/upload flow described in the module doc.
+    # Skips steps whose s3 prefix does not exist. Prints every response. Conversion errors raise
+    # EnvironmentError.
+    # KNOWN ISSUE: the adapter presence check uses head_object on a "directory" key, which normally returns
+    # False on S3, so adapters of converted checkpoints are not downloaded; the initial
+    # check_s3_directory(run_name) result is ignored.
     args = get_args()
 
     run_name = args.run_name

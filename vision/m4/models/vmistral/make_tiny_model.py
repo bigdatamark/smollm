@@ -1,4 +1,12 @@
 #!/usr/bin/env python
+# [MODULE DOC] Script (run directly, no arguments) that builds a tiny random VMistralForCausalLM for tests:
+# hidden 16,
+# 2 layers, 4 heads/1 KV head, tiny-random-siglip vision tower, 2-layer perceiver resampler with 16 latents,
+# 2 additional vocab tokens. Builds the matching tokenizer via m4 get_tokenizer (adds
+# <fake_token_around_image>
+# and <image>), asserts <image> is in the vocab, runs a smoke generate on one blank 30x30 image plus a
+# caption,
+# halves to fp16, saves to ./tiny-random-vmistral-m4, reloads it and prints a note. Needs network access.
 
 # This script creates a super tiny model that is useful inside tests, when we just want to test that
 # the machinery works, without needing to check the quality of the outcomes.

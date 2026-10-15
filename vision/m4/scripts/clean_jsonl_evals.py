@@ -1,3 +1,8 @@
+# [MODULE DOC] One-off script that cleans an evaluation results JSONL file in place (hardcoded local
+# PATH_JSONL). For every record with a "score" field it parses a string score (single quotes replaced by
+# double quotes, then JSON) into a mapping and removes the keys listed in BANNED_KEYS (distributions,
+# BLEU/METEOR/ROUGE variants, per-bucket accuracies, etc.), then rewrites the whole file one JSON object per
+# line.
 import json
 
 

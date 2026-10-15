@@ -1,3 +1,8 @@
+# [MODULE DOC] CLI pipeline step downloading Common Crawl WARC records. Loads the metadata dataset from disk
+# (adding empty "warc" bytes / "warc_error" string columns if neither exists, so a previous partial run can be
+# resumed), maps WarcDownloader over it with num_proc processes, saves the result to
+# --path_save_dir_warc_dataset and logs the success rate (rows with empty warc_error). Configures root logging
+# at INFO.
 import argparse
 import logging
 from multiprocessing import cpu_count
@@ -17,6 +22,8 @@ logger.setLevel(logging.INFO)
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses --path_metadata_dataset, --path_save_dir_warc_dataset and --num_proc
+    # (default cpu_count); returns the namespace.
     parser = argparse.ArgumentParser(description="Download warc files from Common Crawl pointers.")
     parser.add_argument(
         "--path_metadata_dataset",

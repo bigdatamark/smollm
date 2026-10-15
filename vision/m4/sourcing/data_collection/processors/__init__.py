@@ -1,3 +1,8 @@
+# [PACKAGE DOC] Package of the data collection processors. Re-exports the main processor classes so callers
+# can import them from the package: DOMTreeSimplificator, HtmlExtractor, ImageDeduplicator,
+# TextMediaPairsExtractor, PairFiltering, PreExtractionSimplificator, WarcDownloader,
+# CommonCrawlWebDocumentExtractor, FilteringFunctions, WebDocumentFilteringDocLevel/NodeLevel,
+# WebDocumentImageDeduplication and WebDocumentLineDeduplication.
 from m4.sourcing.data_collection.processors.dom_tree_simplificator import DOMTreeSimplificator
 from m4.sourcing.data_collection.processors.html_extractor import HtmlExtractor
 from m4.sourcing.data_collection.processors.image_deduplicator import ImageDeduplicator

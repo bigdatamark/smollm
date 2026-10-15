@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+# [MODULE DOC] Cron-style CLI uploading finished opt_step-* checkpoints under checkpoints_path to
+# s3://m4-exps-us-east-1/<experiment dir name>/<opt_step>/ with s5cmd sync, then syncing auxiliary files
+# matching include_patterns (tb_run_*, logs, config.yaml) to the experiment prefix. Per checkpoint it uses a
+# control file (started-upload-checkpoint, stale after 2h) for cross-node coordination and writes
+# finished-upload-checkpoint on completion (consumed by cleanup-checkpoints.py). Requires s5cmd and AWS
+# credentials.
 
 #
 # This tool uploads any new deepspeed checkpoints found at given path to s3 (and also various non-checkpoint files, like logs)
@@ -43,6 +49,8 @@ reasonable_upload_time_in_secs = 2 * 60 * 60
 
 
 def run_cmd(cmd, check=True):
+    # [FUNCTION DOC] HELPER: runs a command list via subprocess capturing output as UTF-8; returns stripped
+    # stdout; with check (default True) non-zero exit raises EnvironmentError carrying stderr.
     try:
         response = subprocess.run(
             cmd,
@@ -58,6 +66,8 @@ def run_cmd(cmd, check=True):
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses positional checkpoints_path, -f/--force and --skip-conversion-check;
+    # returns the namespace.
     parser = argparse.ArgumentParser()
     parser.add_argument("checkpoints_path", type=str, help="base dir with checkpoints")
     # parser.add_argument("experiment_name", type=str, help="experiment name as a s3 sub-dir")
@@ -69,11 +79,17 @@ def get_args():
 
 
 def exit(msg):
+    # [FUNCTION DOC] HELPER: prints msg and exits with status 0 (shadows the builtin).
     print(msg)
     sys.exit()
 
 
 def should_process(path, force, control_file_path, finished_uploading_file_path, args):
+    # [FUNCTION DOC] Decides whether to upload checkpoint dir path. False if the "finished-saving" marker
+    # (written by the trainer) is missing; True if force; False if finished_uploading_file_path exists; False
+    # if no converted weights exist in unwrapped_model (unless args.skip_conversion_check); then True if
+    # control_file_path is absent or stale, False if fresh. Prints a [Y]/[N] reason.
+    # KNOWN ISSUE: the force message lacks the f-prefix and prints the literal "{checkpoint_dir}".
     """Heuristics to decide whether to upload this opt_step-XXX checkpoint or not"""
 
     # check if checkpoint is fully saved
@@ -122,6 +138,12 @@ def should_process(path, force, control_file_path, finished_uploading_file_path,
 
 
 def main():
+    # [FUNCTION DOC] Entry point: validates checkpoints_path (FileNotFoundError), exits if no checkpoints; for
+    # each approved checkpoint touches the control file, runs s5cmd sync up to RETRIES times retrying on
+    # errors, then removes the control file and touches the finished marker; finally syncs the auxiliary files
+    # (errors there propagate).
+    # KNOWN ISSUE: any EnvironmentError (not just InvalidDigest) is swallowed and retried, and after
+    # exhausting retries the checkpoint is still marked as finished-uploaded even though the sync failed.
     args = get_args()
 
     checkpoints_path = Path(args.checkpoints_path)

@@ -1,3 +1,10 @@
+# [MODULE DOC] One-off script doubling the perceiver resampler latents of a hardcoded 2-shard
+# pytorch_model-*.bin checkpoint: every tensor whose key contains "perceiver_resampler.latents" is
+# concatenated with itself along dim 0. Saves the shards to the destination unwrapped_model dir, writes
+# config.json with resampler_n_latents doubled, and copies the bin index, generation config and tokenizer
+# directory.
+# KNOWN ISSUE: resampler_n_latents is read as a top-level config key; configs that nest it in
+# perceiver_config (e.g. VMistral) raise KeyError.
 import json
 import os
 import shutil

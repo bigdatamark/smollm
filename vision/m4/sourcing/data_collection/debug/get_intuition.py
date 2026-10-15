@@ -1,3 +1,8 @@
+# [MODULE DOC] Collection of exploratory analysis functions used to build intuition about raw HTML documents
+# (from load_dataset_html) and the extracted media: node counts after simplification, which tags carry
+# interesting content, tag counts, media extraction, alt-text length and image size histograms, download
+# success rates. All functions print results and/or write files under ./m4/sourcing/data_collection/outputs/
+# or read relative paths (outputs/, downloaded_images/); the main block does nothing.
 import json
 import os
 import time
@@ -17,6 +22,8 @@ from m4.sourcing.data_collection.utils import (
 
 
 def get_example(save_file=True):
+    # [FUNCTION DOC] Takes the first HTML document and, if save_file (default True), writes its raw HTML to
+    # outputs/example_html.txt. Returns nothing.
     # Keys in an example. Only "html" is useful.
     # keys = [
     #     "c4_shard",
@@ -51,6 +58,9 @@ def get_example(save_file=True):
 def check_performance_simplification_methods(
     num_docs_to_consider=1000,
 ):
+    # [FUNCTION DOC] Simplifies num_docs_to_consider (default 1000) documents with a fully enabled
+    # DOMTreeSimplificator, timing only the simplification; prints the average node count per tree and total
+    # time.
     dataset = load_dataset_html()
     list_nb_nodes = []
     tot_time = 0
@@ -87,6 +97,9 @@ def check_performance_simplification_methods(
 def check_interesting_tags_removed(
     num_docs_to_consider=1000,
 ):
+    # [FUNCTION DOC] For each prefix of STRIP_TAGS (growing by one tag per iteration), reloads the dataset,
+    # strips those tags from num_docs_to_consider (default 1000) raw trees and prints how many nodes with tags
+    # in INTERESTING_TAGS_SET remain, showing which stripped tag destroys interesting content.
     for i in range(len(STRIP_TAGS)):
         print("Iteration:", i)
         print(
@@ -116,6 +129,10 @@ def count_tags(
     num_docs_to_consider=10000,
     save_file=False,
 ):
+    # [FUNCTION DOC] Counts occurrences of each tag in list_tags_to_count over num_docs_to_consider (default
+    # 10000) documents, optionally after default DOMTreeSimplificator simplification (simplify_html_tree,
+    # default True). With save_file it collects the node HTML of each occurrence, dumps it to
+    # outputs/count_tags.json and then reduces to counts. Prints the tag->count mapping.
     if save_file:
         dic_count_tags = {el: [] for el in list_tags_to_count}
     else:
@@ -151,6 +168,9 @@ def get_media(
     simplify_html_tree=True,
     save_file=True,
 ):
+    # [FUNCTION DOC] Extracts media nodes (via simplify_media_node with the page URL) from
+    # num_docs_to_consider (default 1000) documents, optionally simplified first, grouping them by tag; prints
+    # counts per tag and, if save_file (default True), writes the mapping to outputs/media.json.
     dataset = load_dataset_html()
     media = {}
 
@@ -186,6 +206,10 @@ def get_media(
 
 
 def get_distribution_number_words_images():
+    # [FUNCTION DOC] Reads outputs/media.json (relative to the CWD) and shows a matplotlib histogram of the
+    # alt-text word counts of img entries (0 when missing).
+    # KNOWN ISSUE: d is passed as plt.hist's third positional argument, which is range, not a bin width; also
+    # reads a different relative path than get_media writes.
     number_words_images = []
     with open("outputs/media.json") as f:
         media = json.load(f)
@@ -209,6 +233,9 @@ def get_distribution_number_words_images():
 
 
 def get_url_images(save_file=True):
+    # [FUNCTION DOC] Reads outputs/media.json, splits img src values into absolute http URLs vs internal
+    # paths, prints the share of internal paths and, if save_file (default True), writes the URLs one per line
+    # to outputs/url_images.txt.
     url_images = []
     internal_path = 0
     with open("outputs/media.json") as f:
@@ -228,6 +255,8 @@ def get_url_images(save_file=True):
 
 
 def get_ratio_success_download_images():
+    # [FUNCTION DOC] Sums "successes" and "count" over all *_stats.json files in downloaded_images/
+    # (img2dataset output) and prints the success ratio; ZeroDivisionError if none found.
     num_successes = 0
     num_tot = 0
     for file in os.listdir("downloaded_images/"):
@@ -241,6 +270,10 @@ def get_ratio_success_download_images():
 
 
 def get_distribution_size_images():
+    # [FUNCTION DOC] Shows histograms of original width, height and pixel count read from per-image JSON files
+    # in downloaded_images/ subdirectories, then of rendered (display) width, height and size of img entries
+    # in outputs/media.json that have integer-convertible rendered sizes (others ignored); prints the counts
+    # kept.
     original_widths = []
     original_heights = []
     original_sizes = []

@@ -1,4 +1,8 @@
 #!/usr/bin/env python
+# [MODULE DOC] Cron-style CLI converting every DeepSpeed opt_step-* checkpoint under checkpoints_path into HF
+# format by running m4/models/zero_checkpoint_to_hf.py on it. -f/--force reconverts even when a control file
+# says a conversion is in progress. A control file unwrapped_model/started-convert-checkpoint guards against
+# concurrent jobs on a shared filesystem; files older than 2 hours are considered aborted runs.
 
 #
 # This tool converts any deepspeed checkpoints found at given path to hf format
@@ -33,6 +37,8 @@ reasonable_conversion_time_in_secs = 2 * 60 * 60
 
 
 def run_cmd(cmd, check=True):
+    # [FUNCTION DOC] HELPER: runs a command list via subprocess capturing output as UTF-8 and returns stripped
+    # stdout; with check (default True) a non-zero exit raises EnvironmentError containing stderr.
     try:
         response = subprocess.run(
             cmd,
@@ -48,6 +54,7 @@ def run_cmd(cmd, check=True):
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses positional checkpoints_path and -f/--force; returns the namespace.
     parser = argparse.ArgumentParser()
     parser.add_argument("checkpoints_path", type=str, help="base dir with checkpoints")
     parser.add_argument("-f", "--force", action="store_true", help="force rebuilding of all checkpoints")
@@ -55,11 +62,19 @@ def get_args():
 
 
 def exit(msg):
+    # [FUNCTION DOC] HELPER: prints msg and exits the process with status 0 (shadows the builtin exit).
     print(msg)
     sys.exit()
 
 
 def should_process(path, force, control_file_path):
+    # [FUNCTION DOC] Decides whether to convert checkpoint dir path. Returns False when unwrapped_model or its
+    # config.json is missing, or when any converted weights file (pytorch_model.bin[.index.json] /
+    # model.safetensors[.index.json]) already exists. Then returns True if force; otherwise True if the
+    # control file is absent or stale (older than reasonable_conversion_time_in_secs), False if it is fresh.
+    # Prints a [Y]/[N] reason each time.
+    # KNOWN ISSUE: the control_file_path argument is ignored and recomputed; the force message lacks the
+    # f-prefix so it prints the literal "{checkpoint_dir}".
     """Heuristics to decide whether to convert this opt_step-XXX checkpoint or not"""
 
     target_dir = path / "unwrapped_model"
@@ -109,6 +124,10 @@ def should_process(path, force, control_file_path):
 
 
 def main():
+    # [FUNCTION DOC] Entry point: validates checkpoints_path (FileNotFoundError if not a dir), exits if no
+    # opt_step-* dirs, and for each approved checkpoint touches the control file, runs the converter script
+    # synchronously (EnvironmentError on failure, leaving the control file behind), removes the control file
+    # and prints the converter output.
     args = get_args()
 
     checkpoints_path = Path(args.checkpoints_path)

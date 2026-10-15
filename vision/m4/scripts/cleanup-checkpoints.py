@@ -1,4 +1,9 @@
 #!/usr/bin/env python
+# [MODULE DOC] Cron-style CLI that deletes old opt_step-* checkpoint directories under checkpoints_path once
+# they are safe to remove: the s3 upload marker (finished-upload-checkpoint) exists and, unless
+# --skip-evals-check, the four run_evals_*_done markers exist. The two most recent checkpoints are always
+# kept. A shared-filesystem control file (unwrapped_model/started-cleanup-checkpoint) coordinates concurrent
+# jobs; one older than 1 hour is treated as a crashed cleanup and retried.
 
 #
 # This tool deletes checkpoints found at given path that are no longer needed
@@ -42,6 +47,9 @@ reasonable_cleanup_time_in_secs = 1 * 60 * 60
 
 
 def run_cmd(cmd, check=True):
+    # [FUNCTION DOC] HELPER: runs a command list via subprocess, capturing stdout/stderr as UTF-8; returns
+    # stripped stdout. check (default True) raises on non-zero exit, converted into EnvironmentError carrying
+    # stderr. Unused here.
     try:
         response = subprocess.run(
             cmd,
@@ -57,6 +65,7 @@ def run_cmd(cmd, check=True):
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses positional checkpoints_path and --skip-evals-check; returns the namespace.
     parser = argparse.ArgumentParser()
     parser.add_argument("checkpoints_path", type=str, help="base dir with checkpoints")
     parser.add_argument("--skip-evals-check", action="store_true", help="skip evals done checks")
@@ -64,11 +73,17 @@ def get_args():
 
 
 def exit(msg):
+    # [FUNCTION DOC] HELPER: prints msg and exits the process with status 0 (shadows the builtin exit).
     print(msg)
     sys.exit()
 
 
 def should_process(path, control_file_path, args):
+    # [FUNCTION DOC] Decides whether checkpoint directory path (Path) may be deleted. Returns False (printing
+    # "[N] ...") if the s3 completion marker is missing, if evals are not finished (unless
+    # args.skip_evals_check), or if control_file_path exists and is younger than
+    # reasonable_cleanup_time_in_secs; returns True (printing "[Y] ...") if the control file is stale or
+    # absent.
     """Heuristics to decide whether to cleanup this opt_step-XXX checkpoint or not"""
 
     s3_completed_path = path / finished_uploading_file_name
@@ -108,6 +123,10 @@ def should_process(path, control_file_path, args):
 
 
 def main():
+    # [FUNCTION DOC] Entry point: validates checkpoints_path is a directory (FileNotFoundError otherwise),
+    # exits if no opt_step-* dirs, sorts them by numeric step, skips the last two, and for each one approved
+    # by should_process touches the control file and removes the whole checkpoint directory with shutil.rmtree
+    # (errors ignored).
     args = get_args()
 
     checkpoints_path = Path(args.checkpoints_path)

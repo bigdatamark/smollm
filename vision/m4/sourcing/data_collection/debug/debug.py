@@ -1,3 +1,6 @@
+# [MODULE DOC] Debug script: runs DOMTreeSimplificator with every simplification enabled on a small
+# hand-written HTML sample (scripts, unknown tags, nested divs, media, a date div, comments including an
+# unclosed one) and prints the simplified HTML followed by the tag of every node in traversal order.
 from m4.sourcing.data_collection.processors import DOMTreeSimplificator
 
 
@@ -49,6 +52,8 @@ html_str = """<!DOCTYPE html>
 
 
 def debug():
+    # [FUNCTION DOC] Builds the simplificator, simplifies the module-level html_str returning a selectolax
+    # tree, prints its HTML, a separator and each node tag. Returns nothing.
     tree_simplificator = DOMTreeSimplificator(
         strip_multiple_linebreaks=True,
         strip_multiple_spaces=True,

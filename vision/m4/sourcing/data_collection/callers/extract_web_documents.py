@@ -1,3 +1,9 @@
+# [MODULE DOC] CLI pipeline step turning an HTML dataset into web documents (interleaved texts and images).
+# Loads the HTML dataset from disk and a YAML config (sections dom_tree_simplificator,
+# pre_extraction_simplificator, web_document_extractor with image_size/resize_mode), builds the simplificators
+# and a CommonCrawlWebDocumentExtractor, then runs in order: html_to_web_documents, get_image_urls,
+# download_images, create_dataset_images, urls_to_images, save_dataset, save_commit_hash,
+# save_split_sharded_dataset. Configures INFO logging; downloads images over the network.
 import argparse
 import logging
 from multiprocessing import cpu_count
@@ -22,6 +28,10 @@ logger.setLevel(logging.INFO)
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses the config path, input HTML dataset path, output dataset/sharded dataset
+    # dirs, num_proc (default cpu_count), image URL file, downloaded images dir, thread_count (256),
+    # number_sample_per_shard (10000), temporary and final image dataset dirs, url->index map file,
+    # num_proc_urls_to_images (15) and shard_size (20000); returns the namespace.
     parser = argparse.ArgumentParser(description="Extract web documents.")
     parser.add_argument(
         "--path_config_extract_web_documents",

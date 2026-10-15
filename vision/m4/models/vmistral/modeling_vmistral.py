@@ -1,4 +1,12 @@
 # coding=utf-8
+# [MODULE DOC] PyTorch implementation of VMistral, the m4 vision-language model (Idefics2-style): a Mistral
+# decoder LM whose input sequence contains <image> placeholder tokens that are replaced by visual features.
+# Pipeline per image: a vision encoder (SigLIP-like, loaded from vision_config.vision_model_name, supports
+# NaViT-style patch attention masks) -> modality_projection MLP into the LM hidden size -> PerceiverResampler
+# down to resampler_n_latents vectors, which overwrite the embeddings of the image tokens. Includes eager and
+# FlashAttention-2 attention, generation helpers (expanding/caching image inputs), decoupled embeddings/LM
+# head for extra (additional_vocab_size) tokens, and a TFLOPs estimator. Imports flash_attn only when
+# available.
 # Copyright 2023 Mistral AI and the HuggingFace Inc. team. All rights reserved.
 #
 # This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
@@ -72,6 +80,9 @@ _CONFIG_FOR_DOC = "VMistralConfig"
 
 @dataclass
 class VMistralBaseModelOutputWithPast(ModelOutput):
+    # [CLASS DOC] Output dataclass of VMistralModel: last_hidden_state, past_key_values, hidden_states,
+    # attentions and image_hidden_states (visual features after projection/resampling, reusable during
+    # generation).
     """
     Base class for VMistral model's outputs that may also contain a past key/values (to speed up sequential decoding).
 
@@ -117,6 +128,8 @@ class VMistralBaseModelOutputWithPast(ModelOutput):
 
 @dataclass
 class VMistralCausalLMOutputWithPast(ModelOutput):
+    # [CLASS DOC] Output dataclass of VMistralForCausalLM: loss, logits, past_key_values, hidden_states,
+    # attentions, image_hidden_states.
     """
     Base class for VMistral causal language model (or autoregressive) outputs.
 
@@ -165,6 +178,10 @@ def expand_inputs_for_generation(
     encoder_outputs=None,
     **model_kwargs,
 ):
+    # [FUNCTION DOC] HELPER: generation helper (beam search / num_return_sequences) repeating every batch row
+    # expand_size (default 1) times: input_ids, token_type_ids, attention_mask, pixel_values (or else
+    # image_hidden_states) and pixel_attention_mask in model_kwargs (missing image keys are set to None).
+    # is_encoder_decoder and encoder_outputs are ignored. Returns (input_ids, model_kwargs).
     expanded_return_idx = (
         torch.arange(input_ids.shape[0]).view(-1, 1).repeat(1, expand_size).view(-1).to(input_ids.device)
     )
@@ -195,6 +212,9 @@ def expand_inputs_for_generation(
 
 
 def update_model_kwargs_for_generation(outputs, model_kwargs):
+    # [FUNCTION DOC] HELPER: after each generation step stores outputs.past_key_values (or None), extends
+    # token_type_ids by repeating the last value and attention_mask by a column of ones, and stores
+    # outputs.image_hidden_states so images are not re-encoded. Mutates and returns model_kwargs.
     # must have this key set to at least None
     if "past_key_values" in outputs:
         model_kwargs["past_key_values"] = outputs.past_key_values
@@ -220,6 +240,11 @@ def update_model_kwargs_for_generation(outputs, model_kwargs):
 
 
 def prepare_inputs_for_generation(input_ids, past_key_values=None, **kwargs):
+    # [FUNCTION DOC] HELPER: builds the forward kwargs for a generation step. With a cache only the last token
+    # (and token type) is fed. If attention_mask is given without position_ids, positions are the cumulative
+    # sum of the mask minus 1 (padding set to 1), keeping only the last when cached. Returns a mapping with
+    # input_ids, past_key_values, use_cache, position_ids, attention_mask, token_type_ids, pixel_values,
+    # pixel_attention_mask and image_hidden_states.
     token_type_ids = kwargs.get("token_type_ids", None)
     # only last token for inputs_ids if past is defined in kwargs
     if past_key_values:
@@ -256,6 +281,8 @@ def prepare_inputs_for_generation(input_ids, past_key_values=None, **kwargs):
 
 # Copied from transformers.models.llama.modeling_llama._get_unpad_data
 def _get_unpad_data(attention_mask):
+    # [FUNCTION DOC] HELPER: from a 2D 0/1 attention_mask returns (flat indices of non-padding tokens,
+    # cumulative sequence lengths with a leading 0 as int32, max sequence length) for flash-attn varlen calls.
     seqlens_in_batch = attention_mask.sum(dim=-1, dtype=torch.int32)
     indices = torch.nonzero(attention_mask.flatten(), as_tuple=False).flatten()
     max_seqlen_in_batch = seqlens_in_batch.max().item()
@@ -269,7 +296,11 @@ def _get_unpad_data(attention_mask):
 
 # Copied from transformers.models.llama.modeling_llama.LlamaRotaryEmbedding with Llama->Mistral
 class MistralRotaryEmbedding(nn.Module):
+    # [CLASS DOC] Rotary position embedding (RoPE) with cached cos/sin tables.
     def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None):
+        # [FUNCTION DOC] dim: head dimension; max_position_embeddings (default 2048) sizes the initial cache;
+        # base (default 10000) is the RoPE theta; device for inv_freq. Registers non-persistent buffers
+        # inv_freq, cos_cached, sin_cached.
         super().__init__()
 
         self.dim = dim
@@ -284,6 +315,8 @@ class MistralRotaryEmbedding(nn.Module):
         )
 
     def _set_cos_sin_cache(self, seq_len, device, dtype):
+        # [FUNCTION DOC] HELPER: (re)computes cos/sin tables of shape (seq_len, dim) (frequencies duplicated
+        # across both halves) in dtype on device and updates max_seq_len_cached.
         self.max_seq_len_cached = seq_len
         t = torch.arange(self.max_seq_len_cached, device=device, dtype=self.inv_freq.dtype)
 
@@ -294,6 +327,8 @@ class MistralRotaryEmbedding(nn.Module):
         self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
 
     def forward(self, x, seq_len=None):
+        # [FUNCTION DOC] Returns (cos, sin) for the first seq_len positions cast to x's dtype, growing the
+        # cache if seq_len exceeds it. x is only used for dtype/device.
         # x: [bs, num_attention_heads, seq_len, head_size]
         if seq_len > self.max_seq_len_cached:
             self._set_cos_sin_cache(seq_len=seq_len, device=x.device, dtype=x.dtype)
@@ -306,6 +341,8 @@ class MistralRotaryEmbedding(nn.Module):
 
 # Copied from transformers.models.llama.modeling_llama.rotate_half
 def rotate_half(x):
+    # [FUNCTION DOC] HELPER: splits the last dimension in two halves (x1, x2) and returns the concatenation of
+    # -x2 and x1.
     """Rotates half the hidden dims of the input."""
     x1 = x[..., : x.shape[-1] // 2]
     x2 = x[..., x.shape[-1] // 2 :]
@@ -314,6 +351,8 @@ def rotate_half(x):
 
 # Copied from transformers.models.llama.modeling_llama.apply_rotary_pos_emb
 def apply_rotary_pos_emb(q, k, cos, sin, position_ids):
+    # [FUNCTION DOC] HELPER: gathers cos/sin at position_ids (broadcast over heads) and returns the rotated
+    # (q, k): q * cos + rotate_half(q) * sin, same for k.
     cos = cos[position_ids].unsqueeze(1)  # [seq_len, dim] -> [batch_size, 1, seq_len, head_dim]
     sin = sin[position_ids].unsqueeze(1)
     q_embed = (q * cos) + (rotate_half(q) * sin)
@@ -323,6 +362,9 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids):
 
 # Copied from transformers.models.llama.modeling_llama.repeat_kv
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    # [FUNCTION DOC] HELPER: expands key/value heads for grouped-query attention: (batch, kv_heads, seq,
+    # head_dim) -> (batch, kv_heads * n_rep, seq, head_dim), each head repeated n_rep times consecutively;
+    # returns input if n_rep == 1.
     """
     This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
     num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
@@ -335,12 +377,18 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
 
 
 class MistralAttention(nn.Module):
+    # [CLASS DOC] Eager multi-head attention with grouped-query KV heads, RoPE and optional RMSNorm on
+    # queries/keys.
     """
     Multi-headed attention from 'Attention Is All You Need' paper. Modified to use sliding window attention: Longformer
     and "Generating Long Sequences with Sparse Transformers".
     """
 
     def __init__(self, config: VMistralConfig, qk_layer_norms: bool = False):
+        # [FUNCTION DOC] Builds q/k/v/o projections without bias from config (hidden_size,
+        # num_attention_heads, num_key_value_heads, max_position_embeddings, rope_theta, attention_dropout,
+        # rms_norm_eps). qk_layer_norms (default False) adds per-head RMSNorm on q and k. Raises ValueError if
+        # hidden_size is not divisible by num_heads.
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
@@ -376,6 +424,8 @@ class MistralAttention(nn.Module):
         self.attention_dropout = config.attention_dropout
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
+        # [FUNCTION DOC] HELPER: reshapes (bsz, seq_len, hidden) to (bsz, num_heads, seq_len, head_dim)
+        # contiguous. Unused.
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
 
     def forward(
@@ -389,6 +439,14 @@ class MistralAttention(nn.Module):
         use_cache: bool = False,
         **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+        # [FUNCTION DOC] Projects hidden_states (bsz, q_len, hidden), applies RoPE at position_ids (cos/sin
+        # computed for the past+current length), prepends cached past_key_value keys/values, returns them as
+        # the new cache if use_cache, applies q/k norms if enabled, repeats KV heads, computes scaled
+        # dot-product scores, adds the 4D additive attention_mask (must be (bsz, 1, q_len, kv_len) else
+        # ValueError), softmax in fp32, weighted sum and output projection. Returns (attn_output, attn_weights
+        # or None, past_key_value or None). key_value_states is unused; padding_mask in kwargs only triggers a
+        # deprecation warning. Raises ValueError on unexpected score/output shapes.
+        # KNOWN ISSUE: attention_dropout is stored but never applied in this eager path.
         if "padding_mask" in kwargs:
             warnings.warn(
                 "Passing `padding_mask` is deprecated and will be removed in v4.37. Please make sure use"
@@ -464,6 +522,8 @@ class MistralAttention(nn.Module):
 
 
 class MistralFlashAttention2(MistralAttention):
+    # [CLASS DOC] FlashAttention-2 variant of MistralAttention (same weights) handling padding via unpadding
+    # and optional sliding window attention.
     """
     Mistral flash attention module. This module inherits from `MistralAttention` as the weights of the module stays
     untouched. The only required change would be on the forward pass where it needs to correctly call the public API of
@@ -480,6 +540,14 @@ class MistralFlashAttention2(MistralAttention):
         use_cache: bool = False,
         **kwargs,
     ):
+        # [FUNCTION DOC] Same contract as MistralAttention.forward but attention_mask is the 2D padding mask
+        # (or None). Computes RoPE up to max(kv length, last position id) + 1, trims the KV cache to the
+        # sliding window when exceeded (ValueError on bad cache shape), concatenates cache, repeats KV heads,
+        # applies dropout only in training, casts fp32 inputs back to the weights' (or pre-quantization)
+        # dtype, and calls _flash_attention_forward. Attention weights are never returned (always None).
+        # KNOWN ISSUE: q/k RMSNorms (qk_layer_norms) are not applied in this path, so flash and eager
+        # attention differ for models using them; the sliding-window check "hasattr(...) is not None" is
+        # always true.
         if "padding_mask" in kwargs:
             warnings.warn(
                 "Passing `padding_mask` is deprecated and will be removed in v4.37. Please make sure use"
@@ -608,6 +676,11 @@ class MistralFlashAttention2(MistralAttention):
         softmax_scale=None,
         use_sliding_windows=False,
     ):
+        # [FUNCTION DOC] HELPER: runs flash attention on (batch, seq, heads, head_dim) tensors. If
+        # attention_mask is given, unpads inputs (_upad_input), calls flash_attn_varlen_func (with
+        # window_size=(sliding_window, sliding_window) when use_sliding_windows) and re-pads the output;
+        # otherwise calls flash_attn_func. Causal, dropout probability dropout, softmax_scale default
+        # 1/sqrt(head_dim). Returns the attention output (batch, q_len, heads, head_dim).
         """
         Calls the forward method of Flash Attention - if the input hidden states contain at least one padding token
         first unpad the input, then computes the attention scores and pad the final attention scores.
@@ -692,6 +765,10 @@ class MistralFlashAttention2(MistralAttention):
         return attn_output
 
     def _upad_input(self, query_layer, key_layer, value_layer, attention_mask, query_length):
+        # [FUNCTION DOC] HELPER: slices attention_mask to the key length, gathers non-padding key/value rows,
+        # and for queries either reuses the key indexing (q_len == kv_len), uses one token per batch row
+        # (q_len == 1), or unpads with the last q_len mask columns (assumes left padding). Returns (q, k, v,
+        # indices_q, (cu_seqlens_q, cu_seqlens_k), (max_q, max_k)).
         batch_size, kv_seq_len, num_heads, head_dim = key_layer.shape
 
         # On the first iteration we need to properly re-create the padding mask
@@ -735,7 +812,11 @@ class MistralFlashAttention2(MistralAttention):
 
 
 class MistralDecoderLayer(nn.Module):
+    # [CLASS DOC] Pre-norm transformer decoder block: RMSNorm -> self-attention (flash if
+    # config._flash_attn_2_enabled) -> residual, RMSNorm -> MLP (config.hidden_act, intermediate_size) ->
+    # residual.
     def __init__(self, config: VMistralConfig):
+        # [FUNCTION DOC] Builds attention, MLP and the two RMSNorms from config.
         super().__init__()
         self.hidden_size = config.hidden_size
         self.self_attn = (
@@ -762,6 +843,10 @@ class MistralDecoderLayer(nn.Module):
         use_cache: Optional[bool] = False,
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
+        # [FUNCTION DOC] Applies the block to hidden_states (batch, seq, hidden) with attention_mask,
+        # position_ids and past_key_value. Returns a tuple (hidden_states, [attention weights if
+        # output_attentions], [present key/value if use_cache]). padding_mask in kwargs only triggers a
+        # warning.
         if "padding_mask" in kwargs:
             warnings.warn(
                 "Passing `padding_mask` is deprecated and will be removed in v4.37. Please make sure use"
@@ -835,6 +920,8 @@ MISTRAL_START_DOCSTRING = r"""
     MISTRAL_START_DOCSTRING,
 )
 class VMistralPreTrainedModel(VLOOMPreTrainedModelBase):
+    # [CLASS DOC] Base class (on VLOOMPreTrainedModelBase) holding config_class, weight init, gradient
+    # checkpointing support and the vision-model override hook used by from_pretrained.
     config_class = VMistralConfig
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
@@ -842,7 +929,14 @@ class VMistralPreTrainedModel(VLOOMPreTrainedModelBase):
     _skip_keys_device_placement = "past_key_values"
 
     def _init_weights(self, module):
+        # [FUNCTION DOC] Custom init per module: Linear layers inside MLPs ~ N(0, sqrt(0.4 / (hidden_size *
+        # f))) with f = 2 for down_proj else 1; PerceiverResampler latents ~ N(0, sqrt(1 / hidden_size)) and
+        # its Linear layers like above with f = 2 * depth for o_proj; nn.Embedding ~ N(0, sqrt(1 /
+        # hidden_size)) with padding row zeroed; DecoupledLinear additional_fc ~ N(0, sqrt(1 / in_features)).
+        # Biases zeroed. Parameters are gathered under DeepSpeed ZeRO-3 when needed.
         def init_a_linear(module, mean=0.0, std=self.config.initializer_range):
+            # [FUNCTION DOC] HELPER: normal-initializes module.weight (mean, std default
+            # config.initializer_range) and zeros its bias, inside DeepSpeed gathered-parameter contexts.
             with ContextManagers(deepspeed_gathered_parameters_context_manager(module.weight, modify=True)):
                 module.weight.data.normal_(mean=mean, std=std)
                 if module.bias is not None:
@@ -878,6 +972,9 @@ class VMistralPreTrainedModel(VLOOMPreTrainedModelBase):
 
     @classmethod
     def override_vision_model_wrapper(cls, model, config, vision_model_name, vision_model_params, torch_dtype):
+        # [FUNCTION DOC] Class method called during loading: replaces the vision model of model (or of
+        # model.model when a head is present) by the pretrained vision_model_name with vision_model_params /
+        # torch_dtype, then re-applies parameter freezing from config.
         # this can be called via from_pretrained from a class w/ head or w/o head so we extract the beheaded model version
         beheaded_model = model.model if hasattr(model, "model") else model
         cls.override_vision_model(beheaded_model, vision_model_name, vision_model_params, torch_dtype)
@@ -953,6 +1050,8 @@ MISTRAL_INPUTS_DOCSTRING = r"""
     MISTRAL_START_DOCSTRING,
 )
 class VMistralModel(VMistralPreTrainedModel):
+    # [CLASS DOC] Bare VMistral model (no LM head): embeddings, vision encoder, modality projection, perceiver
+    # resampler, decoder layers and final norm.
     """
     Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`MistralDecoderLayer`]
 
@@ -961,6 +1060,13 @@ class VMistralModel(VMistralPreTrainedModel):
     """
 
     def __init__(self, config: VMistralConfig, vision_model=None):
+        # [FUNCTION DOC] Builds DecoupledEmbedding (vocab_size + additional_vocab_size, partially frozen when
+        # freeze_text_layers), an uninitialized vision model from the AutoConfig of
+        # vision_config.vision_model_name with image_size overridden (network/cache access,
+        # trust_remote_code), the modality projection MLP (vision embed_dim -> hidden_size), the
+        # PerceiverResampler (image_seq_len = resampler_n_latents), decoder layers and norm; runs post_init
+        # and freezes parameters per config. vision_model argument is unused. Raises ValueError if
+        # config.use_resampler is False.
         super().__init__(config)
         self.config = config
         self.vision_config = config.vision_config
@@ -1030,12 +1136,16 @@ class VMistralModel(VMistralPreTrainedModel):
         self.freeze_relevant_params(config)
 
     def enable_input_require_grads(self):
+        # [FUNCTION DOC] Registers forward hooks forcing requires_grad on the outputs of the input embeddings
+        # and of the first leaf module of the vision model (needed for gradient checkpointing with frozen
+        # weights / adapters). Stores the hook handles.
         """
         Enables the gradients for the input embeddings. This is useful for fine-tuning adapter weights while keeping
         the model weights fixed.
         """
 
         def get_lowest_module(module):
+            # [FUNCTION DOC] HELPER: follows the first child recursively and returns the first leaf module.
             if len(list(module.children())) == 0:
                 # If the module has no children, it is a leaf module (e.g., Linear, Conv2d, etc.)
                 return module
@@ -1044,6 +1154,7 @@ class VMistralModel(VMistralPreTrainedModel):
                 return get_lowest_module(list(module.children())[0])
 
         def make_inputs_require_grads(module, input, output):
+            # [FUNCTION DOC] HELPER: forward hook setting requires_grad on output.
             output.requires_grad_(True)
 
         self._text_require_grads_hook = self.get_input_embeddings().register_forward_hook(make_inputs_require_grads)
@@ -1052,6 +1163,9 @@ class VMistralModel(VMistralPreTrainedModel):
         )
 
     def freeze_relevant_params(self, config=None):
+        # [FUNCTION DOC] Freezes text layers (decoder layers + norm, except freeze_text_module_exceptions) if
+        # config.freeze_text_layers and the vision model (except freeze_vision_module_exceptions) if
+        # config.freeze_vision_layers; config defaults to self.config.
         if config is None:
             config = self.config
 
@@ -1062,13 +1176,16 @@ class VMistralModel(VMistralPreTrainedModel):
             freeze_model(self.vision_model, module_exceptions=config.freeze_vision_module_exceptions)
 
     def freeze_text_layers(self, module_exceptions):
+        # [FUNCTION DOC] HELPER: freezes self.layers and self.norm, keeping module_exceptions trainable.
         for module in [self.layers, self.norm]:
             freeze_model(module, module_exceptions=module_exceptions)
 
     def get_input_embeddings(self):
+        # [FUNCTION DOC] Returns embed_tokens.
         return self.embed_tokens
 
     def set_input_embeddings(self, value):
+        # [FUNCTION DOC] Replaces embed_tokens by value.
         self.embed_tokens = value
 
     def inputs_merger(
@@ -1077,6 +1194,14 @@ class VMistralModel(VMistralPreTrainedModel):
         inputs_embeds: Optional[torch.Tensor] = None,
         image_hidden_states: Optional[torch.Tensor] = None,
     ):
+        # [FUNCTION DOC] Replaces, for each batch row, the embeddings at positions where input_ids equals
+        # image_token_id by that row's image hidden states, taken in order from image_hidden_states (total
+        # images, image_seq_len, hidden) using per-row image counts (number of image tokens // image_seq_len).
+        # Raises ValueError if the number of image tokens in a row differs from images * sequence length.
+        # Returns {"inputs_embeds": merged} (a clone), or the input embeddings unchanged when no image states;
+        # returns an empty mapping if inputs_embeds is None. input_ids is required.
+        # KNOWN ISSUE: the docstring says input_ids and attention_mask are also adapted, but only
+        # inputs_embeds is changed.
         """
         This method aims at merging the token embeddings with the image hidden states into one single sequence of vectors that are fed to the transformer LM.
         The merging happens as follows:
@@ -1145,6 +1270,20 @@ class VMistralModel(VMistralPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, VMistralBaseModelOutputWithPast]:
+        # [FUNCTION DOC] Runs the model. Validates exactly one of input_ids/inputs_embeds (ValueError), builds
+        # position_ids after the cache length if absent, embeds tokens. pixel_values (batch, num_images, C, H,
+        # W) and image_hidden_states are mutually exclusive (ValueError). With pixel_values: casts to model
+        # dtype, flattens images, drops all-zero padding images, builds/filters pixel_attention_mask (default
+        # all True), derives a patch-level mask (a patch is valid if any pixel is), runs the vision model,
+        # modality projection and perceiver resampler (masked by the patch mask). Image features are merged
+        # into embeddings only when there is no cache. In training adds NEFTune uniform noise of magnitude
+        # neftune_noise_alpha / sqrt(seq * hidden) in place. Builds a 2D mask (flash; None if no padding;
+        # ValueError on right padding while generating with cache) or a 4D causal sliding-window mask (-inf
+        # replaced by dtype min). Runs decoder layers (gradient checkpointing when enabled, which disables
+        # use_cache), final norm. Returns VMistralBaseModelOutputWithPast or a tuple of the non-None values
+        # (hidden, cache, all hidden states, attentions, image_hidden_states).
+        # KNOWN ISSUE: the vision path uses input_ids.device, so passing inputs_embeds without input_ids fails
+        # with images.
         device = input_ids.device if input_ids is not None else inputs_embeds.device
 
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -1347,9 +1486,13 @@ class VMistralModel(VMistralPreTrainedModel):
 
 
 class VMistralForCausalLM(VMistralPreTrainedModel):
+    # [CLASS DOC] VMistralModel plus LM head: lm_head over the base vocabulary and additional_fc over the
+    # additional tokens, whose logits are concatenated.
     _tied_weights_keys = ["lm_head.weight"]
 
     def __init__(self, config, vision_model=None):
+        # [FUNCTION DOC] Builds self.model (VMistralModel), additional_fc (if additional_vocab_size > 0),
+        # lm_head (frozen if config.freeze_lm_head), then post_init (init + weight tying).
         super().__init__(config)
         self.model = VMistralModel(config, vision_model=vision_model)
         self.image_token_id = self.config.image_token_id
@@ -1373,12 +1516,15 @@ class VMistralForCausalLM(VMistralPreTrainedModel):
         self.post_init()
 
     def enable_input_require_grads(self):
+        # [FUNCTION DOC] Same as VMistralModel.enable_input_require_grads, hooking the text embeddings and the
+        # vision model's first leaf.
         """
         Enables the gradients for the input embeddings. This is useful for fine-tuning adapter weights while keeping
         the model weights fixed.
         """
 
         def get_lowest_module(module):
+            # [FUNCTION DOC] HELPER: follows the first child recursively and returns the first leaf module.
             if len(list(module.children())) == 0:
                 # If the module has no children, it is a leaf module (e.g., Linear, Conv2d, etc.)
                 return module
@@ -1387,6 +1533,7 @@ class VMistralForCausalLM(VMistralPreTrainedModel):
                 return get_lowest_module(list(module.children())[0])
 
         def make_inputs_require_grads(module, input, output):
+            # [FUNCTION DOC] HELPER: forward hook setting requires_grad on output.
             output.requires_grad_(True)
 
         self._text_require_grads_hook = self.get_input_embeddings().register_forward_hook(make_inputs_require_grads)
@@ -1395,27 +1542,36 @@ class VMistralForCausalLM(VMistralPreTrainedModel):
         )
 
     def get_input_embeddings(self):
+        # [FUNCTION DOC] Returns model.embed_tokens.
         return self.model.embed_tokens
 
     def set_input_embeddings(self, value):
+        # [FUNCTION DOC] Replaces model.embed_tokens by value.
         self.model.embed_tokens = value
 
     def get_output_embeddings(self):
+        # [FUNCTION DOC] Returns the tuple (lm_head, additional_fc or None).
         if self.out_additional_features > 0:
             return self.lm_head, self.additional_fc
         else:
             return self.lm_head, None
 
     def set_output_embeddings(self, new_embeddings):
+        # [FUNCTION DOC] Replaces lm_head by new_embeddings.
         self.lm_head = new_embeddings
 
     def set_decoder(self, decoder):
+        # [FUNCTION DOC] Replaces self.model by decoder.
         self.model = decoder
 
     def get_decoder(self):
+        # [FUNCTION DOC] Returns self.model.
         return self.model
 
     def tie_weights(self):
+        # [FUNCTION DOC] If config.tie_word_embeddings (default True), shares lm_head weight with the base
+        # embedding and additional_fc weight with the additional embedding (asserts matching sizes); then
+        # syncs out_features of the heads with the embedding sizes.
         """
         Overwrite `transformers.modeling_utils.PreTrainedModel.tie_weights` to handle the case of DecoupledLinear and DecoupledEmbedding.
         """
@@ -1452,6 +1608,12 @@ class VMistralForCausalLM(VMistralPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, VMistralCausalLMOutputWithPast]:
+        # [FUNCTION DOC] Runs self.model with all inputs, computes logits = concat(lm_head, additional_fc) in
+        # fp32. If labels are given, computes next-token cross-entropy on shifted logits/labels, restricted to
+        # positions where the shifted attention_mask is non-zero, ignoring label value image_token_id. Returns
+        # VMistralCausalLMOutputWithPast or a tuple (loss first when present).
+        # KNOWN ISSUE: the docstring says labels of -100 are ignored, but the loss ignores image_token_id
+        # instead (-100 labels would raise an index error).
         r"""
         Args:
             labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -1535,6 +1697,10 @@ class VMistralForCausalLM(VMistralPreTrainedModel):
         )
 
     def prepare_inputs_for_generation(self, input_ids, past=None, **kwargs):
+        # [FUNCTION DOC] Generation hook: drops image_hidden_states from kwargs (setting pixel_values to None
+        # when they were present, so images are not re-encoded), delegates to the module-level
+        # prepare_inputs_for_generation and removes token_type_ids. The past argument is passed through as an
+        # extra keyword and ignored (past_key_values arrives via kwargs).
         image_hidden_states = kwargs.pop("image_hidden_states", None)
         if image_hidden_states is not None:
             kwargs["pixel_values"] = None
@@ -1549,20 +1715,33 @@ class VMistralForCausalLM(VMistralPreTrainedModel):
         *args,
         **model_kwargs,
     ):
+        # [FUNCTION DOC] HELPER: generation hook delegating to expand_inputs_for_generation.
         return expand_inputs_for_generation(*args, **model_kwargs)
 
     @staticmethod
     def _update_model_kwargs_for_generation(outputs, model_kwargs, is_encoder_decoder):
+        # [FUNCTION DOC] HELPER: generation hook delegating to update_model_kwargs_for_generation
+        # (is_encoder_decoder ignored).
         return update_model_kwargs_for_generation(outputs, model_kwargs)
 
     @staticmethod
     def _reorder_cache(past, beam_idx):
+        # [FUNCTION DOC] HELPER: reorders every cached key/value tensor along the batch dimension by beam_idx
+        # for beam search; returns the new cache tuple.
         reordered_past = ()
         for layer_past in past:
             reordered_past += (tuple(past_state.index_select(0, beam_idx) for past_state in layer_past),)
         return reordered_past
 
     def get_model_tflops_per_batch_per_gpu(self, hparams, data_param, tokenizer, max_num_images, max_num_tokens=None):
+        # [FUNCTION DOC] Estimates training TFLOPs per batch per GPU from hparams (batch_size_per_gpu,
+        # grad_acc_size, gradient_checkpointing, model_config freeze_vision_layers), data_param.max_seq_len
+        # (or max_num_tokens), tokenizer.vocab_size and max_num_images: sum of language decoder (SwiGLU, with
+        # backward), modality projection, vision encoder ((image_size / patch_size)^2 tokens, backward only if
+        # not frozen) and perceiver resampler estimates. Returns the total.
+        # KNOWN ISSUE: the projection is counted on the resampler output length although it runs on the full
+        # vision sequence, and the perceiver input dim is taken as the vision hidden size although it receives
+        # LM-size features.
         config_vl_model = self.config
 
         language_embed_size = config_vl_model.hidden_size

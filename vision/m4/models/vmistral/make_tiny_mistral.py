@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+# [MODULE DOC] Script (run directly, no arguments) that builds a tiny randomly initialised MistralForCausalLM
+# for tests:
+# vocab 32000, hidden 16, intermediate 64, 2 layers, 4 heads, 1 KV head. Loads the Mistral-7B-v0.1 tokenizer
+# (network), runs a smoke generate on "This is a test", converts to fp16, saves model and tokenizer to
+# ./tiny-random-MistralForCausalLM (created in the current directory), reloads it to verify, and prints a
+# note.
 
 # This script creates a super tiny model that is useful inside tests, when we just want to test that
 # the machinery works, without needing to check the quality of the outcomes.

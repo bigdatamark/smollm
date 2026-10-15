@@ -1,3 +1,7 @@
+# [MODULE DOC] CLI pipeline step extracting HTML from downloaded WARC records: loads the WARC dataset from
+# disk (adding empty "html"/"html_error" columns if neither exists), maps HtmlExtractor over it with num_proc
+# processes, saves to --path_save_dir_html_dataset and logs the success rate (rows with empty html_error).
+# Configures INFO logging.
 import argparse
 import logging
 from multiprocessing import cpu_count
@@ -17,6 +21,8 @@ logger.setLevel(logging.INFO)
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses --path_warc_dataset, --path_save_dir_html_dataset and --num_proc (default
+    # cpu_count); returns the namespace.
     parser = argparse.ArgumentParser(description="Extract html from warc files.")
     parser.add_argument(
         "--path_warc_dataset",

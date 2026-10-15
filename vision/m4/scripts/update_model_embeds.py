@@ -1,3 +1,10 @@
+# [MODULE DOC] One-off script (hardcoded source/output opt_step dirs) that adds one extra new-token row to a
+# 2-shard pytorch_model-*.bin checkpoint: the mean of embed_tokens.weight is appended as a new row to both
+# embed_tokens.additional_embedding.weight and lm_head.additional_fc.weight. Writes the modified shards to the
+# output unwrapped_model directory, prints the new shapes, and copies the bin index, config.json,
+# generation_config.json and tokenizer directory unchanged.
+# KNOWN ISSUE: config.json is copied unchanged, so additional_vocab_size is not incremented to match the new
+# row; copytree fails if the output tokenizer directory already exists.
 import os
 import shutil
 
