@@ -1,3 +1,15 @@
+# [MODULE DOC] lighteval custom task definitions for SmolLM3. TASKS_TABLE starts with lighteval's
+# multilingual task table,
+# then adds base-model tasks in MCF/CF/Hybrid formulations with token- and char-normalized log-likelihood
+# accuracy (ARC, BoolQ CF, HellaSwag, CommonsenseQA, OpenBookQA, Winogrande, PIQA, SIQA, 57 MMLU subsets,
+# MMLU-Pro), generative TriviaQA, BBH (exact match), GSM8K (expression match), MATH CoT per subject (LaTeX
+# extractive match), and instruct-model tasks: MixEval easy/hard (free-form and multiple-choice, judged by
+# Flow-Judge-v0.1 on vLLM after stripping <think> reasoning blocks) and GSM-Plus (pass@1). Finally removes
+# PMI-normalized metrics from every task. Run as main it prints task info. Importing needs lighteval extras.
+# KNOWN ISSUE: mixeval_hard:freeform uses the multichoice judge metric instead of the freeform one.
+# KNOWN ISSUE: the freeform judge metric declares higher_is_better key "judge_score" while it emits
+# "judge_score_flow"; the MixEval notes say judge max_tokens=6144 but 1024 is passed.
+# KNOWN ISSUE: the main block prints a generator object instead of the task names.
 # Copyright 2020-2025 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -384,6 +396,8 @@ TASKS_TABLE.extend(triviqa_tasks)
 
 # BBH tasks
 def bbh_prompt(line, task_name: str = None):
+    # [FUNCTION DOC] Prompt function for BBH: query "Question: <input>\nAnswer: " with the target as the
+    # only choice (gold 0).
     return Doc(
         task_name=task_name,
         query="Question: " + line["input"] + "\nAnswer: ",
@@ -511,7 +525,22 @@ MAX_INPUT_TOKENS = 2048  # LightEval judges have max_model_len=8192 and require 
 
 
 class JudgeLLMMixEval(JudgeLLM):
+    # [CLASS DOC] JudgeLLM subclass for MixEval: strips reasoning tags from predictions and left-truncates
+    # long predictions
+    # so they fit the judge's MAX_INPUT_TOKENS (2048) budget.
     def compute(self, sample_ids: list[str], responses: list, formatted_docs: list[Doc], **kwargs) -> dict[str, float]:
+        # [FUNCTION DOC] Inputs: sample_ids, responses (per sample a list of model responses; uses
+        # response[0].result[0] and
+        # .generated_tokens[0]), formatted_docs (Doc with specific["question"], choices, golds). Removes
+        # <think>
+        # blocks and strips; if the generation exceeds MAX_INPUT_TOKENS tokens keeps only the last
+        # MAX_INPUT_TOKENS*4 characters. Prints a truncation count, then calls judge.evaluate_answer_batch
+        # with
+        # questions, predictions, options and the first gold. Returns a list (one per sample) of mappings with
+        # judge_score_<short_name>, user_prompt_<short_name> and judgement_<short_name>.
+        # KNOWN ISSUE: num_truncated is never incremented so the printed count is always 0; the return is a
+        # list,
+        # not the annotated dict; the docstring's two-turn behaviour is not implemented.
         """
         Compute the score of a generative task using a llm as a judge.
         The generative task can be multiturn with 2 turns max, in that case, we
@@ -667,6 +696,11 @@ TASKS_TABLE.extend(
 # GSMPlus #
 ###########
 def gsm_plus_prompt(line, task_name: str = None):
+    # [FUNCTION DOC] Prompt function for GSM-Plus: returns None (sample skipped) for "critical thinking"
+    # perturbations;
+    # otherwise a Doc whose query asks to solve the problem step by step ending with "Therefore, the final
+    # answer
+    # is: $\boxed{ANSWER}$. I hope it is correct", with the reference answer as the only choice (gold 0).
     # Prompt template adapted from
     # - simple-evals: https://github.com/openai/simple-evals/blob/6e84f4e2aed6b60f6a0c7b8f06bbbf4bfde72e58/math_eval.py#L17
     # - Llama 3: https://huggingface.co/datasets/meta-llama/Llama-3.2-1B-Instruct-evals/viewer/Llama-3.2-1B-Instruct-evals__math__details?views%5B%5D=llama_32_1b_instruct_evals__math__details

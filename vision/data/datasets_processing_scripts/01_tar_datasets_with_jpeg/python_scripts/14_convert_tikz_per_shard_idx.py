@@ -1,3 +1,5 @@
+# [MODULE DOC] Converts the DaTikZ (TikZ code) dataset into webdataset tar files.
+# Configures INFO logging and disables datasets caching at import time. As main: parses args and runs main.
 import argparse
 import logging
 from pathlib import Path
@@ -20,6 +22,8 @@ set_caching_enabled(False)
 
 
 def get_args():
+    # [FUNCTION DOC] Parses CLI args: --saving_dir, --num_examples_per_shard, --num_proc, --shard_idx
+    # (required), --min_num_shards (optional). Returns the namespace.
     parser = argparse.ArgumentParser()
     parser.add_argument("--saving_dir", type=Path, required=True)
     parser.add_argument("--num_examples_per_shard", type=int, required=True)
@@ -31,6 +35,8 @@ def get_args():
 
 
 def main(args):
+    # [FUNCTION DOC] Calls export_dataset_shard_idx_to_tar (deprecated wrapper, exports only shard number
+    # shard_idx) on the fixed dataset "HuggingFaceM4/datikz_modif:train" with type IMAGE_CAPTION_PAIRS.
     ds_type = DatasetTypes.IMAGE_CAPTION_PAIRS
 
     export_dataset_shard_idx_to_tar(

@@ -1,3 +1,11 @@
+# [MODULE DOC] Script that cleans the "argilla/ifeval-like-data" dataset into a verified IFEval-style
+# dataset: normalizes
+# per-instruction kwargs, drops rows with invalid kwargs or mutually conflicting instructions, scores each
+# response with lm-eval-harness's IFEval checker and keeps only rows passing prompt-level strict accuracy.
+# Module constants: INSTRUCTION_ARGS (instruction id -> list of kwarg names it takes), ALL_ARGUMENTS (set of
+# all kwarg names), IFEVAL_INSTRUCTION_CONFLICTS (instruction id -> set of ids it conflicts with, including
+# itself), LANGUAGE_TO_CODE (language name -> ISO code). Running as main pushes the result to the Hub as
+# config "filtered" of the same repo.
 import json
 from typing import TYPE_CHECKING
 
@@ -255,6 +263,15 @@ LANGUAGE_TO_CODE = {
 
 
 def build_instruction_kwargs(row: dict) -> dict:
+    # [FUNCTION DOC] Map function. Input row with "kwargs" (JSON string of one flat mapping of all args) and
+    # "instruction_id_list". Returns {"valid_kwargs_json": False} if kwargs is None, not valid JSON, or a
+    # "language" value is not a key of LANGUAGE_TO_CODE. Otherwise builds, for each instruction id in order, a
+    # mapping of just that instruction's args (per INSTRUCTION_ARGS; language names converted to ISO codes)
+    # and
+    # returns {"kwargs": JSON string of that list, "valid_kwargs_json": True}.
+    # KNOWN ISSUE: a kwarg name missing from the JSON raises KeyError (uncaught) instead of marking the row
+    # invalid; an unknown instruction id also raises KeyError; a language already given as a code ("en") is
+    # rejected as invalid.
     """Builds the list of `kwargs` for each instruction in `instruction_id_list`."""
     kwargs = row["kwargs"]
 
@@ -286,6 +303,10 @@ def build_instruction_kwargs(row: dict) -> dict:
 
 
 def filter_not_valid_rows(row: dict) -> bool:
+    # [FUNCTION DOC] Filter predicate. Returns False if row["valid_kwargs_json"] is falsy, or if any
+    # instruction in
+    # instruction_id_list conflicts (per IFEVAL_INSTRUCTION_CONFLICTS, excluding itself) with another
+    # instruction present in the list; True otherwise.
     """Filters out rows which their JSON kwargs are not valid or that the instructions
     in their `instruction_id_list` conflict each other."""
     valid_kwargs_json = row["valid_kwargs_json"]
@@ -306,6 +327,10 @@ def filter_not_valid_rows(row: dict) -> bool:
 
 
 def get_ifeval_results(row: dict) -> dict:
+    # [FUNCTION DOC] Map function. Copies the row, parses its "kwargs" JSON string into a list and calls
+    # lm-eval's IFEval
+    # process_results with [row["response"]]. Returns its result dict (prompt/inst level strict/loose acc);
+    # on any exception returns a dict with both prompt-level accs False and both inst-level lists empty.
     """Checks if the `response` correct is OK using the IFEval benchmark code from `lm-evaluation-harness`."""
     results = [row["response"]]
     doc = row.copy()
@@ -322,6 +347,11 @@ def get_ifeval_results(row: dict) -> dict:
 
 
 def get_dataset() -> "Dataset":
+    # [FUNCTION DOC] Loads the "train" split of argilla/ifeval-like-data (network), applies
+    # build_instruction_kwargs and
+    # filter_not_valid_rows, adds an integer "key" column (0..n-1), renames "instruction" to "prompt", keeps
+    # columns key/prompt/response/instruction_id_list/kwargs, adds IFEval results and keeps rows whose
+    # prompt_level_strict_acc is True. Returns the resulting Dataset.
     dataset = load_dataset("argilla/ifeval-like-data", split="train")
     dataset = dataset.map(build_instruction_kwargs)
     dataset = dataset.filter(filter_not_valid_rows)

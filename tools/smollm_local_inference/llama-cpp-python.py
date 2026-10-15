@@ -1,3 +1,7 @@
+# [MODULE DOC] Minimal example: downloads the SmolLM2-1.7B-Instruct q4_k_m GGUF from the Hub with
+# llama-cpp-python, runs a
+# raw completion for a planets question (max 32 tokens, stops at "Q:" or newline, echoes the prompt) and
+# prints the full output mapping. Defines no functions.
 from llama_cpp import Llama
 
 llm = Llama.from_pretrained(

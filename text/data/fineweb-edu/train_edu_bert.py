@@ -1,3 +1,8 @@
+# [MODULE DOC] Script that trains the FineWeb-Edu quality classifier: a BERT-like encoder with a
+# single-output regression
+# head on LLM-annotated educational scores (0-5), with frozen embeddings/encoder (only the head trains).
+# CLI args: --base_model_name, --dataset_name, --target_column (default "score"), --checkpoint_dir,
+# --output_model_name (Hub repo to push to).
 from transformers import (
     AutoTokenizer,
     DataCollatorWithPadding,
@@ -14,6 +19,11 @@ from sklearn.metrics import classification_report, confusion_matrix
 
 
 def compute_metrics(eval_pred):
+    # [FUNCTION DOC] Trainer metric callback. Input: eval_pred tuple (logits array, labels array). Rounds
+    # logits and clips to
+    # [0, 5] as int predictions, rounds labels to int, and computes macro precision/recall/F1 and accuracy via
+    # the `evaluate` library (loaded on every call, may hit network). Prints an sklearn classification report
+    # and confusion matrix. Returns a dict with keys precision, recall, f1_macro, accuracy.
     precision_metric = evaluate.load("precision")
     recall_metric = evaluate.load("recall")
     f1_metric = evaluate.load("f1")
@@ -45,6 +55,18 @@ def compute_metrics(eval_pred):
 
 
 def main(args):
+    # [FUNCTION DOC] Entry point. Loads the "train" split (cache /scratch/cosmo/cache/), clips the target
+    # column to int in
+    # [0, 5], casts it to a 6-class ClassLabel and does a stratified 90/10 train/test split (seed 42). Loads
+    # the
+    # model with num_labels=1 and no dropout, a tokenizer with max length min(model max positions, 512), using
+    # EOS as pad token if none. Tokenizes with preprocess, freezes model.bert embeddings and encoder
+    # parameters,
+    # and trains with Trainer (lr 3e-4, 20 epochs, batch 256/128, eval/save every 1000 steps, bf16, best
+    # model by
+    # f1_macro, push_to_hub to output_model_name). Saves the final model to <checkpoint_dir>/final.
+    # KNOWN ISSUE: assumes the model exposes a `.bert` attribute; non-BERT base models will raise
+    # AttributeError.
     dataset = load_dataset(
         args.dataset_name, split="train", cache_dir="/scratch/cosmo/cache/", num_proc=8
     )
@@ -75,6 +97,9 @@ def main(args):
         tokenizer.pad_token = tokenizer.eos_token
 
     def preprocess(examples):
+        # [FUNCTION DOC] Batched map function: tokenizes examples["text"] with truncation and adds "labels"
+        # as float32 values of the
+        # target column (regression targets). Returns the tokenized batch.
         batch = tokenizer(examples["text"], truncation=True)
         batch["labels"] = np.float32(examples[args.target_column])
         return batch

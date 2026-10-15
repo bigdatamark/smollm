@@ -1,3 +1,5 @@
+# [MODULE DOC] Converts one LAION image-caption dataset shard into webdataset tar files.
+# Configures INFO logging and disables datasets caching at import time. As main: parses args and runs main.
 import argparse
 import logging
 from pathlib import Path
@@ -20,6 +22,9 @@ set_caching_enabled(False)
 
 
 def get_args():
+    # [FUNCTION DOC] Parses CLI args: --shard_dir_path, --saving_dir, --num_proc, --shard_idx,
+    # --laoin_shard_idx (required), --num_examples_per_shard, --min_num_shards, --save_shard_idx (optional).
+    # Returns the namespace.
     parser = argparse.ArgumentParser()
     parser.add_argument("--shard_dir_path", type=Path, required=True)
     parser.add_argument("--saving_dir", type=Path, required=True)
@@ -34,6 +39,10 @@ def get_args():
 
 
 def main(args):
+    # [FUNCTION DOC] Keeps only the subdirectory of shard_dir_path named laoin_shard_idx and calls
+    # export_dataset_shard_idx_to_tar (deprecated wrapper, exports only shard number shard_idx) with type
+    # IMAGE_CAPTION_PAIRS.
+    # KNOWN ISSUE: passing --save_shard_idx makes the exporter raise NotImplementedError (option deprecated).
     shard_1_dirs = [
         shard_dir for shard_dir in args.shard_dir_path.iterdir() if shard_dir.name == str(args.laoin_shard_idx)
     ]

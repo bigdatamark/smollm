@@ -1,3 +1,5 @@
+# [MODULE DOC] Converts a saved WebSight mix dataset into webdataset tar files, optionally uploading to S3.
+# Configures INFO logging and disables datasets caching at import time. As main: parses args and runs main.
 import argparse
 import logging
 from pathlib import Path
@@ -20,6 +22,9 @@ set_caching_enabled(False)
 
 
 def get_args():
+    # [FUNCTION DOC] Parses CLI args: --ds_path, --saving_dir, --num_proc (required),
+    # --num_examples_per_shard, --s3_uri, --min_num_shards, --save_shard_prefix (default ""). Returns the
+    # namespace.
     parser = argparse.ArgumentParser()
     parser.add_argument("--ds_path", type=Path, required=True)
     parser.add_argument("--saving_dir", type=Path, required=True)
@@ -34,6 +39,8 @@ def get_args():
 
 
 def main(args):
+    # [FUNCTION DOC] Calls export_dataset_all_shard_idx_to_tar (exports every shard) on [ds_path] with type
+    # IMAGE_CAPTION_PAIRS and the shard prefix as given.
     ds_paths = [args.ds_path]
     ds_type = DatasetTypes.IMAGE_CAPTION_PAIRS
 

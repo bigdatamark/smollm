@@ -1,3 +1,8 @@
+# [MODULE DOC] Math answer normalization/extraction utilities (adapted from the Qwen2.5-Math eval parser)
+# used by the
+# SmolLM2 lighteval math tasks: pull the final answer out of a model completion or a ground-truth solution
+# and canonicalize LaTeX/plain-text answers so they can be compared as strings. Module data: unit_texts, a
+# list of MathQA unit words (plus their plural "s" forms) that strip_string removes.
 # Disclaimer: this code is adapted from the Qwen2.5-Math eval suite.
 # Source: https://github.com/QwenLM/Qwen2.5-Math/blob/cb098e13/evaluation/parser.py
 
@@ -6,6 +11,10 @@ from word2number import w2n
 
 
 def _fix_fracs(string):
+    # [FUNCTION DOC] HELPER: rewrites shorthand LaTeX fractions into braced form, e.g. "\frac12" ->
+    # "\frac{1}{2}" and
+    # "\frac1{2}" -> "\frac{1}{2}"; parts already starting with "{" are kept. Returns the original string
+    # unchanged if a non-braced \frac is followed by fewer than 2 characters.
     substrs = string.split("\\frac")
     new_str = substrs[0]
     if len(substrs) > 1:
@@ -38,6 +47,9 @@ def _fix_fracs(string):
 
 
 def _fix_a_slash_b(string):
+    # [FUNCTION DOC] HELPER: converts a plain "a/b" (exactly one slash, both sides integers or containing
+    # "sqrt", and the
+    # string round-trips exactly) into "\frac{a}{b}"; otherwise returns the input unchanged.
     if len(string.split("/")) != 2:
         return string
     a = string.split("/")[0]
@@ -55,11 +67,17 @@ def _fix_a_slash_b(string):
 
 
 def _fix_sqrt(string):
+    # [FUNCTION DOC] HELPER: adds braces to unbraced square roots, e.g. "\sqrt3" -> "\sqrt{3}" (applies to
+    # word characters
+    # directly following \sqrt).
     _string = re.sub(r"\\sqrt(\w+)", r"\\sqrt{\1}", string)
     return _string
 
 
 def convert_word_number(text: str) -> str:
+    # [FUNCTION DOC] HELPER: converts an English number phrase ("twenty one") to its digit string via
+    # word2number; returns the
+    # text unchanged if conversion fails (any exception swallowed).
     try:
         text = str(w2n.word_to_num(text))
     except:
@@ -207,6 +225,26 @@ unit_texts.extend([t + "s" for t in unit_texts])
 
 
 def strip_string(string, skip_unit=False):
+    # [FUNCTION DOC] Canonicalizes an answer string. Input: any value (converted to str), skip_unit (default
+    # False) to keep unit
+    # words. Steps in order: strip, drop newlines and trailing dots, remove "\!", normalize array/bmatrix to
+    # pmatrix, tfrac/dfrac -> frac, \neq/\leq/\geq -> \ne/\le/\ge, drop \left/\right and escaped braces,
+    # drop a
+    # trailing \text{...} unit, (unless skip_unit) remove unit_texts words bounded by non-word chars (2
+    # passes),
+    # drop degree symbols, dollar signs and \( \), convert word numbers, unwrap \text{...}, remove "x=",
+    # "y\in",
+    # "z\to"-style prefixes, \emptyset -> "{}", (-\infty,\infty) -> \mathbb{R}, drop percent signs, add
+    # leading
+    # zeros to ".5"-style decimals, unwrap alnum-only brackets, map "infinity"/"inf" to \infty, delete "and"
+    # and
+    # \mathbf and \mbox{...}, map j to i when no i is present, drop trailing zero decimals ("2.000" -> "2"),
+    # drop short "k=" prefixes, fix sqrt, remove all spaces, fix fracs and a/b. Returns the normalized string.
+    # KNOWN ISSUE: the quote-removal replace calls discard their results, so quotes are never removed.
+    # KNOWN ISSUE: the "+\inity" replacement is a typo that never matches; the bracket-unwrap condition can
+    # never
+    # be true (a string with brackets is not alphanumeric); deleting every "and"/"inf" substring can corrupt
+    # words or LaTeX commands (e.g. "\land", "\inf").
     string = str(string).strip()
     # linebreaks
     string = string.replace("\n", "")
@@ -348,6 +386,19 @@ def strip_string(string, skip_unit=False):
 
 
 def extract_answer(pred_str, data_name, use_last_number=True):
+    # [FUNCTION DOC] Extracts the predicted final answer from a completion. Inputs: pred_str (model text),
+    # data_name (dataset
+    # name: drives multiple-choice handling and unit skipping), use_last_number (default True). Removes the
+    # "ки" marker, then takes, by priority: text between "final answer is $" and "$. I hope" (Minerva style);
+    # the content of the last \boxed{...} with balanced braces (or text up to the next "$" if unbraced;
+    # returns
+    # "" if nothing follows "boxed"); the text after the last "he answer is" / "final answer is"; the text
+    # after
+    # the first Chinese "答案是" up to a blank line; else the last number in the comma-stripped text (or "" ).
+    # For sat_math/aqua/mmlu* the last standalone A-E letter is used if present. Then removes newlines and a
+    # leading ":" / trailing "." or "/", and normalizes with strip_string (skip_unit for
+    # carp_en/minerva_math).
+    # Returns the answer string.
     pred_str = pred_str.replace("\u043a\u0438", "")
 
     if "final answer is $" in pred_str and "$. I hope" in pred_str:
@@ -418,6 +469,13 @@ def extract_answer(pred_str, data_name, use_last_number=True):
 
 
 def parse_math_answer(text: str, data_name):
+    # [FUNCTION DOC] Extracts the ground-truth answer from a reference solution. data_name
+    # "math"/"minerva_math": uses
+    # extract_answer on the text; "gsm8k": takes the part after "####"; any other name raises
+    # NotImplementedError. Then maps \neq/\leq/\geq to \ne/\le/\ge and returns the answer string.
+    # KNOWN ISSUE: for gsm8k the answer is not stripped (keeps leading space) and text with more than one
+    # "####"
+    # raises ValueError on unpacking.
     # parse ground truth
     if data_name in ["math", "minerva_math"]:
         gt_cot = text

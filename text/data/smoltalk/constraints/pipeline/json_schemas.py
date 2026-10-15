@@ -1,3 +1,9 @@
+# [MODULE DOC] JSON schemas used as structured-output constraints for the IFEval-like pipeline. Defines no
+# functions.
+# IFEVAL_RESPONSE_VERIFICATION_FUNCTION_ARGUMENTS_JSON_SCHEMA: an object where every IFEval kwarg (language,
+# num_sentences, relation, keywords, letter, capital_relation, etc.) is required but nullable, with type,
+# minimum, enum and length constraints and no additional properties. IFEVAL_INSTRUCTION_ID_LIST_JSON_SCHEMA:
+# an object with a required "instruction_id_list" array whose items are enumerated IFEval instruction ids.
 IFEVAL_RESPONSE_VERIFICATION_FUNCTION_ARGUMENTS_JSON_SCHEMA = {
     "type": "object",
     "properties": {

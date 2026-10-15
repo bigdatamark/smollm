@@ -1,3 +1,8 @@
+# [MODULE DOC] Builds the input dataset for the Smol-Rewrite pipeline from FinePersonas sources (Hub,
+# network). Every
+# produced row has columns "system_prompt" (rewrite instruction: concise, friendly or professional),
+# "instruction" (the text to rewrite) and "kind_of_content" ("email", "linkedin_post" or "tweet").
+# CONFIG_NAME_TO_SYSTEM_PROMPT maps each email dataset config to its rewrite system prompt.
 from typing import TYPE_CHECKING, Any
 
 from datasets import concatenate_datasets, load_dataset
@@ -19,6 +24,10 @@ CONFIG_NAME_TO_SYSTEM_PROMPT = {
 
 
 def get_dataset() -> "Dataset":
+    # [FUNCTION DOC] Concatenates: concise rewrites of "default" emails, friendly rewrites of
+    # "unfriendly_email_conversations",
+    # professional rewrites of "unprofessional_email_conversations", LinkedIn posts (concise and professional
+    # copies) and tweets (professional). Returns the concatenated Dataset.
     concise = get_finepersonas_emails_dataset("default")
     unfriendly = get_finepersonas_emails_dataset("unfriendly_email_conversations")
     unprofessional = get_finepersonas_emails_dataset(
@@ -48,7 +57,14 @@ def get_dataset() -> "Dataset":
 def get_finepersonas_emails_dataset(
     config_name: str, n: int | None = None
 ) -> "Dataset":
+    # [FUNCTION DOC] Loads the "train" split of argilla/FinePersonas-Synthetic-Email-Conversations config
+    # `config_name`, maps
+    # each row to its first email body with the config's system prompt (dropping all original columns), drops
+    # rows without emails, and if `n` is given keeps the first n rows. Returns the Dataset.
     def get_first_email(row: dict[str, Any]) -> dict[str, Any]:
+        # [FUNCTION DOC] HELPER: map function; returns system_prompt/instruction(=first email
+        # "body")/kind_of_content="email", or
+        # all empty strings when row["formatted_emails"] is empty so the row can be filtered out.
         formatted_emails = row["formatted_emails"]
         if not formatted_emails:
             return {"system_prompt": "", "instruction": "", "kind_of_content": ""}
@@ -75,6 +91,9 @@ def get_finepersonas_emails_dataset(
 def get_finepersonas_linkedin_posts(
     n: int | None = None, system_prompt: str = REWRITE_CONCISE_SYSTEM_PROMPT
 ) -> "Dataset":
+    # [FUNCTION DOC] Loads the "linkedin_posts" config of argilla-warehouse/FinePersonas-Extra-Stuff, keeps
+    # formatted_linkedin_post renamed to "instruction", adds the given system_prompt (default concise) and
+    # kind_of_content="linkedin_post"; optionally keeps only the first n rows.
     dataset: "Dataset" = load_dataset(  # type: ignore
         "argilla-warehouse/FinePersonas-Extra-Stuff",
         name="linkedin_posts",
@@ -92,6 +111,9 @@ def get_finepersonas_linkedin_posts(
 def get_finepersonas_tweets(
     n: int | None = None, system_prompt: str = REWRITE_CONCISE_SYSTEM_PROMPT
 ) -> "Dataset":
+    # [FUNCTION DOC] Same as get_finepersonas_linkedin_posts but for the "tweets" config (column
+    # formatted_tweet) with
+    # kind_of_content="tweet".
     dataset: "Dataset" = load_dataset(  # type: ignore
         "argilla-warehouse/FinePersonas-Extra-Stuff", name="tweets", split="train"
     )
@@ -105,4 +127,5 @@ def get_finepersonas_tweets(
 
 
 def select_n(dataset: "Dataset", n: int) -> "Dataset":
+    # [FUNCTION DOC] HELPER: returns the first n rows of the dataset (raises if n exceeds its length).
     return dataset.select(range(n))

@@ -1,3 +1,11 @@
+# [MODULE DOC] distilabel pipeline (run on Ray) that generates IFEval-like instruction data: a
+# MagpieGenerator with
+# Qwen2.5-72B-Instruct on vLLM (tensor parallel 8, temperature 0.8) produces 500k instruction/response rows
+# under IFEVAL_SYSTEM_PROMPT; IFEvalInstructionIdListAssignator labels constraint ids and
+# IFEvalKwargsAssignator extracts their kwargs, both with JSON-schema structured output (temperature 0.2).
+# When run as main, executes the pipeline (with cache) and pushes the Distiset privately to
+# "argilla-warehouse/tons-of-ifeval-like-data". Requires GPUs, Ray and network. The pipeline object is built
+# at import time. IFEVAL_INSTRUCTION_CONFLICTS (id -> conflicting ids) is defined here but unused.
 from distilabel.llms import vLLM
 from distilabel.pipeline import Pipeline
 from distilabel.steps.tasks import MagpieGenerator

@@ -1,3 +1,15 @@
+# [MODULE DOC] Top-level script (runs entirely at import; meant for a Slurm CPU node) that builds a
+# concatenated SFT
+# dataset mixture for VLM fine-tuning, organized in NUM_MAX_MINI_EPOCHS (50) "mini-epochs". Several
+# MAPPING_DATASET_TO_PROPORTION* dicts give per-dataset relative weights; CHOSEN_MIXTURE selects one (MIX_9)
+# together with hard-coded /fsx output and temp paths. Steps: load each chosen dataset with load_from_disk
+# from COMMON_PATH_DATASETS/<name>; fix punctuation in all but rendered_text and large_docvqa; normalize
+# weights by the max weight; split each dataset into int(1/normalized weight) shards and repeat the shard
+# list cyclically to 50 entries (so heavier datasets appear fully in every mini-epoch and lighter ones only
+# one shard per mini-epoch); for each mini-epoch concatenate one entry per dataset and shuffle (seed = index);
+# save each mini-epoch to the temp dir in a process pool, reload them, concatenate and save the final dataset
+# to PATH_SAVE_DATASET (NUM_PROC 32 processes).
+# KNOWN ISSUE: int(1/normalized weight) truncates, so non-integer ratios give inexact proportions.
 """
 srun --pty --cpus-per-task=96 --mem-per-cpu=20G --partition=hopper-prod bash -i
 srun --pty --cpus-per-task=32 --partition=hopper-cpu --qos high bash -i
@@ -479,6 +491,10 @@ all_datasets = {ds_name: load_from_disk(COMMON_PATH_DATASETS / ds_name) for ds_n
 
 
 def map_func_replace_wrong_punctuation(example):
+    # [FUNCTION DOC] Map function over an example with "texts" (list of {"user", "assistant", ...} turns):
+    # in each user and
+    # assistant string replaces "?." with "?" and "!." with "?". Mutates and returns the example.
+    # KNOWN ISSUE: "!." is replaced by "?" instead of "!", turning exclamations into questions.
     texts = example["texts"]
     for idx in range(len(texts)):
         texts[idx]["user"] = texts[idx]["user"].replace("?.", "?")
@@ -518,6 +534,10 @@ for idx_mini_epoch in tqdm(range(NUM_MAX_MINI_EPOCHS)):
 
 
 def save_dataset(idx_mini_epoch):
+    # [FUNCTION DOC] HELPER (pool worker): saves mini-epoch dataset idx_mini_epoch from the global
+    # all_concat_datasets to
+    # PATH_SAVE_TMP_DATASETS/<idx> using NUM_PROC // NUM_MAX_MINI_EPOCHS processes.
+    # KNOWN ISSUE: with NUM_PROC 32 and 50 mini-epochs that integer division is 0, an invalid num_proc value.
     ds_mini_epoch = all_concat_datasets[idx_mini_epoch]
     ds_mini_epoch.save_to_disk(PATH_SAVE_TMP_DATASETS / str(idx_mini_epoch), num_proc=NUM_PROC // NUM_MAX_MINI_EPOCHS)
 

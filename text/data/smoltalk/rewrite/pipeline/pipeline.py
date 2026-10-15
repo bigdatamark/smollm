@@ -1,3 +1,8 @@
+# [MODULE DOC] distilabel pipeline (on Ray) for Smol-Rewrite: a TextGeneration task with
+# Qwen2.5-72B-Instruct on vLLM
+# (tensor parallel 8, temperature 0.2, 1024 new tokens, 4 replicas) rewrites each "instruction" following its
+# "system_prompt" column. When run as main, builds the input with dataset.get_dataset, runs with cache and
+# pushes to "HuggingFaceTB/smollm-v2-rewriting". Defines no functions.
 from dataset import get_dataset
 from distilabel.llms import vLLM
 from distilabel.pipeline import Pipeline

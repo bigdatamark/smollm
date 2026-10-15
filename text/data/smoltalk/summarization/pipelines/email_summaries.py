@@ -1,3 +1,9 @@
+# [MODULE DOC] distilabel pipeline generating two summaries (one-sentence "maximum brevity" and
+# up-to-3-sentence) for each
+# email of argilla/FinePersonas-Synthetic-Email-Conversations, using Qwen2.5-72B-Instruct on vLLM (8 GPUs,
+# temperature 0.2) and SYSTEM_PROMPT_EMAIL_SUMMARIZATION. EXTRACT_SUMMARIES_REGEX parses the markdown answer.
+# As main: explodes conversations into single emails, runs without cache and pushes privately to
+# "argilla-warehouse/Email-Summaries".
 from typing import Any, TYPE_CHECKING
 
 import re
@@ -49,11 +55,15 @@ EXTRACT_SUMMARIES_REGEX = re.compile(
 
 
 class EmailSummarization(Task):
+    # [CLASS DOC] distilabel Task: input column "email", outputs "maximum_brevity_summary" and "summary".
     @property
     def inputs(self) -> "StepColumns":
+        # [FUNCTION DOC] Property: ["email"].
         return ["email"]
 
     def format_input(self, input: dict[str, Any]) -> "FormattedInput":
+        # [FUNCTION DOC] Returns a chat with the email summarization system prompt and the email as user
+        # message.
         return [
             {"role": "system", "content": SYSTEM_PROMPT_EMAIL_SUMMARIZATION},
             {"role": "user", "content": input["email"]},
@@ -61,11 +71,15 @@ class EmailSummarization(Task):
 
     @property
     def outputs(self) -> "StepColumns":
+        # [FUNCTION DOC] Property: ["maximum_brevity_summary", "summary"].
         return ["maximum_brevity_summary", "summary"]
 
     def format_output(
         self, output: str | None, input: dict[str, Any] | None = None
     ) -> dict[str, Any]:
+        # [FUNCTION DOC] Matches EXTRACT_SUMMARIES_REGEX at the start of the output (case-insensitive, dot
+        # matches newline) and
+        # returns both captured sections stripped; returns both None if output is None or does not match.
         if output is None:
             return {"maximum_brevity_summary": None, "summary": None}
 
@@ -104,6 +118,14 @@ if __name__ == "__main__":
     )
 
     def explode_emails(rows: dict[str, list[Any]]) -> dict[str, list[Any]]:
+        # [FUNCTION DOC] Batched map function (defined only under main): for each row's non-empty
+        # formatted_emails list, emits one
+        # row per email with "conversation_id" (row index) and "email" formatted as "Subject: <subject>",
+        # blank line,
+        # body. Returns the new column mapping (original columns are removed by the caller).
+        # KNOWN ISSUE: conversation_id is the index within the map batch (enumerate), not a global id, so
+        # ids repeat
+        # across batches.
         formatted_emails = rows["formatted_emails"]
         exploded_rows = {"conversation_id": [], "email": []}
 

@@ -1,3 +1,10 @@
+# [MODULE DOC] Launcher that tokenizes the FineMath / InfiWebMath subsets (3+ and 4+) for continual
+# pretraining with
+# datatrove on Slurm. Module-level argparse parser: positional output_name (unused), --n_tasks (default 100),
+# --max_toks per output file (default 1e9), --tokenizer (default Llama-3.2-1B), --text_key. As main, for
+# each subset submits a SlurmPipelineExecutor job (hopper-cpu partition, 32 CPUs, 20h) that reads parquet
+# from the Hub and writes shuffled tokenized files to /fsx/elie_bakouch/data/<name>; logs under /fsx paths.
+# KNOWN ISSUE: uses args.email, which is never defined by the parser, so the script raises AttributeError.
 import argparse
 import os
 

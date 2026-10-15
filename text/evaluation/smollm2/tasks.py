@@ -1,3 +1,11 @@
+# [MODULE DOC] lighteval custom task definitions for the SmolLM2 evaluation suite. Builds TASKS_TABLE (the
+# list lighteval
+# loads via --custom-tasks): log-likelihood multiple-choice tasks (ARC easy/challenge, OpenBookQA, HellaSwag,
+# CommonsenseQA, Winogrande, PIQA, MMLU-Pro, MMLU-STEM, MMLU cloze), generative TriviaQA and GSM8K, 27 BBH
+# subsets (exact match, few-shot from train), and MATH with a custom quasi-exact-match metric
+# (quasi_exact_match_math) that normalizes both prediction and gold with math_utils.parse_math_answer.
+# All datasets are pinned to specific Hub revisions. Run as main it prints task info.
+# KNOWN ISSUE: the main block prints a generator object instead of the task names.
 import re
 import numpy as np
 
@@ -9,7 +17,14 @@ from .math_utils import parse_math_answer
 
 
 def prompt_hellaswag(line, task_name: str = None):
+    # [FUNCTION DOC] Prompt function: builds a Doc whose query is "<activity_label>: <ctx_a> <Capitalized
+    # ctx_b> " and whose
+    # choices are the endings prefixed by a space, all cleaned by preprocess; gold_index is int(label), or -1
+    # when label is empty (test split).
     def preprocess(text):
+        # [FUNCTION DOC] HELPER: HellaSwag text cleanup (from the eval harness): " [title]" -> ". ", removes
+        # any "[...]" bracketed
+        # artifacts and collapses double spaces once. Returns the cleaned string.
         """Comes from AiHarness"""
         # text = text.strip()
         # NOTE: Brackets are artifacts of the WikiHow dataset portion of HellaSwag.
@@ -27,6 +42,9 @@ def prompt_hellaswag(line, task_name: str = None):
     )
 
 def prompt_commonsense_qa(line, task_name: str = None):
+    # [FUNCTION DOC] Prompt function: Doc with the question as query, choices " <text>" for each option,
+    # gold index = position
+    # of the stripped answerKey in the choice labels (ValueError if absent), empty instruction.
     return Doc(
         task_name=task_name,
         query=line["question"],
@@ -36,6 +54,11 @@ def prompt_commonsense_qa(line, task_name: str = None):
     )
 
 def mmlu_pro_mc_prompt(line, task_name: str = None):
+    # [FUNCTION DOC] Prompt function for MMLU-Pro: query is a header naming the category (underscores ->
+    # spaces), the question,
+    # lettered options "A. ...", one per line, then "Answer:"; choices are the letters, gold is
+    # answer_index, and
+    # the header is also the instruction.
     options = line["options"]
     letters = [chr(ord("A") + i) for i in range(len(options))]
     topic = line["category"].replace('_', ' ')
@@ -53,6 +76,10 @@ def mmlu_pro_mc_prompt(line, task_name: str = None):
     )
 
 def mmlu_cloze_prompt(line, task_name: str = None):
+    # [FUNCTION DOC] Prompt function for MMLU in cloze form (no options shown): query "The following are
+    # questions about
+    # <subject>.\nQuestion: <question>\nAnswer:", choices are the answer texts prefixed with a space, gold is
+    # int(answer), instruction is the header line.
     """MMLU prompt without choices"""
     topic = line["subject"]
     prompt = f"The following are questions about {topic.replace('_', ' ')}.\nQuestion: "
@@ -67,6 +94,9 @@ def mmlu_cloze_prompt(line, task_name: str = None):
     )
 
 def bbh_prompt(line, task_name: str = None):
+    # [FUNCTION DOC] Prompt function for BBH: query "Question: <input>\nAnswer: " with the single target as
+    # the only choice
+    # (gold index 0), used with exact match generation.
     return Doc(
         task_name=task_name,
         query="Question: " + line["input"] + "\nAnswer: ",
@@ -75,6 +105,10 @@ def bbh_prompt(line, task_name: str = None):
     )
 
 def prompt_math(line, task_name: str = None):
+    # [FUNCTION DOC] Prompt function for MATH: query is the problem plus an instruction to reason step by
+    # step and put the final
+    # answer in \boxed{}; the single choice/gold is the full reference solution (answer extracted by the
+    # metric).
     return Doc(
         task_name=task_name,
         query=f"{line['problem']}\nPlease reason step by step, and put your final answer within \\boxed{{}}.\n\n",
@@ -303,6 +337,7 @@ TASKS_TABLE.extend(MATH_TASKS)
 
 ## MMLU ##
 class CustomMMLUEvaluationTask(LightevalTaskConfig):
+    # [CLASS DOC] LightevalTaskConfig subclass with MMLU-oriented defaults (unused in this module's tables).
     def __init__(
         self,
         name,
@@ -321,6 +356,13 @@ class CustomMMLUEvaluationTask(LightevalTaskConfig):
         output_regex=None,
         frozen=False,
     ):
+        # [FUNCTION DOC] Forwards all arguments to LightevalTaskConfig. Defaults: hf_repo "lighteval/mmlu",
+        # metrics
+        # loglikelihood_acc and loglikelihood_acc_norm_nospace, evaluation split "test", few-shot split "dev",
+        # suite ["custom"], generation_size -1, frozen False; other options None.
+        # KNOWN ISSUE: list defaults (metric, evaluation_splits, suite) are mutable default arguments shared
+        # across
+        # instances.
         super().__init__(
             name=name,
             prompt_function=prompt_function,

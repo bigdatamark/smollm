@@ -1,3 +1,6 @@
+# [MODULE DOC] Converts COCO image-caption HF dataset shards into webdataset tar files (part of the VLM data
+# prep).
+# Configures INFO logging and disables datasets caching at import time. As main: parses args and runs main.
 import argparse
 import logging
 from pathlib import Path
@@ -20,6 +23,9 @@ set_caching_enabled(False)
 
 
 def get_args():
+    # [FUNCTION DOC] Parses CLI args: --shard_dir_path (dir of saved dataset dirs), --saving_dir,
+    # --num_examples_per_shard, --num_proc, --shard_idx (all required), --min_num_shards (optional). Returns
+    # the namespace.
     parser = argparse.ArgumentParser()
     parser.add_argument("--shard_dir_path", type=Path, required=True)
     parser.add_argument("--saving_dir", type=Path, required=True)
@@ -32,6 +38,9 @@ def get_args():
 
 
 def main(args):
+    # [FUNCTION DOC] Uses every subdirectory of shard_dir_path as a dataset path and calls
+    # export_dataset_shard_idx_to_tar (deprecated wrapper, exports only shard number shard_idx) with type
+    # IMAGE_CAPTION_PAIRS and the CLI options.
     shard_1_dirs = [shard_dir for shard_dir in args.shard_dir_path.iterdir()]
     ds_type = DatasetTypes.IMAGE_CAPTION_PAIRS
 

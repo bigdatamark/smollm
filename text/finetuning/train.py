@@ -1,3 +1,8 @@
+# [MODULE DOC] Supervised fine-tuning script (adapted from TRL / gemma-peft examples) that LoRA-fine-tunes a
+# SmolLM2 causal
+# LM on a text dataset (default: Python files from bigcode/the-stack-smol) with TRL's SFTTrainer. As main:
+# parses args, seeds, creates output_dir, silences transformers logging and calls main. Reads HF_TOKEN from
+# the environment; logs to Weights & Biases; optionally pushes to the Hub.
 # Code adapted from https://github.com/huggingface/trl/blob/main/examples/research_projects/stack_llama/scripts/supervised_finetuning.py
 # and https://huggingface.co/blog/gemma-peft
 import argparse
@@ -22,6 +27,13 @@ from trl import SFTConfig, SFTTrainer
 
 
 def get_args():
+    # [FUNCTION DOC] Defines and parses CLI arguments: model_id, tokenizer_id (empty -> model_id),
+    # dataset_name, subset (passed
+    # as data_dir), split, streaming, dataset_text_field, max_seq_length, max_steps, micro_batch_size,
+    # gradient_accumulation_steps, weight_decay, bf16, use_bnb, attention_dropout, learning_rate,
+    # lr_scheduler_type, warmup_steps, seed, output_dir, num_proc, push_to_hub, repo_id. Returns the
+    # namespace.
+    # KNOWN ISSUE: boolean flags use type=bool, so any non-empty value (including "False") parses as True.
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_id", type=str, default="HuggingFaceTB/SmolLM2-1.7B")
     parser.add_argument("--tokenizer_id", type=str, default="")
@@ -52,6 +64,12 @@ def get_args():
 
 
 def main(args):
+    # [FUNCTION DOC] Builds a LoRA config (r 16, alpha 32, dropout 0.05, q_proj/v_proj), an optional 4-bit
+    # NF4 bitsandbytes
+    # config (use_bnb), loads the model on this process's device (accelerate PartialState) with the given
+    # attention_dropout and the tokenizer, loads the dataset (num_proc defaults to the CPU count unless
+    # streaming), then trains with SFTTrainer (paged 8-bit AdamW, log every 10 steps, wandb, run name
+    # "train-<model>", hub id repo_id). Prints progress messages. Writes checkpoints to output_dir.
     # config
     lora_config = LoraConfig(
         r=16,

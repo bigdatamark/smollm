@@ -1,12 +1,24 @@
+# [MODULE DOC] Abstract base class for the smol_tools assistants: loads a GGUF model with llama-cpp (shared
+# across tool
+# instances through a class-level cache), warms it up, and offers a streaming chat-completion helper.
 from abc import ABC, abstractmethod
 from typing import Generator, List, Dict, Any, Union, Tuple
 from llama_cpp import Llama
 
 class SmolTool(ABC):
+    # [CLASS DOC] Abstract base for a text tool. Class attribute _model_cache maps (model_repo,
+    # model_filename) to a loaded
+    # Llama instance, shared by all subclasses. Instance attributes: system_prompt, prefix_text, model.
+    # Subclasses implement process.
     # Class-level cache for model instances
     _model_cache: Dict[Tuple[str, str], Llama] = {}
 
     def __init__(self, model_repo: str, model_filename: str, system_prompt: str, prefix_text: str = "", n_ctx: int = 8192):
+        # [FUNCTION DOC] Stores system_prompt and prefix_text (default ""); if the (repo, filename) pair is
+        # not cached, prints a
+        # message and downloads/loads it via Llama.from_pretrained with context n_ctx (default 8192),
+        # caching it.
+        # Sets self.model; for a newly loaded model only, runs _warm_up.
         self.system_prompt = system_prompt
         self.prefix_text = prefix_text
         
@@ -33,6 +45,9 @@ class SmolTool(ABC):
             self._warm_up()
 
     def _warm_up(self):
+        # [FUNCTION DOC] HELPER: prints status, runs process on a fixed test sentence and fully consumes the
+        # generator, then prints
+        # that the tool is ready.
         """Warm up the model with a test prompt"""
         print(f"Warming up {self.__class__.__name__}...")
         test_text = "This is a test message to warm up the model."
@@ -43,6 +58,8 @@ class SmolTool(ABC):
 
     @abstractmethod
     def process(self, text: str) -> Generator[str, None, None]:
+        # [FUNCTION DOC] Abstract: process input text and yield output (typically the growing response text)
+        # as it is generated.
         """Process the input text and yield results as they're generated"""
         pass
 
@@ -55,6 +72,12 @@ class SmolTool(ABC):
         repeat_penalty: float = 1.2,
         max_tokens: int = 256
     ) -> Generator[str, None, None]:
+        # [FUNCTION DOC] HELPER: streams a llama-cpp chat completion for messages with the given sampling
+        # params (temperature 0.4,
+        # top_p 0.9, top_k 50, repeat_penalty 1.2, max_tokens 256 by default). Yields the accumulated output
+        # so far
+        # after each non-empty content chunk (cumulative text, not deltas); stops at "<end_action>" or
+        # "<|endoftext|>" chunks.
         """Helper method to create chat completions with standard parameters"""
         output = ""
         for chunk in self.model.create_chat_completion(

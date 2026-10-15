@@ -1,3 +1,16 @@
+# [MODULE DOC] Monolithic, top-level script (everything runs at import, section by section; intended to be
+# run piecewise
+# interactively on a Slurm node) that converts dozens of vision-language and text-only datasets into one
+# common SFT schema and saves each with save_to_disk under /fsx/hugo/fine_tuning_datasets* paths. Schema
+# (FEATURES): "images" = list of decoded images, "texts" = list of turns {"user", "assistant", "source"}.
+# Sources include Hub datasets (load_dataset) and raw downloads under /fsx/hugo (JSON, pickle, image files)
+# for captioning, VQA, OCR/document, chart/table, diagram/math, multi-image and text-only instruction data.
+# Common patterns: prompts randomly chosen from per-dataset prompt lists; short-answer suffixes from
+# PROMPTS_ANSWER_SHORTLY / QUESTION_BRIEVETY_HINT(_MULTI_TURN); multiple-choice formatted as "Question: ...
+# Choices: A. ... Answer with the letter." with answer "Answer: <letter>"; datasets.map with NUM_PROC (48)
+# processes; examples per output noted in trailing comments. Sets PIL MAX_IMAGE_PIXELS=None and allows
+# truncated images. Uses the random module without a seed, so outputs are not reproducible. Heavy disk,
+# network and CPU side effects.
 """
 srun --pty --cpus-per-task=96 --mem-per-cpu=20G --gpus=1 --partition=hopper-prod --qos high bash -i
 srun --pty --cpus-per-task=96 --partition=hopper-cpu --qos high bash -i
@@ -90,6 +103,9 @@ QUESTION_BRIEVETY_HINT_MULTI_TURN = [
 
 
 def convert_img_to_bytes(img_path, format):
+    # [FUNCTION DOC] HELPER: opens the image at img_path with PIL, re-encodes it in the given format (e.g.
+    # "png", "JPEG") into
+    # memory and returns the encoded bytes.
     img = Image.open(img_path)
     buffer = BytesIO()
     img.save(buffer, format=format)
@@ -99,6 +115,9 @@ def convert_img_to_bytes(img_path, format):
 
 
 def _convert_to_rgb(image):
+    # [FUNCTION DOC] HELPER: returns the image unchanged if already RGB; otherwise alpha-composites it (as
+    # RGBA) onto a white
+    # background and returns the RGB result, so transparent areas become white.
     # `image.convert("RGB")` would only work for .jpg images, as it creates
     # a wrong background for transparent images. The call to `alpha_composite`
     # handles this case
@@ -112,6 +131,12 @@ def _convert_to_rgb(image):
 
 
 def correct_casing(text, is_question=False):
+    # [FUNCTION DOC] HELPER: capitalizes text whose first char is lowercase and appends "." unless the text
+    # already ends with
+    # "." or is_question is True. Returns the new string.
+    # KNOWN ISSUE: str.capitalize lowercases the rest of the string (breaks acronyms/proper nouns), and an
+    # empty
+    # answer becomes ".".
     if text and text[0].islower():
         text = text.capitalize()
     if not text.endswith(".") and not is_question:
@@ -120,13 +145,23 @@ def correct_casing(text, is_question=False):
 
 
 def lowercase_first_letter(text):
+    # [FUNCTION DOC] HELPER: lowercases the first character if it is uppercase; returns the string.
     if text and text[0].isupper():
         text = text[0].lower() + text[1:]
     return text
 
 
 def format_numbers_in_string(input_str):
+    # [FUNCTION DOC] HELPER: rewrites every unsigned number token in input_str: absolute values > 10000
+    # become scientific
+    # notation with 2 decimals (trailing zeros/dot stripped), others are printed with up to 2 decimals if the
+    # whole input string contains a "." anywhere, else rounded to an integer. Returns the new string.
+    # KNOWN ISSUE: the comment says 1000 but the threshold is 10000; stripping zeros from scientific notation
+    # can corrupt the exponent (e.g. "1.00e+10" -> "1.00e+1"); the decimal decision looks at the whole string,
+    # not the matched number.
     def format_number(match):
+        # [FUNCTION DOC] HELPER: regex substitution callback implementing the per-number formatting
+        # described above.
         number = float(match.group(0))
         # Check if the number is greater than 1000
         if abs(number) > 10000:
@@ -176,6 +211,9 @@ prompts_screen2words = [
 
 
 def map_transform_screen2words(example):
+    # [FUNCTION DOC] Map for rico-screen2words: one image, a random screenshot-description prompt, assistant
+    # = cased caption,
+    # source "Screen2Words".
     example["images"] = [example["image"]]
     example["texts"] = [
         {
@@ -218,6 +256,9 @@ ds_textcaps = load_dataset("HuggingFaceM4/TextCaps", split="train")
 
 
 def map_transform_textcaps(example):
+    # [FUNCTION DOC] Map for TextCaps: one image, random captioning prompt, assistant = one random reference
+    # caption (cased),
+    # source "TextCaps".
     example["images"] = [example["image"]]
     example["texts"] = [
         {
@@ -303,6 +344,9 @@ ds_vqav2 = load_dataset("HuggingFaceM4/VQAv2_modif", "train", split="train")
 
 
 def map_transform_vqav2(example):
+    # [FUNCTION DOC] Map for VQAv2: question + random short-answer suffix; assistant = most frequent answer
+    # (cased); source
+    # "VQAv2".
     example["images"] = [example["image"]]
     question = example["question"] + random.choice(PROMPTS_ANSWER_SHORTLY)
     answers = Counter(example["answers"])
@@ -326,6 +370,8 @@ ds_okvqa = load_dataset("HuggingFaceM4/OK-VQA_modif", split="train")
 
 
 def map_transform_okvqa(example):
+    # [FUNCTION DOC] Map for OK-VQA: same as VQAv2 (most frequent answer, short-answer suffix), source
+    # "OK-VQA".
     example["images"] = [example["image"]]
     question = example["question"] + random.choice(PROMPTS_ANSWER_SHORTLY)
     answers = Counter(example["answers"])
@@ -349,6 +395,9 @@ ds_gqa = load_dataset("Graphcore/gqa", split="train")
 
 
 def map_transform_gqa(example):
+    # [FUNCTION DOC] Map for GQA: loads the image from /fsx/hugo/gqa/images/<basename of image_id> as JPEG
+    # bytes, question +
+    # short-answer suffix, assistant = cased label, source "GQA".
     path_image = os.path.join("/fsx/hugo/gqa/images", os.path.basename(example["image_id"]))
     image_bytes = convert_img_to_bytes(img_path=path_image, format="JPEG")
     question = example["question"] + random.choice(PROMPTS_ANSWER_SHORTLY)
@@ -432,6 +481,10 @@ prompts_vsr = [
 
 
 def map_transform_vsr(example):
+    # [FUNCTION DOC] Map for VSR (zero-shot split): loads the COCO train2017 image as JPEG bytes and asks
+    # whether the caption
+    # (random template) is correct, "Answer yes or no."; assistant "Yes."/"No." from label. On any error sets
+    # images and texts to None (rows filtered out afterwards).
     try:
         path_image = os.path.join("/fsx/hugo/coco/train2017/", os.path.basename(example["image"]))
         image_bytes = convert_img_to_bytes(img_path=path_image, format="JPEG")
@@ -467,6 +520,10 @@ with open("/fsx/hugo/visual7w/dataset_v7w_telling.json", "r") as f:
 
 
 def make_question_answer_visual7w(question, multiple_choices, answer):
+    # [FUNCTION DOC] HELPER: inserts the correct answer at a random position among the wrong
+    # multiple_choices (copy) and
+    # formats a lettered multiple-choice prompt ending "Answer with the letter.". Returns (prompt,
+    # "Answer: <letter>").
     letters_cap = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"]
     prompt = f"Question: {question}\nChoices:\n"
     all_choices = deepcopy(multiple_choices)
@@ -546,6 +603,8 @@ prompts_iam = [
 
 
 def map_transform_iam(example):
+    # [FUNCTION DOC] Map for IAM handwritten sentences: random transcription prompt, assistant = the text,
+    # source "IAM".
     example["images"] = [example["image"]]
     example["texts"] = [{"user": random.choice(prompts_iam), "assistant": example["text"], "source": "IAM"}]
     return example
@@ -587,6 +646,9 @@ prompts_diagram_image_to_text = [
 
 
 def map_transform_diagram_image_to_text(example):
+    # [FUNCTION DOC] Map for diagram_image_to_text: random diagram-explanation prompt, assistant = text,
+    # source
+    # "Diagram-Image-to-Text".
     example["images"] = [example["image"]]
     example["texts"] = [
         {
@@ -696,6 +758,9 @@ ds_infographic_vqa = load_from_disk("/fsx/hugo/fine_tuning_datasets/infographic_
 
 
 def filter_big_images_infovqa(example):
+    # [FUNCTION DOC] Filter predicate: False if any image has aspect ratio above 4 (either way) or a side
+    # above 1960 px; else
+    # True. Used for Infographic-VQA.
     images = example["images"]
     for image in images:
         width, height = image.size
@@ -880,6 +945,9 @@ ds_scienceqa = ds_scienceqa.filter(lambda example: example["image"] is not None,
 
 
 def map_transform_scienceqa(example):
+    # [FUNCTION DOC] Map for ScienceQA (image subset): prompt = optional "Lecture: ...", "Question: ...",
+    # optional "Hint: ...",
+    # lettered choices and "Answer with the letter."; assistant "Answer: <letter>"; source "ScienceQA".
     question = example["question"]
 
     all_choices = example["choices"]
@@ -1002,6 +1070,9 @@ prompts_nlvr2 = [f"{prefix} {prompt} {suffix}" for prompt in prompts_nlvr2]
 
 
 def map_transform_nlvr2(example):
+    # [FUNCTION DOC] Map for NLVR2: two images (left, right); prompt explains the image order, asks if the
+    # sentence holds
+    # (random template) and "Answer yes or no."; assistant "Yes." if label string is "True" else "No.".
     example["images"] = [example["left_image"], example["right_image"]]
     answer = "Yes." if (int2str_nlvr2(values=example["label"]) == "True") else "No."
     example["texts"] = [
@@ -1087,6 +1158,9 @@ prompts_hm = [
 
 
 def map_transform_hm(example):
+    # [FUNCTION DOC] Map for Hateful Memes: random "is this meme hateful"-style question + "Answer yes or
+    # no."; assistant
+    # "Yes." when label is 1 else "No."; source "Hateful Memes".
     example["images"] = [example["image"]]
     question = random.choice(prompts_hm)
     question += "\nAnswer yes or no."
@@ -1270,6 +1344,8 @@ prompts_datikz = [
 
 
 def map_transform_datikz(example):
+    # [FUNCTION DOC] Map for DaTikZ: random "generate TikZ code" prompt, assistant = TikZ code, source
+    # "DaTikz".
     example["images"] = [example["image"]]
     example["texts"] = [
         {
@@ -1321,6 +1397,9 @@ prompts_websight = [
 
 
 def map_transform_websight(example):
+    # [FUNCTION DOC] Map for WebSight v0.2 (first 500k rows): random "generate HTML for this screenshot"
+    # prompt, assistant =
+    # HTML text, source "WebSight_v02".
     example["images"] = [example["image"]]
     example["texts"] = [
         {
@@ -1397,6 +1476,8 @@ ds_pathvqa = load_dataset("flaviagiammarino/path-vqa", split="train")
 
 
 def map_transform_pathvqa(example):
+    # [FUNCTION DOC] Map for PathVQA: capitalized question, cased answer, source "PathVQA" (no short-answer
+    # suffix).
     example["images"] = [example["image"]]
     example["texts"] = [
         {
@@ -1426,6 +1507,8 @@ ds_vqarad = load_dataset("flaviagiammarino/vqa-rad", split="train")
 
 
 def map_transform_vqarad(example):
+    # [FUNCTION DOC] Map for VQA-RAD: capitalized question + short-answer suffix, cased answer, source
+    # "VQA-RAD".
     example["images"] = [example["image"]]
     example["texts"] = [
         {
@@ -1519,6 +1602,8 @@ ds_plotqa = load_from_disk("/fsx/hugo/fine_tuning_datasets/plotqa")
 
 
 def map_transform_plotqa(example):
+    # [FUNCTION DOC] Fix-up map for the saved PlotQA dataset: replaces " ?" with "?" in every user turn (in
+    # place).
     for idx in range(len(example["texts"])):
         example["texts"][idx]["user"] = example["texts"][idx]["user"].replace(" ?", "?")
     return example
@@ -1542,6 +1627,9 @@ ds_visualmrc = load_from_disk("/fsx/hugo/fine_tuning_datasets/visual_mrc")
 
 
 def map_transform_visualmrc(example):
+    # [FUNCTION DOC] Fix-up map for saved VisualMRC: user " ?" -> "?"; assistant has trailing "?", "." and
+    # spaces stripped
+    # then a single "." appended, and any "?." replaced by ".".
     texts = example["texts"]
     for idx in range(len(texts)):
         texts[idx]["user"] = texts[idx]["user"].replace(" ?", "?")
@@ -1569,11 +1657,15 @@ ds_openhermes = load_from_disk("/fsx/hugo/fine_tuning_datasets/openhermes")
 
 
 def map_remove_none_images(example):
+    # [FUNCTION DOC] Map that sets "images" to an empty list (text-only datasets whose images were None).
     example["images"] = []
     return example
 
 
 def filter_openhermes(example):
+    # [FUNCTION DOC] Filter predicate for text datasets: False if any assistant turn (lowercased) contains
+    # "language model",
+    # "sorry" or "openai"; else True. Reused for many text datasets.
     texts = example["texts"]
     for text in texts:
         assistant_text = text["assistant"].lower()
@@ -1593,6 +1685,9 @@ ds_openhermes.save_to_disk("/fsx/hugo/fine_tuning_datasets/new_openhermes", num_
 
 
 def filter_special_tokens(example):
+    # [FUNCTION DOC] Filter predicate: False if any turn's user+assistant text contains a model special
+    # token ("<unk>", "<s>",
+    # "</s>", "<fake_token_around_image>", "<image>", "<end_of_utterance>"); else True.
     special_tokens = ["<unk>", "<s>", "</s>", "<fake_token_around_image>", "<image>", "<end_of_utterance>"]
     texts = example["texts"]
     for text in texts:
@@ -1633,6 +1728,8 @@ ds_orcamath = load_dataset("microsoft/orca-math-word-problems-200k", split="trai
 
 
 def map_transform_orcamath(example):
+    # [FUNCTION DOC] Map for Orca-Math 200k: text-only (no images), user = question, assistant = answer,
+    # source "OrcaMath".
     example["images"] = []
     example["texts"] = [
         {
@@ -1670,6 +1767,7 @@ ds_metamathqa = load_dataset("meta-math/MetaMathQA", split="train")
 
 
 def map_transform_metamathqa(example):
+    # [FUNCTION DOC] Map for MetaMathQA: text-only, user = query, assistant = response, source "MetaMathQA".
     example["images"] = []
     example["texts"] = [
         {
@@ -1708,6 +1806,8 @@ ds_math_instruct = load_dataset("TIGER-Lab/MathInstruct", split="train")
 
 
 def map_transform_math_instruct(example):
+    # [FUNCTION DOC] Map for MathInstruct: text-only, user = instruction, assistant = output, source
+    # "MathInstruct".
     example["images"] = []
     example["texts"] = [
         {
@@ -1746,6 +1846,8 @@ ds_camel_ai_math = load_dataset("camel-ai/math", split="train")
 
 
 def map_transform_camel_ai_math(example):
+    # [FUNCTION DOC] Map for camel-ai/math: text-only, user = message_1, assistant = message_2, source
+    # "CamelAIMath".
     example["images"] = []
     example["texts"] = [
         {
@@ -1784,6 +1886,8 @@ ds_atlas_math_sets = load_dataset("AtlasUnified/atlas-math-sets", split="train")
 
 
 def map_transform_atlas_math_sets(example):
+    # [FUNCTION DOC] Map for atlas-math-sets: text-only, user = instruction, assistant = output, source
+    # "AtlasMathSets".
     example["images"] = []
     example["texts"] = [
         {
@@ -1822,6 +1926,8 @@ ds_goat = load_dataset("tiedong/goat", split="train")
 
 
 def map_transform_goat(example):
+    # [FUNCTION DOC] Map for Goat arithmetic: text-only, user = instruction, assistant = output, source
+    # "Goat".
     example["images"] = []
     example["texts"] = [
         {
@@ -1860,6 +1966,8 @@ ds_camel_ai_physics = load_dataset("camel-ai/physics", split="train")
 
 
 def map_transform_camel_ai_physics(example):
+    # [FUNCTION DOC] Map for camel-ai/physics: text-only, message_1 -> user, message_2 -> assistant, source
+    # "CamelAIPhysics".
     example["images"] = []
     example["texts"] = [
         {
@@ -1898,6 +2006,8 @@ ds_camel_ai_biology = load_dataset("camel-ai/biology", split="train")
 
 
 def map_transform_camel_ai_biology(example):
+    # [FUNCTION DOC] Map for camel-ai/biology: text-only, message_1 -> user, message_2 -> assistant, source
+    # "CamelAIBiology".
     example["images"] = []
     example["texts"] = [
         {
@@ -1936,6 +2046,8 @@ ds_camel_ai_chemistry = load_dataset("camel-ai/chemistry", split="train")
 
 
 def map_transform_camel_ai_chemistry(example):
+    # [FUNCTION DOC] Map for camel-ai/chemistry: text-only, message_1 -> user, message_2 -> assistant, source
+    # "CamelAIChemistry".
     example["images"] = []
     example["texts"] = [
         {
@@ -1974,6 +2086,9 @@ ds_dolly = load_dataset("databricks/databricks-dolly-15k", split="train")
 
 
 def map_transform_dolly(example):
+    # [FUNCTION DOC] Map for Dolly 15k: text-only; user = context + newline + instruction when context is
+    # non-empty, else the
+    # instruction; assistant = response; source "Dolly".
     example["images"] = []
     instruction = example["instruction"]
     context = example["context"]
@@ -2039,6 +2154,10 @@ for image_id, indices_ds in tqdm(map_image_id_to_ds_id.items()):
 
 
 def data_generator():
+    # [FUNCTION DOC] HELPER generator for Dataset.from_generator: yields {"images", "texts"} pairs from the
+    # CLEVR-Math
+    # dict built above (examples grouped by image id, many questions per image).
+    # KNOWN ISSUE: the name is redefined later for MapQA, shadowing this definition.
     for images, texts in zip(dict_clevr_math["images"], dict_clevr_math["texts"]):
         yield {"images": images, "texts": texts}
 
@@ -2189,6 +2308,10 @@ ds_unigeo = datasets.Dataset.from_dict(dict_unigeo, features=FEATURES)
 
 
 def func_filter_unigeo(example, black_threshold=20, mostly_black_threshold=50):
+    # [FUNCTION DOC] Filter predicate for UniGeo: converts the first image to RGB and counts pixels whose R,
+    # G and B are all
+    # below black_threshold (default 20); keeps the example if black pixels are under mostly_black_threshold
+    # percent (default 50). Pure-Python per-pixel loop (slow).
     # Removes the illisible images containing a lot of black pixels
     img = example["images"][0]
     img = img.convert("RGB")
@@ -2263,6 +2386,9 @@ for path_image, dict_ids in tqdm(mapping_path_image_to_dict_id.items()):
 
 
 def data_generator():
+    # [FUNCTION DOC] HELPER generator for Dataset.from_generator: yields {"images", "texts"} pairs from
+    # merged_dict_mapqa
+    # (MapQA questions grouped per map image).
     for images, texts in zip(merged_dict_mapqa["images"], merged_dict_mapqa["texts"]):
         yield {"images": images, "texts": texts}
 
@@ -2283,6 +2409,9 @@ ds_llava_conv = load_dataset("jxu124/llava_conversation_58k", split="train")
 
 
 def map_transform_llava_conv(example):
+    # [FUNCTION DOC] Map for llava_conversation_58k: loads /fsx/hugo/<image_path> as JPEG bytes; each dialog
+    # turn (asserted to
+    # be a [user, assistant] pair) becomes a turn with source "Llava Conv".
     example["images"] = [
         {
             "bytes": convert_img_to_bytes(img_path=os.path.join("/fsx/hugo", example["image_path"]), format="JPEG"),
@@ -2327,6 +2456,8 @@ ds_lnqa = load_dataset("vikhyatk/lnqa", split="train")
 
 
 def map_transform_lnqa(example):
+    # [FUNCTION DOC] Map for vikhyatk/lnqa: one image; every QA pair in example["qa"] becomes a turn, source
+    # "LNQA".
     example["images"] = [example["image"]]
     example["texts"] = [
         {
@@ -2360,6 +2491,10 @@ ds_sharegpt4o = load_dataset("OpenGVLab/ShareGPT-4o", "image_caption", split="im
 
 
 def map_transform_sharegpt4o(example):
+    # [FUNCTION DOC] Map for ShareGPT-4o image captions: loads /fsx/hugo/ShareGPT-4o/images/<image> as JPEG
+    # bytes; pairs
+    # consecutive human/gpt messages (asserted alternating, even count) into turns with "<image>" removed and
+    # whitespace stripped; source "ShareGPT-4o".
     example["images"] = [
         {
             "bytes": convert_img_to_bytes(
@@ -2426,6 +2561,9 @@ ds_geo170k = datasets.Dataset.from_dict(dict_geo170k)
 
 
 def map_transform_geo170k(example):
+    # [FUNCTION DOC] Map for Geo170K (conversations pre-merged per image): loads
+    # /fsx/hugo/Geo170K/images/<image> as PNG bytes
+    # and converts human/gpt message pairs into turns ("<image>" removed), source "Geo170K".
     example["images"] = [
         {
             "bytes": convert_img_to_bytes(
@@ -2563,6 +2701,9 @@ prompts_cord = [
 
 
 def map_transform_cord(example):
+    # [FUNCTION DOC] Map for CORD-v2 receipts: one image, random "extract information as JSON" prompt;
+    # assistant = the
+    # ground_truth "gt_parse" object re-serialized as indented JSON; source "Cord-v2".
     example["images"] = [example["image"]]
     output_json_ex = json.loads(example["ground_truth"])["gt_parse"]
     output_json_ex = json.dumps(output_json_ex, indent=4)
@@ -2639,6 +2780,13 @@ prompts_chart_captioning = [
 
 
 def map_transform_chartgemma(example):
+    # [FUNCTION DOC] Map for ChartGemma: decodes the image bytes with PIL and rewrites the instruction by
+    # task: "program of
+    # thought" -> strip tag, append "Answer by giving a code."; "Chart to Markdown" -> random markdown prompt;
+    # "Fact Checking" -> support/refute question with "Answer by saying 'Supports' or 'Refutes'."; caption
+    # task ->
+    # random captioning prompt; "Let's think step by step" -> append a "Final Answer: ..." format instruction.
+    # Assistant = original output; source "ChartGemma".
     image = Image.open(BytesIO(example["image"]))
     example["images"] = [image]
     user = example["input"]
@@ -2720,6 +2868,11 @@ prompts_aokvqa_2 = [
 
 
 def map_transform_aokvqa(example):
+    # [FUNCTION DOC] Map for A-OKVQA, randomly choosing one of two formats: (0) question + random
+    # choose-among-4 instruction +
+    # "Options: <choices joined>." with the cased correct choice as answer; (1) same with an answer+rationale
+    # instruction, answer "Answer: <choice>." plus "\nRationale: <random rationale>". Source "A-OKVQA".
+    # KNOWN ISSUE: str.capitalize on the joined options lowercases every option except the first character.
     task = random.randint(a=0, b=1)
     if task == 0:
         example["images"] = [example["image"]]
@@ -2767,6 +2920,9 @@ ds_mimic_sd = ds_mimic_sd.rename_column("images", "images_og")
 
 
 def map_transform_mimic_sd(example):
+    # [FUNCTION DOC] Map for MIMIC-IT "SD" (spot-the-difference): user = instruction, assistant = answer,
+    # images = the
+    # original image list (column renamed images_og); source "MIMIC-IT - SN".
     instruction = example["instruction"]
     answer = example["answer"]
     example["texts"] = [{"user": instruction, "assistant": answer, "source": "MIMIC-IT - SN"}]
@@ -2793,6 +2949,9 @@ cgd_instructions = cgd_instructions.rename_column("images", "images_og")
 
 
 def map_transform_mimic_cgd(example):
+    # [FUNCTION DOC] Map for MIMIC-IT CGD instructions: looks up the two referenced images by id in the
+    # CGD_Images dataset
+    # (global id_to_idx mapping) and pairs them with instruction/answer; source "MIMIC-IT - SN".
     instruction = example["instruction"]
     answer = example["answer"]
     example["texts"] = [{"user": instruction, "assistant": answer, "source": "MIMIC-IT - SN"}]
@@ -2834,6 +2993,12 @@ prompts_pgm_1 = [
 
 
 def map_transform_pgm(example):
+    # [FUNCTION DOC] Map for PGM (Procedurally Generated Matrices): builds a 3x3 grid image of the 8 context
+    # panels with black
+    # 2-px borders and a downloaded question-mark image (global question_mark_image) in the last cell, then
+    # with probability 0.5 pairs it with the correct answer panel (assistant "Yes") or a random wrong one
+    # ("No"); user = random "does this image complete the sequence" prompt; source "PGM".
+    # KNOWN ISSUE: panels[3*i+j] is pasted at column i, row j, so a row-major panel list is drawn transposed.
     panels = example["panels"]
     choices = example["choices"]
     target = example["target"]
@@ -2919,6 +3084,15 @@ prompts_raven_2 = [
 
 
 def map_transform_raven(example):
+    # [FUNCTION DOC] Map for RAVEN (shuffled union of 7 configs), randomly choosing: (1) binary task as in
+    # PGM with 1-px
+    # borders, the candidate panel (correct or random wrong, borders drawn on it in place) and assistant
+    # "Yes."/"No." with a yes/no prompt; (2) a single white canvas with the 3x3 grid (question mark last)
+    # and the
+    # 8 choices laid out in two rows labeled A-H (Hack-Bold font from a hard-coded home path), assistant = the
+    # target letter. Source "RAVEN".
+    # KNOWN ISSUE: depends on a font file at /admin/home/victor/...; border loops use width for y and height
+    # for x (only correct for square panels).
     panels = example["panels"]
     choices = example["choices"]
     target = example["target"]
@@ -3041,6 +3215,9 @@ ds_textvqa = load_dataset("textvqa", split="train")
 
 
 def map_transform_textvqa(example):
+    # [FUNCTION DOC] Map for TextVQA: picks the most frequent annotator answer (random among ties); user =
+    # cased question +
+    # random QUESTION_BRIEVETY_HINT; assistant = cased answer; source "textvqa".
     example["images"] = [example["image"]]
 
     # Get the answer(s) with the highest count (agreement among annotators), or a random one if there is a tie.
@@ -3081,6 +3258,9 @@ Question: {question}"""
 
 
 def map_transform_textvqa_new_prompt(example):
+    # [FUNCTION DOC] Same answer selection as map_transform_textvqa, but the user prompt is the strict
+    # short-answer template
+    # (prompt_template_textvqa_new_prompt) and the answer is kept raw (no casing/period).
     example["images"] = [example["image"]]
 
     # Get the answer(s) with the highest count (agreement among annotators), or a random one if there is a tie.
@@ -3115,6 +3295,9 @@ ds_ocrvqa = load_dataset("howard-hou/OCR-VQA", split="train")
 
 
 def map_transform_ocrvqa(example):
+    # [FUNCTION DOC] Map for OCR-VQA: one turn per (question, answer) pair: cased question + brevity hint,
+    # cased answer;
+    # source "ocrvqa".
     example["images"] = [example["image"]]
 
     # Get an answer at random
@@ -3144,6 +3327,8 @@ ds_docvqa = load_dataset("HuggingFaceM4/DocumentVQA", split="train")
 
 
 def map_transform_docvqa(example):
+    # [FUNCTION DOC] Map for DocumentVQA: random reference answer (cased), cased question + brevity hint;
+    # source "docvqa".
     example["images"] = [example["image"]]
 
     # Get an answer at random
@@ -3172,6 +3357,8 @@ Question: {question}"""
 
 
 def filter_large_images_docvqa_new_prompt(example, max_side=3 * 980):
+    # [FUNCTION DOC] Filter predicate: False if the image width or height exceeds max_side (default 2940
+    # px); else True.
     width, height = example["image"].size
     if (width > max_side) or (height > max_side):
         return False
@@ -3179,6 +3366,9 @@ def filter_large_images_docvqa_new_prompt(example, max_side=3 * 980):
 
 
 def map_transform_docvqa_new_prompt(example):
+    # [FUNCTION DOC] Map for DocumentVQA with the terse-answer template (prompt_template_docvqa_new_prompt)
+    # and a random raw
+    # reference answer; source "docvqa".
     example["images"] = [example["image"]]
     #
     # Get an answer at random
@@ -3211,6 +3401,7 @@ ds_clevr = load_dataset("HuggingFaceM4/clevr", "default", split="train")
 
 
 def map_transform_ds_clevr(example):
+    # [FUNCTION DOC] Map for CLEVR: cased question + brevity hint, cased answer, source "clevr".
     example["images"] = [example["image"]]
     question = correct_casing(example["question"], is_question=True) + random.choice(QUESTION_BRIEVETY_HINT)
     answer = correct_casing(example["answer"])
@@ -3285,6 +3476,10 @@ ds_pmcvqa = load_dataset("HuggingFaceM4/PMC-VQA", split="train")
 
 
 def map_transform_ds_pmcvqa(example):
+    # [FUNCTION DOC] Map for PMC-VQA: user = optional caption line, question and the four choice lines (each
+    # stripped); with
+    # probability 0.5 assistant = the full text of the labeled choice, else just the label letter; source
+    # "pmc-vqa".
     example["images"] = [example["image"]]
 
     # When there is a caption, add it as context to the question
@@ -3381,6 +3576,9 @@ ds_sharegpt4v = load_dataset("HuggingFaceM4/sharegpt4v-nowebimages", split="trai
 
 
 def map_transform_sharegpt4v(example):
+    # [FUNCTION DOC] Map for sharegpt4v-nowebimages: one image; each {"human", "gpt"} pair becomes a turn
+    # with "<image>"
+    # markers (and their adjacent newline) removed; source "sharegpt4v".
     example["images"] = [example["image"]]
 
     user_questions = [
@@ -3456,6 +3654,7 @@ ds_dvqa = load_dataset("HuggingFaceM4/DVQA", split="train")
 
 
 def map_transform_ds_dvqa(example):
+    # [FUNCTION DOC] Map for DVQA: cased question + brevity hint, cased answer, source "dvqa".
     example["images"] = [example["image"]]
     question = correct_casing(example["question"], is_question=True) + random.choice(QUESTION_BRIEVETY_HINT)
     answer = correct_casing(example["answer"])
@@ -3618,6 +3817,11 @@ ds_plotqa = load_dataset("HuggingFaceM4/PlotQA-multi-turn", split="train")
 
 
 def map_transform_ds_plotqa(example):
+    # [FUNCTION DOC] Map for PlotQA-multi-turn (many QAs per chart): with probability 0.5 a multi-turn
+    # dialogue whose first
+    # user turn is prefixed with a QUESTION_BRIEVETY_HINT_MULTI_TURN instruction and later turns have no hint;
+    # otherwise every question gets its own brevity hint. Answers go through format_numbers_in_string then
+    # correct_casing. Source "plotqa".
     example["images"] = [example["image"]]
     if random.random() < 0.5:
         first_example = [
@@ -3724,6 +3928,8 @@ ds_vismrc = load_dataset("HuggingFaceM4/VisualMRC-nobbox", split="train")
 
 
 def map_transform_ds_vismrc(example):
+    # [FUNCTION DOC] Map for VisualMRC-nobbox: one turn per qa_data item with cased question/answer; source
+    # "vismrc".
     example["images"] = [example["image"]]
 
     example["texts"] = [
@@ -3738,6 +3944,8 @@ def map_transform_ds_vismrc(example):
 
 
 def filter_fn_ds_vismrc(example):
+    # [FUNCTION DOC] Filter predicate: False if the image aspect ratio exceeds 4 in either direction; else
+    # True.
     width, height = example["image"].size
     if width / height > 4 or height / width > 4:
         return False
@@ -3759,6 +3967,9 @@ ds_openhermes = load_dataset("teknium/OpenHermes-2.5", split="train")
 
 
 def map_transform_openhermes(example):
+    # [FUNCTION DOC] Map for OpenHermes-2.5 (text-only): pairs human and gpt messages in order into cased
+    # turns (asserting
+    # equal counts); images set to [None] (fixed later by map_remove_none_images); source "openhermes".
     example["images"] = [None]
     questions = [ex["value"] for ex in example["conversations"] if ex["from"] == "human"]
     answers = [ex["value"] for ex in example["conversations"] if ex["from"] == "gpt"]
@@ -3790,6 +4001,10 @@ ds_lima = load_dataset("GAIR/lima", split="train")
 
 
 def map_transform_lima(example):
+    # [FUNCTION DOC] Map for LIMA: even-indexed conversation entries are user turns and odd ones assistant
+    # turns; drops a
+    # trailing unanswered user message; cased turns; images [None].
+    # KNOWN ISSUE: the source is labeled "openhermes" instead of "lima".
     example["images"] = [None]
     questions = [example["conversations"][i] for i in range(len(example["conversations"])) if i % 2 == 0]
     answers = [example["conversations"][i] for i in range(len(example["conversations"])) if i % 2 != 0]
@@ -3824,6 +4039,11 @@ ds_tatqa = datasets.load_dataset("HuggingFaceM4/TATQA-rendered-tables", split="t
 
 
 def map_transform_ds_tatqa(example):
+    # [FUNCTION DOC] Map for TAT-QA rendered tables: the first user turn is the paragraphs joined by
+    # newlines, then the first
+    # question; each question gets "\nAnswer scale should be: <scale>." when a scale exists. Assistant =
+    # derivation
+    # + "\nAnswer: <answer>" when a derivation exists, else the answer. Turns are cased; source "tatqa".
     example["images"] = [example["image"]]
     user_texts = [
         (
@@ -3892,6 +4112,11 @@ ds_robut_wikisql = datasets.load_dataset("HuggingFaceM4/ROBUT-wikisql-rendered-t
 
 
 def map_transform_ds_robut_wikisql(example):
+    # [FUNCTION DOC] Map for ROBUT-WikiSQL rendered tables: user = cased question, assistant = answers
+    # joined by ", " (cased).
+    # With probability 0.15 adds a "parse the table" turn whose answer is str(table), placed before or after
+    # the
+    # QA turn at random. Source "robut_wikisql".
     example["images"] = [example["image"]]
     assistant_texts = ", ".join(example["answers"])
     example["texts"] = [
@@ -3947,6 +4172,7 @@ ds_robut_wtq = datasets.load_dataset("HuggingFaceM4/ROBUT-wtq-rendered-tables", 
 
 
 def map_transform_ds_robut_wtq(example):
+    # [FUNCTION DOC] Same as map_transform_ds_robut_wikisql for ROBUT-WTQ, source "robut_wtq".
     example["images"] = [example["image"]]
     assistant_texts = ", ".join(example["answers"])
     example["texts"] = [
@@ -3980,10 +4206,20 @@ ds_robut_wtq.save_to_disk("/fsx/hugo/fine_tuning_datasets/robut_wtq", num_proc=N
 
 
 def translate_nested_expression(expr):
+    # [FUNCTION DOC] Converts a FinQA prefix program such as "divide(add(1, 2), const_100)" to an infix string
+    # "((1 + 2) / 100)": strips "const_" prefixes, then (if any known operator name occurs) recursively splits
+    # "op(a, b)" at the top-level comma and maps divide/multiply/add/subtract/greater/less/exp to / * + - >
+    # < **.
+    # Returns the input unchanged when no operator occurs.
+    # KNOWN ISSUE: only handles a single top-level call; programs with several comma-chained steps or unknown
+    # operators (KeyError) are not supported.
     symbols = {"divide": "/", "multiply": "*", "add": "+", "subtract": "-", "greater": ">", "less": "<", "exp": "**"}
     expr = re.sub(r"const_(\d+)", r"\1", expr)
 
     def parse(e):
+        # [FUNCTION DOC] HELPER: recursive parser; finds the comma at nesting depth 1 and returns "(<left>
+        # <symbol> <right>)",
+        # or the string unchanged if it contains no such comma (a leaf).
         depth = 0
         for i, char in enumerate(e):
             if char == "(":
@@ -4004,6 +4240,9 @@ def translate_nested_expression(expr):
 
 # only happens with finqa and not sure we want to apply to other datasets, so I'm making this just for this one
 def correct_casing_finqa(text, is_question=False, is_context=False):
+    # [FUNCTION DOC] HELPER: like correct_casing but for FinQA: capitalizes a lowercase first letter and,
+    # unless is_context,
+    # appends "." for non-questions or "?" for questions when missing.
     if text and text[0].islower():
         text = text.capitalize()
     if not is_context:
@@ -4018,6 +4257,14 @@ ds_finqa = datasets.load_dataset("HuggingFaceM4/FINQA-rendered-tables", split="t
 
 
 def map_transform_ds_finqa(example):
+    # [FUNCTION DOC] Map for FinQA rendered tables: context = cased pre_text (keeping entries longer than 3
+    # chars, "following
+    # table" -> "table") and post_text lines; user = context + question (ends with "?"); assistant = optional
+    # "\nRationale: <explanation>", "\nComputations: <infix program>" (program_re translated unless it
+    # references
+    # "table") and "\nAnswer: <answer>". Source "finqa".
+    # KNOWN ISSUE: if program_re is empty, translated_program is unbound and the map raises UnboundLocalError;
+    # the assistant text starts with a newline.
     example["images"] = [example["image"]]
     example["pre_text"] = [
         correct_casing_finqa(pre_text, is_question=False, is_context=True).replace("following table", "table")
@@ -4070,6 +4317,10 @@ ds_multihiertt = datasets.load_dataset("HuggingFaceM4/MultiHiertt-rendered-table
 
 
 def map_transform_ds_multihiertt(example):
+    # [FUNCTION DOC] Map for MultiHiertt rendered tables: user = question; assistant = optional
+    # "\nComputations: <program>" then
+    # "\nAnswer: <answer>" (cased). The images column is kept by removing all columns except the first.
+    # KNOWN ISSUE: relies on the first column being "images"; the assistant text starts with a newline.
     user_text = example["question"]
     assistant_text = ""
     if len(example["translated_program"]) > 0:
@@ -4114,6 +4365,10 @@ ds_hitab = datasets.load_dataset("HuggingFaceM4/HiTab-rendered-tables", split="t
 
 
 def map_transform_ds_finqa(example):
+    # [FUNCTION DOC] Map for HiTab rendered tables (despite its name): one cased turn per question/answer
+    # pair; with probability
+    # 0.15 adds a "parse the table" turn (str(table)) before or after; source "hitab".
+    # KNOWN ISSUE: reuses the name map_transform_ds_finqa, shadowing the FinQA map function defined above.
     example["images"] = [example["image"]]
     user_texts = [user_text for user_text in example["questions"]]
     assistant_texts = [assistant_text for assistant_text in example["answers"]]
@@ -4165,6 +4420,9 @@ ds_chart2text_pew = datasets.load_dataset("heegyu/chart2text_pew", split="train"
 
 
 def map_transform_chart2text(example, config):
+    # [FUNCTION DOC] Map for chart2text (config "statista" uses first_caption, otherwise "caption"): random
+    # explain-this-graph
+    # prompt, cased stripped caption, source "chart2text-<config>". Mojibake rows are filtered out afterwards.
     example["images"] = [example["image"]]
     example["texts"] = [
         {
@@ -4225,6 +4483,9 @@ ds_robut_sqa = datasets.load_dataset(
 
 
 def map_transform_ds_robut_sqa(example):
+    # [FUNCTION DOC] Map for ROBUT-SQA rendered tables: one cased turn per question/answer pair; with
+    # probability 0.10 inserts
+    # a "parse the table" turn (str(table)) at a random position. Source "robut_sqa".
     example["images"] = [example["image"]]
     example["texts"] = [
         {
@@ -4414,6 +4675,13 @@ ds_ny_cc_explanation = datasets.load_dataset("jmhessel/newyorker_caption_contest
 
 
 def map_transform_ds_ny_cc_explanation(example):
+    # [FUNCTION DOC] Map for New Yorker caption contest "explanation" config: builds six (prompt, answer)
+    # turns from random
+    # prompt lists (funny caption -> caption_choices, descriptive caption -> image_description, uncanny
+    # element
+    # -> image_uncanny_description, questions -> questions joined by spaces, location via a random template
+    # whose answer prefix is prepended to image_location, joke explanation -> label), shuffles them and emits
+    # them as turns with source "ny_cc_explanation".
     example["images"] = [example["image"]]
     funny_caption = (random.choice(ask_for_funny_caption), example["caption_choices"])
     serious_caption = (random.choice(ask_for_captionning_instruct), example["image_description"])
@@ -4578,6 +4846,12 @@ ds_ny_cc_matching = datasets.load_dataset("jmhessel/newyorker_caption_contest", 
 
 
 def map_transform_ds_ny_cc_matching(example):
+    # [FUNCTION DOC] Map for the "matching" config: four shuffled turns as above (description, uncanny,
+    # questions, location)
+    # plus a multiple-choice turn listing the 5 caption choices lettered A-E with a random separator (".",
+    # ")",
+    # ":" or none) and a letter instruction; answer is the label, prefixed by "Answer: " half the time. Source
+    # "ny_cc_matching".
     example["images"] = [example["image"]]
     serious_caption = (random.choice(ask_for_captionning_instruct), example["image_description"])
     description_of_uncannyness = (
@@ -4774,6 +5048,11 @@ ds_ny_cc_ranking = datasets.load_dataset("jmhessel/newyorker_caption_contest", "
 
 
 def map_transform_ds_ny_cc_ranking(example):
+    # [FUNCTION DOC] Map for the "ranking" config: shuffled description/uncanny/questions/location turns,
+    # with two consecutive
+    # turns inserted at a random position: "write two witty captions" -> the two captions lettered A and B,
+    # and
+    # "which caption is best? answer with the letter" -> label. Source "ny_cc_ranking".
     example["images"] = [example["image"]]
     serious_caption = (random.choice(ask_for_captionning_instruct), example["image_description"])
     description_of_uncannyness = (
@@ -4839,6 +5118,8 @@ prompts_ln = [
 
 
 def map_transform_ln(example):
+    # [FUNCTION DOC] Map for LocalizedNarratives: random brief-description prompt, assistant = caption, source
+    # "localized_narratives".
     example["images"] = [example["image"]]
     example["texts"] = [
         {

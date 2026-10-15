@@ -1,3 +1,8 @@
+# [MODULE DOC] distilabel pipeline generating abstractive news summaries of CNN/DailyMail articles with
+# Qwen2.5-72B-Instruct on vLLM (8 GPUs, temperature 0.2, max 256 new tokens), guided by
+# SYSTEM_PROMPT_NEWS_SUMMARIZATION. As main: loads abisee/cnn_dailymail 3.0.0 train, cleans the articles,
+# runs the pipeline without cache and pushes privately to "argilla/cnn-dailymail-summaries".
+# KNOWN ISSUE: the Pipeline is named "email-summaries" (copied from the email script), so cache/names collide.
 from typing import Any, TYPE_CHECKING
 
 from datasets import load_dataset
@@ -31,11 +36,15 @@ When presented with a news article, analyze its content, identify the key inform
 
 
 class NewsSummarization(Task):
+    # [CLASS DOC] distilabel Task: input column "article", output column "summary" (raw LLM text).
     @property
     def inputs(self) -> "StepColumns":
+        # [FUNCTION DOC] Property: ["article"].
         return ["article"]
 
     def format_input(self, input: dict[str, Any]) -> "FormattedInput":
+        # [FUNCTION DOC] Returns a chat with the news summarization system prompt and the article as user
+        # message.
         return [
             {"role": "system", "content": SYSTEM_PROMPT_NEWS_SUMMARIZATION},
             {"role": "user", "content": input["article"]},
@@ -43,11 +52,13 @@ class NewsSummarization(Task):
 
     @property
     def outputs(self) -> "StepColumns":
+        # [FUNCTION DOC] Property: ["summary"].
         return ["summary"]
 
     def format_output(
         self, output: str | None, input: dict[str, Any] | None = None
     ) -> dict[str, Any]:
+        # [FUNCTION DOC] Returns {"summary": output} (None when generation failed). `input` is unused.
         if output is None:
             return {"summary": None}
 
@@ -75,6 +86,10 @@ with Pipeline(name="email-summaries") as pipeline:
 
 if __name__ == "__main__":
     def clean_article(row: dict[str, Any]) -> dict[str, Any]:
+        # [FUNCTION DOC] Map function (defined only under main): strips a dateline prefix by keeping the
+        # text after the first
+        # "-- " if present, and cuts everything from " E-mail to a friend" onward. Mutates and returns the
+        # row.
         article: str = row["article"]
 
         # Remove prefix "WASHINGTON (CNN) -- ..."

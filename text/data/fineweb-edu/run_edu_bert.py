@@ -1,3 +1,7 @@
+# [MODULE DOC] Script that annotates a Hugging Face dataset shard with educational-quality scores from a
+# sequence-classification (regression) model such as the FineWeb-Edu classifier, then pushes the scored
+# shard to the Hub. CLI args: --model_name, --dataset_name, --dataset_config, --output_dataset_name,
+# --output_dataset_config, --text_column (default "text"), --shard and --num_shards (both required).
 import torch
 import argparse
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
@@ -5,6 +9,14 @@ from datasets import load_dataset
 
 
 def main(args):
+    # [FUNCTION DOC] Entry point. Loads tokenizer and model (bfloat16) onto CUDA if available else CPU;
+    # loads the "train"
+    # split of the dataset (cache dir hard-coded to /scratch/cosmo/cache/, 12 processes); keeps only rows
+    # whose
+    # index modulo num_shards equals shard; maps compute_scores over batches of 512; then pushes to the Hub as
+    # private dataset `output_dataset_name` with config "<output_dataset_config>_<shard>" (max shard 4096MB).
+    # Side effects: network/GPU use; the push is retried forever on any exception (error printed each time).
+    # KNOWN ISSUE: the push retry loop has no limit or backoff, so a persistent error loops infinitely.
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
     model = AutoModelForSequenceClassification.from_pretrained(
         args.model_name, torch_dtype=torch.bfloat16
@@ -24,6 +36,10 @@ def main(args):
     )
 
     def compute_scores(batch):
+        # [FUNCTION DOC] Batched map function: tokenizes batch[text_column] (longest padding, truncation)
+        # onto the device, runs
+        # the model without gradients and takes the squeezed float logits. Adds "score" (raw float list) and
+        # "int_score" (each score clamped to [0, 5] and rounded to int) to the batch and returns it.
         inputs = tokenizer(
             batch[args.text_column],
             return_tensors="pt",

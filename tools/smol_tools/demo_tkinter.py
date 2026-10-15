@@ -1,3 +1,9 @@
+# [MODULE DOC] macOS Tkinter desktop demo ("Smol Tools") that runs at import: creates a hidden Tk root with
+# Segoe UI
+# fonts and a TextPopupApp, then enters the Tk main loop. Global hotkeys (pynput): F1 draft-reply rewriter,
+# F2 summarize the currently selected text (copied via Cmd+C), F5 chat window with saved history, F10 tool
+# agent. Uses tkmacosx buttons and pyperclip; model generation runs on daemon threads and UI updates are
+# scheduled with root.after.
 import tkinter as tk
 from tkmacosx import Button
 import time
@@ -15,7 +21,18 @@ import os
 import getpass
 
 class TextPopupApp:
+    # [CLASS DOC] Main application object. Holds the Tk root, the list of open popups, the system username,
+    # and instances of
+    # SmolSummarizer, SmolRewriter, SmolTitler, SmolToolAgent and SmolChatter (all sharing one cached model).
     def __init__(self, root):
+        # [FUNCTION DOC] Hides the root window, initializes state (last_text, active_popups, last_summary),
+        # constructs all tools
+        # (loading/warming up the model; slow), creates a keyboard Controller, registers and starts
+        # GlobalHotKeys
+        # for F1/F2/F5/F10, and stores getpass.getuser() as username.
+        # KNOWN ISSUE: hotkey callbacks run on the pynput listener thread and create Tk widgets directly,
+        # which is
+        # not thread-safe in Tkinter.
         self.root = root
         self.root.withdraw()  # Start with the window hidden
         self.last_text = ""
@@ -47,6 +64,8 @@ class TextPopupApp:
         self.username = getpass.getuser()  # Get system username
 
     def generate_summary_from_selected_text(self):
+        # [FUNCTION DOC] F2 handler: grabs the selected text through the clipboard and, if non-empty, opens
+        # the summary window.
         selected_text = self.get_selected_text()
         if selected_text:
             # Directly generate summary instead of showing confirmation popup
@@ -54,6 +73,12 @@ class TextPopupApp:
 
     # New method to directly show summary window
     def generate_summary_direct(self, text):
+        # [FUNCTION DOC] Opens a 600x600 "Summary Chat" popup centred on the mouse (clamped to screen): a
+        # read-only chat display
+        # with name tags, a text input and "Ask Question" button (Enter also submits) wired to
+        # process_summary_question. Shows the user's request with a 100-char preview, then starts a daemon
+        # thread
+        # running summarize on the text.
         summary_popup = tk.Toplevel(self.root)
         summary_popup.withdraw()  # Hide the window initially
         self.active_popups.append(summary_popup)
@@ -183,6 +208,9 @@ class TextPopupApp:
         summary_popup.deiconify()
         
         def summarize(input_text):
+            # [FUNCTION DOC] Thread body: adds an empty assistant line, then streams summarizer.process
+            # output, appending only the newly
+            # added suffix of the cumulative text to the display via root.after. Exceptions are printed.
             try:
                 # First message from the model
                 self.root.after(0, lambda: self.update_summary_chat(
@@ -204,6 +232,9 @@ class TextPopupApp:
         threading.Thread(target=lambda: summarize(text), daemon=True).start()
 
     def update_summary_chat(self, chat_display: tk.Text, sender: str, message: str):
+        # [FUNCTION DOC] Appends a new line "<sender>: <message>" to a summary chat display, colouring the
+        # sender as assistant if it
+        # equals the summarizer name, else as user; scrolls to the end and keeps the widget read-only.
         """Update the summary chat display with new message"""
         chat_display.config(state='normal')
         
@@ -218,6 +249,9 @@ class TextPopupApp:
 
     def process_summary_question(self, original_text: str, question: str, 
                                chat_display: tk.Text, chat_input: tk.Text):
+        # [FUNCTION DOC] Ignores blank questions; otherwise clears the input, shows the question, and starts
+        # a daemon thread
+        # (process_question) that answers it about original_text.
         """Process a follow-up question about the summarized text"""
         if not question.strip():
             return
@@ -229,6 +263,8 @@ class TextPopupApp:
         self.update_summary_chat(chat_display, self.username, question)
         
         def process_question():
+            # [FUNCTION DOC] Thread body: like summarize, but streams summarizer.process(original_text,
+            # question=question).
             try:
                 # First message from the model
                 self.root.after(0, lambda: self.update_summary_chat(
@@ -250,6 +286,9 @@ class TextPopupApp:
         threading.Thread(target=process_question, daemon=True).start()
 
     def get_selected_text(self):
+        # [FUNCTION DOC] HELPER: simulates Cmd+C with pynput, waits 0.1 s and returns the clipboard contents
+        # (overwrites the user's
+        # clipboard; macOS-specific).
         # Copy selected text to clipboard
         with self.keyboard_controller.pressed(Key.cmd):
             self.keyboard_controller.tap('c')
@@ -261,6 +300,8 @@ class TextPopupApp:
         return pyperclip.paste()
 
     def destroy_active_popups(self):
+        # [FUNCTION DOC] Destroys every tracked popup (ignoring errors for already-closed ones) and clears
+        # the list. Unused here.
         # Destroy all active popups
         for popup in self.active_popups:
             try:
@@ -270,6 +311,14 @@ class TextPopupApp:
         self.active_popups = []
 
     def show_draft_input(self, summary_x, summary_y, summary_width):
+        # [FUNCTION DOC] F1 handler: opens a "Draft Reply" popup with two columns: "Your Reply" input with a
+        # "Smol Improvement?"
+        # button (calls generate_improved_text) and a read-only "Improved Reply" with a "Copy" button
+        # (copies to the
+        # clipboard). Widget height is derived from last_summary line count (15-40). Positions the popup
+        # centred
+        # horizontally on summary_x + summary_width/2 and above or below summary_y depending on screen half.
+        # KNOWN ISSUE: last_summary is never updated anywhere, so the height is always the minimum.
         draft_popup = tk.Toplevel(self.root)
         draft_popup.withdraw()  # Hide initially
         self.active_popups.append(draft_popup)
@@ -400,6 +449,12 @@ class TextPopupApp:
         draft_popup.deiconify()
 
     def generate_improved_text(self, text, improved_text_widget):
+        # [FUNCTION DOC] Looks up the improve button through Tk's auto-generated child names, disables it
+        # ("Generating..."), shows a
+        # placeholder in the output widget and starts a daemon thread running improve on text.
+        # KNOWN ISSUE: the button lookup depends on internal widget names ('!frame2', '!button') and is
+        # fragile;
+        # after generation the button text is restored to "Copy" instead of "Smol Improvement?".
         # Get reference to the improve button
         improve_btn = improved_text_widget.master.master.children['!frame2'].children['!button']
         
@@ -417,6 +472,10 @@ class TextPopupApp:
         improved_text_widget.config(state='disabled')
         
         def improve(input_text):
+            # [FUNCTION DOC] Thread body: streams rewriter.process output, replacing the widget text with
+            # each cumulative output via
+            # root.after; re-enables the button at the end or on error (then re-raises the exception in the
+            # thread).
             try:
                 for output in self.rewriter.process(input_text):
                     self.root.after(0, lambda t=output: self.update_improved_text(improved_text_widget, t))
@@ -439,12 +498,16 @@ class TextPopupApp:
         threading.Thread(target=lambda: improve(text), daemon=True).start()
 
     def update_improved_text(self, text_widget, new_text):
+        # [FUNCTION DOC] Replaces a read-only Text widget's content with new_text.
         text_widget.config(state='normal')
         text_widget.delete("1.0", tk.END)
         text_widget.insert("1.0", new_text)
         text_widget.config(state='disabled')
 
     def show_agent_input(self):
+        # [FUNCTION DOC] F10 handler: opens a centred "SmolAgent" popup with a request input, read-only
+        # response area and Submit
+        # button that runs process_agent_request.
         # Create new popup for agent input
         agent_popup = tk.Toplevel(self.root)
         self.active_popups.append(agent_popup)
@@ -468,6 +531,8 @@ class TextPopupApp:
         output_text.config(state='disabled')
         
         def process_agent_request():
+            # [FUNCTION DOC] Reads the query, shows "Processing request..." and starts a daemon thread
+            # running run_agent.
             query = text_input.get("1.0", "end-1c")
             output_text.config(state='normal')
             output_text.delete("1.0", tk.END)
@@ -475,6 +540,9 @@ class TextPopupApp:
             output_text.config(state='disabled')
             
             def run_agent():
+                # [FUNCTION DOC] Thread body: collects each agent.process output and displays all of them
+                # joined by newlines.
+                # Exceptions are not caught (the thread dies silently apart from the traceback).
                 full_response = []
                 for response in self.agent.process(query):
                     full_response.append(response)
@@ -497,12 +565,21 @@ class TextPopupApp:
         agent_popup.geometry(f"+{x}+{y}")
 
     def update_agent_output(self, text_widget, new_text):
+        # [FUNCTION DOC] Replaces the agent output widget text with new_text (read-only afterwards).
         text_widget.config(state='normal')
         text_widget.delete("1.0", tk.END)
         text_widget.insert("1.0", new_text)
         text_widget.config(state='disabled')
 
     def show_chat_window(self):
+        # [FUNCTION DOC] F5 handler: opens an 800x800 "SmolChat" window with a left history panel ("New
+        # Chat" button and a listbox
+        # of saved chat ids sorted by file modification time, newest first; selecting loads the chat) and a
+        # main
+        # area with the chat display, input and Send button (Enter also sends). Stores listbox and new-chat
+        # button
+        # in self.chat_controls.
+        # KNOWN ISSUE: the saved-chat path "saved_chats" is hard-coded instead of using chatter.chats_dir.
         chat_window = tk.Toplevel(self.root)
         self.active_popups.append(chat_window)
         chat_window.title("SmolChat")
@@ -589,6 +666,7 @@ class TextPopupApp:
         chat_display.tag_configure("user_name", foreground="#7986CB")      # Soft blue
 
     def load_selected_chat(self, listbox: tk.Listbox, chat_display: tk.Text):
+        # [FUNCTION DOC] Loads the chat selected in the listbox into the chatter and redraws the display.
         selection = listbox.curselection()
         if selection:
             chat_id = listbox.get(selection[0])
@@ -596,6 +674,13 @@ class TextPopupApp:
             self.display_chat_history(chat_display)
 
     def start_new_chat(self, chat_display):
+        # [FUNCTION DOC] If the current chat has messages and was modified, saves it: under its existing id,
+        # or (no id) under a
+        # title generated by the titler from the "role: content" history (first 50 chars, slashes replaced
+        # by "-").
+        # Then starts a new chat, clears the display and refreshes the listbox (sorted by mtime).
+        # KNOWN ISSUE: title generation runs synchronously on the UI thread, freezing the window while it
+        # runs.
         # Only save the current chat if it has been modified since loading
         if self.chatter.has_current_chat() and self.chatter.is_chat_modified():
             # Get full chat history as a single string
@@ -635,6 +720,11 @@ class TextPopupApp:
             listbox.insert(tk.END, chat_id)
 
     def process_chat_message(self, message: str, chat_display: tk.Text):
+        # [FUNCTION DOC] Ignores blank messages. Disables history controls, writes "<username>: <message>"
+        # and the assistant name
+        # prefix, clears the input (found via Tk internal child names), resets current_response and starts a
+        # daemon
+        # thread running chat_response.
         if not message.strip():  # Skip empty messages
             return
             
@@ -665,6 +755,9 @@ class TextPopupApp:
         chat_display.config(state='disabled')
         
         def chat_response():
+            # [FUNCTION DOC] Thread body: streams chatter.process(message), appending only new suffix text
+            # to the display, then two
+            # newlines; always re-enables chat controls at the end (exceptions propagate in the thread).
             try:
                 for chunk in self.chatter.process(message):
                     # Only send the new part of the response
@@ -681,17 +774,22 @@ class TextPopupApp:
         threading.Thread(target=chat_response, daemon=True).start()
 
     def enable_chat_controls(self):
+        # [FUNCTION DOC] Re-enables the history listbox and New Chat button.
         """Re-enable chat controls after response is complete"""
         self.chat_controls['listbox'].config(state='normal')
         self.chat_controls['new_chat_btn'].config(state='normal')
 
     def update_chat_display(self, chat_display: tk.Text, new_text: str):
+        # [FUNCTION DOC] Appends new_text to the chat display, scrolls to the end and keeps it read-only.
         chat_display.config(state='normal')
         chat_display.insert(tk.END, new_text)
         chat_display.see(tk.END)
         chat_display.config(state='disabled')
 
     def display_chat_history(self, chat_display: tk.Text):
+        # [FUNCTION DOC] Clears the chat display and redraws every message of the chatter history as
+        # "<username or model name>:
+        # <content>" with coloured name tags.
         chat_display.config(state='normal')
         chat_display.delete("1.0", tk.END)
         

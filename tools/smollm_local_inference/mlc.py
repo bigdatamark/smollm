@@ -1,3 +1,6 @@
+# [MODULE DOC] Minimal example: runs SmolLM2-1.7B-Instruct (q0f16 MLC build from the Hub) with MLC-LLM
+# MLCEngine, streams an
+# OpenAI-style chat completion for one question to stdout, then terminates the engine. Defines no functions.
 from mlc_llm import MLCEngine
 
 # Create engine

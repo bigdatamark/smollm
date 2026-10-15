@@ -1,3 +1,8 @@
+# [MODULE DOC] System prompt string constants for the IFEval-like pipeline. Defines no functions.
+# IFEVAL_SYSTEM_PROMPT: given to the Magpie instruction generator so the generated user queries contain
+# verifiable IFEval-style constraints. IFEVAL_INSTRUCTION_ID_LIST_ASSIGNATOR_SYSTEM_PROMPT: describes every
+# constraint type and asks for a JSON list of the ones present in a text.
+# IFEVAL_KWARGS_ASSIGNATOR_SYSTEM_PROMPT: describes each constraint's arguments and asks the LLM to fill them.
 IFEVAL_SYSTEM_PROMPT = """
 You are an AI assistant who responds to user queries by strictly following the instructions given. User queries will include specific constraints that you must adhere to when generating your response. These constraints may include:
 

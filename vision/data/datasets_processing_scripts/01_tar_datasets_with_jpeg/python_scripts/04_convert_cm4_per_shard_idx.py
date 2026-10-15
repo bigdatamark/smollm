@@ -1,3 +1,6 @@
+# [MODULE DOC] Converts one raw CM4 web-document dataset shard into webdataset tar files and uploads them to
+# S3.
+# Configures INFO logging and disables datasets caching at import time. As main: parses args and runs main.
 import argparse
 import logging
 from pathlib import Path
@@ -20,6 +23,9 @@ set_caching_enabled(False)
 
 
 def get_args():
+    # [FUNCTION DOC] Parses CLI args: --shard_dir_path, --saving_dir, --num_proc, --raw_cm4_shard_idx,
+    # --s3_uri (required), --num_examples_per_shard, --min_num_shards, --save_shard_prefix (optional).
+    # Returns the namespace.
     parser = argparse.ArgumentParser()
     parser.add_argument("--shard_dir_path", type=Path, required=True)
     parser.add_argument("--saving_dir", type=Path, required=True)
@@ -34,6 +40,9 @@ def get_args():
 
 
 def main(args):
+    # [FUNCTION DOC] Keeps only the subdirectory of shard_dir_path named raw_cm4_shard_idx and calls
+    # export_dataset_all_shard_idx_to_tar (exports every shard) with type WEB_DOCUMENTS, the shard prefix
+    # and s3_uri (tars are copied to S3 with s5cmd).
     shard_1_dirs = [
         shard_dir for shard_dir in args.shard_dir_path.iterdir() if shard_dir.name == str(args.raw_cm4_shard_idx)
     ]

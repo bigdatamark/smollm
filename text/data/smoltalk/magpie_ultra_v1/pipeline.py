@@ -1,3 +1,12 @@
+# [MODULE DOC] distilabel pipeline that builds the Magpie-Ultra v1.0 dataset: Llama-3.1-405B-Instruct-FP8
+# (vLLM, Magpie
+# "llama3" template) generates 3-turn conversations under one of several category system prompts
+# (CATEGORIES_SYSTEM_PROMPTS, sampled by weight), then in parallel: Llama-3.1-8B rates difficulty, quality
+# and task category of the first instruction (JSON structured output against the OUTPUT_*_JSON_SCHEMA
+# constants and the INPUT_*_TEMPLATE prompts), gte-large embeds the instruction, ArmoRM scores the
+# conversation, Llama-Guard-3 classifies safety; outputs are combined and a FAISS inner-product k=5 nearest
+# neighbour search is run on the embeddings. Running as main generates 1M rows with per-step GPU
+# resources and pushes to "argilla/magpie-ultra-v1.0". The pipeline is built at import time.
 import faiss
 import json
 from typing import Union, Dict, Any, Literal, List, TYPE_CHECKING
@@ -392,19 +401,31 @@ OUTPUT_CLASSIFICATION_JSON_SCHEMA = {
 
 @step(inputs=["conversation"], outputs=["instruction"])
 def GetInstruction(inputs: StepInput) -> "StepOutput":
+    # [FUNCTION DOC] distilabel step function (decorated with @step, inputs ["conversation"], outputs
+    # ["instruction"]). For each
+    # row in the batch sets "instruction" to the content of the first conversation message (in place) and
+    # yields
+    # the whole batch once.
     for input in inputs:
         input["instruction"] = input["conversation"][0]["content"]
     yield inputs
 
 
 class AssignTags(Task):
+    # [CLASS DOC] distilabel Task that rates a user instruction with an LLM. Field `mission` selects the job:
+    # "difficulty" (intent, knowledge, difficulty), "quality" (explanation, quality) or "classification"
+    # (primary_tag, other_tags). Each output also includes model_name.
     mission: Literal["difficulty", "quality", "classification"]
 
     @property
     def inputs(self) -> List[str]:
+        # [FUNCTION DOC] Property: required input columns, ["instruction"].
         return ["instruction"]
 
     def format_input(self, input: Dict[str, Any]) -> "ChatType":
+        # [FUNCTION DOC] Fills the template for the mission (difficulty / quality / otherwise
+        # classification) with the
+        # instruction and returns a single-user-message chat.
         instruction = input["instruction"]
 
         if self.mission == "difficulty":
@@ -418,6 +439,8 @@ class AssignTags(Task):
 
     @property
     def outputs(self) -> List[str]:
+        # [FUNCTION DOC] Property: output columns for the mission (see class doc), each list ending with
+        # "model_name".
         if self.mission == "difficulty":
             return ["intent", "knowledge", "difficulty", "model_name"]
 
@@ -427,6 +450,8 @@ class AssignTags(Task):
         return ["primary_tag", "other_tags", "model_name"]
 
     def _impute_output(self) -> Dict[str, None]:
+        # [FUNCTION DOC] HELPER: returns the mission's output keys (without model_name) all set to None,
+        # used for failed generations.
         if self.mission == "difficulty":
             return {"intent": None, "knowledge": None, "difficulty": None}
 
@@ -440,6 +465,9 @@ class AssignTags(Task):
         output: Union[str, None],
         input: Union[Dict[str, Any], None] = None,
     ) -> Dict[str, Any]:
+        # [FUNCTION DOC] Returns the imputed all-None mapping when output is None, else the JSON-decoded
+        # output mapping as-is.
+        # KNOWN ISSUE: malformed JSON raises json.JSONDecodeError instead of being imputed with None values.
         if output is None:
             return self._impute_output()
 
@@ -448,6 +476,11 @@ class AssignTags(Task):
 
 # https://github.com/magpie-align/magpie/blob/b08a80193c92ea7ec329dd9c23d6c23450c283b5/exp/gen_ins.py#L134
 def de_md_logits_processor_for_llama3_1(token_ids, logits):
+    # [FUNCTION DOC] vLLM logits processor (copied from the Magpie repo) used by the instruction generator.
+    # When no tokens have
+    # been generated yet (token_ids empty) it sets the logits of Llama-3.1 markdown tokens ("#", "##", "###",
+    # "####", "**", " **", "**:") to about -10000 so the instruction does not start with markdown. Mutates and
+    # returns the logits.
     # Only process the initial logits
     if len(token_ids) == 0:
         logits[2] = -9999.999  # "#": 2,

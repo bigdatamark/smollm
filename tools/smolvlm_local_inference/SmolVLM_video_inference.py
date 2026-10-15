@@ -1,3 +1,7 @@
+# [MODULE DOC] Example script for video question answering with SmolVLM (Idefics3): samples about one frame
+# per second
+# from a video with OpenCV (capped at max_frames), resizes/center-crops them to 384x384, and feeds them as
+# images in a single chat turn. Configures INFO logging at import. main uses hard-coded placeholder paths.
 import torch
 from transformers import AutoProcessor, Idefics3ForConditionalGeneration
 from PIL import Image
@@ -10,10 +14,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class VideoFrameExtractor:
+    # [CLASS DOC] Extracts PIL RGB frames from a video file. Attribute max_frames caps the number of frames
+    # returned.
     def __init__(self, max_frames: int = 50):
+        # [FUNCTION DOC] Stores max_frames (default 50).
         self.max_frames = max_frames
         
     def resize_and_center_crop(self, image: Image.Image, target_size: int) -> Image.Image:
+        # [FUNCTION DOC] Resizes the image (LANCZOS) so its shorter side equals target_size, keeping aspect
+        # ratio, then center-crops
+        # a target_size x target_size square. Returns the new image.
         # Get current dimensions
         width, height = image.size
         
@@ -37,6 +47,13 @@ class VideoFrameExtractor:
         return image.crop((left, top, right, bottom))
         
     def extract_frames(self, video_path: str) -> List[Image.Image]:
+        # [FUNCTION DOC] Opens video_path (ValueError if it cannot be opened), selects frame indices 0, fps,
+        # 2*fps, ... (1 per
+        # second); if more than max_frames, takes max_frames evenly spaced ones. Seeks and reads each,
+        # converts
+        # BGR->RGB, crops to 384x384 and returns the list (unreadable frames skipped). Releases the capture.
+        # KNOWN ISSUE: fps is truncated to int; a video reporting fps < 1 gives step 0 and range() raises
+        # ValueError.
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             raise ValueError(f"Could not open video: {video_path}")
@@ -67,6 +84,11 @@ class VideoFrameExtractor:
         return frames
 
 def load_model(checkpoint_path: str, base_model_id: str = "HuggingFaceTB/SmolVLM-Instruct", device: str = "cuda"):
+    # [FUNCTION DOC] Loads the AutoProcessor from base_model_id and the Idefics3 model in bfloat16 on
+    # `device` from
+    # checkpoint_path if truthy, else from base_model_id. Sets the image processor to 384x384 with resizing
+    # and
+    # image splitting disabled (frames are pre-cropped). Returns (model, processor).
     # Load processor from original model
     processor = AutoProcessor.from_pretrained(base_model_id)
     if checkpoint_path:
@@ -91,6 +113,11 @@ def load_model(checkpoint_path: str, base_model_id: str = "HuggingFaceTB/SmolVLM
     return model, processor
 
 def generate_response(model, processor, video_path: str, question: str, max_frames: int = 50):
+    # [FUNCTION DOC] Extracts frames from video_path (max_frames default 50), builds one user message:
+    # "Answer briefly.", one
+    # image placeholder per frame, then the question; applies the chat template, processes text+images to
+    # tensors on the model device and generates (max 100 new tokens, 5 beams, sampling at temperature 0.7).
+    # Returns the decoded first sequence without special tokens (includes the prompt text).
     # Extract frames
     frame_extractor = VideoFrameExtractor(max_frames)
     frames = frame_extractor.extract_frames(video_path)
@@ -131,6 +158,9 @@ def generate_response(model, processor, video_path: str, question: str, max_fram
     return response
 
 def main():
+    # [FUNCTION DOC] Demo entry point: picks CUDA if available, loads the base SmolVLM-Instruct model, asks
+    # "Describe the video"
+    # about the placeholder path /path/to/video.mp4 and prints question and response.
     # Configuration
     #checkpoint_path = "/path/to/your/checkpoint"
     checkpoint_path = None
