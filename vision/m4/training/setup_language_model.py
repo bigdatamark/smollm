@@ -1,3 +1,7 @@
+# [MODULE DOC] Maps a language-model backbone name to the m4 vision-language config/model classes.
+# model_name2classes is
+# an ordered mapping from regex (gpt2, idefics, mistral, llama, smollm) to [config class, model class]; the
+# first regex found in the lower-cased name wins.
 import re
 
 from m4.models.idefics.configuration_idefics import IdeficsConfig
@@ -20,6 +24,9 @@ model_name2classes = {
 
 
 def model_name_to_classes(model_name_or_path):
+    # [FUNCTION DOC] Return the [config_class, model_class] pair for the first regex in model_name2classes
+    # that matches
+    # model_name_or_path (case-insensitive search). Raises ValueError listing supported regexes if none match.
     """returns config_class, model_class for a given model name or path"""
 
     model_name_lowcase = model_name_or_path.lower()

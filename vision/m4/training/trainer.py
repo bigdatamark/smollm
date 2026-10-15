@@ -1,3 +1,15 @@
+# [MODULE DOC] The m4 training loop. Trainer wraps an accelerate Accelerator, the vision-language model,
+# tokenizer and the
+# custom dataloaders (dataset.py) to run gradient-accumulated training with optional global-batch-size
+# ramp-up, z-loss, per-dataset loss weights, LoRA, DeepSpeed, periodic validation, metric gathering across
+# processes, logging (stdout via printflock, JSONL files under save_dir/logs, wandb + tensorboard trackers),
+# activation / gradient statistics, checkpointing for exact resume (model, optimizer/scheduler, dataloader
+# state, train logs) with optional S3 upload, and stop conditions (kill switch file, SIGTERM, job time
+# limit, host memory pressure, step/epoch limits).
+# Module globals: _MEMORY_EXPLOSION_THRESHOLD (percent of host RAM, 93 on hosts whose FQDN contains
+# "compute.internal", else 90); METRICS_TO_DEFAULT_VALUE_FN (metric name -> factory for its initial value;
+# per-dataset metrics are defaultdicts keyed by dataset name or "all"); METRICS_TO_RESET_AFTER_LOGGING
+# (accumulators zeroed after each training log).
 import copy
 import gc
 import json
@@ -106,12 +118,32 @@ METRICS_TO_RESET_AFTER_LOGGING = [
 
 
 class Trainer(object):
+    # [CLASS DOC] Owns the training state and loop. Construct with (accelerator, vl_model, tokenizer,
+    # train_loader,
+    # val_loader, config: Parameters) and call train().
     """
     Trainer object to monitor training and validation
     :- config -: json config file
     """
 
     def __init__(self, accelerator, vl_model, tokenizer, train_loader, val_loader, config):
+        # [FUNCTION DOC] Store config sections, model (enabling gradient checkpointing if configured),
+        # tokenizer and image token id,
+        # accelerator and loaders; create an ActivationTracker on the main process if activation logging is
+        # on. Runs
+        # compatibility checks, builds optimizer and scheduler, prepares objects with accelerate, derives
+        # batch size
+        # configs, sets optim_param.opt_batch_size, and if neither max_num_opt_steps nor max_num_epochs is set
+        # derives
+        # max_num_opt_steps from len(train_loader) // grad_acc_size (ValueError for iterable loaders, or for
+        # map
+        # loaders combined with ramp-up). Initializes trackers, stop flags and a SigtermListener, logs
+        # parameter
+        # counts (total, LoRA, vision, resampler, projection, trainable) and per-parameter trainability,
+        # imports
+        # DeepSpeed full-state accessors when grad/param logging is requested, and creates -1 float/long
+        # placeholder
+        # tensors used for metric gathering.
         # Initialize params
         self.config: Parameters = config
         self.optim_param: OptimizerParams = config.optim_param
@@ -240,6 +272,17 @@ Batch sizes:
         self.long_placeholder_tensor = torch.tensor(-1, device=self.accelerator.device, dtype=torch.long)
 
     def setup_batch_size_related_configs(self):
+        # [FUNCTION DOC] Derive grad_acc_size and global_batch_size now that num_processes is known. With
+        # ramp-up: require finish,
+        # increment and samples; require (finish - start) >= increment and divisible by it, increment
+        # divisible by
+        # batch_size_per_gpu * num_processes, grad_acc_size <= 1 and global_batch_size unset; set
+        # grad_acc_size =
+        # start / (per-GPU batch * processes) (must be an integer) and global_batch_size = start. Without
+        # ramp-up:
+        # grad_acc_size > 1 and global_batch_size > 1 are mutually exclusive; a global_batch_size > 1 yields
+        # grad_acc_size = gbs / (per-GPU batch * processes) (must be an integer), else global_batch_size =
+        # per-GPU batch * grad_acc_size * processes. Raises ValueError on violations; mutates hparams; logs.
         """
         batch_size-related configs are processed here.
 
@@ -348,6 +391,9 @@ Batch sizes:
                 logger.info(f"Derived {hparams.global_batch_size=}")
 
     def update_gas_and_gbs(self, grad_acc_size_current, global_batch_size_current):
+        # [FUNCTION DOC] Set hparams.grad_acc_size / global_batch_size and the accelerator's
+        # gradient_accumulation_steps to the given
+        # values, and the DeepSpeed engine's train batch size when DeepSpeed is used.
         """
         Update m4, deepspeed and accelerate with the derived global_batch_size and grad_acc_size
         """
@@ -358,6 +404,9 @@ Batch sizes:
             get_deepspeed_engine(self.accelerator).set_train_batch_size(global_batch_size_current)
 
     def _compatibility_checks(self):
+        # [FUNCTION DOC] HELPER: with bf16 mixed precision, raise ValueError if CUDA < 11 or NCCL < 2.10.3.
+        # KNOWN ISSUE: the NCCL error message joins a tuple of ints with str.join, which itself raises
+        # TypeError.
         # BF16 requires cuda>=11 and nccl>=2.10.3
         if self.accelerator.mixed_precision == "bf16":
             if version.parse(torch.version.cuda) < version.parse("11.0"):
@@ -368,6 +417,15 @@ Batch sizes:
                 )
 
     def _init_trackers(self):
+        # [FUNCTION DOC] HELPER: on the main process with wandb enabled: keep the resumed wandb_run_id or
+        # generate a new one (warning
+        # if resuming a run that had none), flatten the config into a wandb config of "section-key" ->
+        # str(value),
+        # init wandb (resume allowed, project/entity/tags, run name = save_dir name), watch a dummy LayerNorm
+        # (so
+        # wandb's watch logging step frequency is set), create a TensorBoardTracker under save_dir, set them
+        # as the
+        # accelerator's trackers and send a wandb alert that training started/resumed.
         if self.hparams.wandb_enable and self.accelerator.is_main_process:
             # Initialize wandb_run_id
             if self.hparams.resume_run and self.hparams.wandb_run_id != "":
@@ -425,6 +483,16 @@ Batch sizes:
             )
 
     def _configure_optimizer_and_scheduler(self):
+        # [FUNCTION DOC] HELPER: build the optimizer named optim_param.vl_optim from torch.optim; for AdamW
+        # (and subclasses) create two
+        # param groups of trainable parameters: with weight_decay and without (names containing any no_decay
+        # substring). Then build the LR scheduler named vl_lr_scheduler with its params, and store both.
+        # Mutates vl_optim_params by popping no_decay and weight_decay.
+        # KNOWN ISSUE: the try/except/else is inverted: when the scheduler exists in torch.optim.lr_scheduler
+        # the
+        # else branch raises ValueError, so only transformers.optimization schedulers work (an unknown name
+        # raises
+        # AttributeError instead of the intended ValueError).
         """defines model optimizer and lr scheduler"""
 
         vl_optim = getattr(torch_optim, self.optim_param.vl_optim)
@@ -479,6 +547,11 @@ Batch sizes:
         self.vl_scheduler = vl_scheduler
 
     def _prepare_register(self):
+        # [FUNCTION DOC] HELPER: for iterable training datasets, accelerate-prepare the model, optimizer and a
+        # dummy 20-element
+        # DataLoader (data sharding is handled by our loaders); otherwise prepare model, optimizer, train and
+        # val
+        # loaders. The LR scheduler is not prepared but registered for checkpointing.
         """
         Prepare model, optimizer and dataloader if necessary.
         Register the scheduler for checkpointing.
@@ -511,6 +584,19 @@ Batch sizes:
         self.accelerator.register_for_checkpointing(self.vl_scheduler)
 
     def _set_up_training(self):
+        # [FUNCTION DOC] HELPER: initialize loop state. When resuming: restore train logs (re-wrapping
+        # defaultdicts), step, epoch and
+        # ramp-up state from resume_param, load the dataloader state from opt_step_dir/resumable_states and
+        # the
+        # accelerator state (optionally without optimizer states, then validating the fresh optimizer), and
+        # mark the
+        # step as saved/evaluated. Otherwise start fresh logs, step 0, epoch 0 and a new ramp-up state, and
+        # reset the
+        # loader state. Applies the current grad-acc/global batch size, computes max_num_updates (min of
+        # max_num_opt_steps, batches per epoch and epochs * batches when the loader has a length; else
+        # max_num_opt_steps) and max_num_updates_this_run. Returns (progress columns, train_logs,
+        # max_num_epochs,
+        # max_num_updates, curr_opt_step, curr_epoch, opt_step_is_saved, eval_is_done, gbs_running).
         """
         Prepare variables for trainings.
         """
@@ -607,6 +693,24 @@ Batch sizes:
         )
 
     def _do_batch(self, batch, curr_opt_step, dataset_name=None, dataset_idx=None, validation=False):
+        # [FUNCTION DOC] HELPER: run one micro-batch. Crops pixel_values/pixel_attention_mask to the batch's
+        # real max image count,
+        # height and width (or drops them without images) and ids/labels/attention mask to the longest
+        # sequence, moves
+        # it to the device, computes stats (images, image tokens, text tokens, padding, pixel sum, image/text
+        # ratio)
+        # and the forward loss (labels default to input_ids). Validation returns (loss, num_images,
+        # num_text_tokens,
+        # ratio, padding, pixel sum). Training: scale the loss by the dataset's loss weight, add z_loss * mean
+        # squared
+        # logsumexp of logits over non-image, non-padding tokens if enabled, backward (raw DeepSpeed engine
+        # backward to
+        # avoid accelerate's implicit step), on gradient-sync steps clip grads and optionally log DeepSpeed
+        # stats,
+        # step the DeepSpeed engine and optimizer, step the scheduler only on sync steps whose optimizer step
+        # was not
+        # skipped, zero grads, and compute model TFLOPs for the batch. Returns (loss, z_loss, num_images,
+        # num_image_tokens, num_text_tokens, ratio, padding, pixel sum, tflops).
         # Use effective max_num_images per batch. ie: if the max_num_images of this batch is 3, the pixel_values and image mask are truncated accordingly.
         # Same for max_height and max_width
         effective_max_num_images = max(batch["num_images"])
@@ -730,6 +834,13 @@ Batch sizes:
         )
 
     def _log_deepspeed_training_stats(self, curr_opt_step):
+        # [FUNCTION DOC] HELPER: for every trainable parameter (with a barrier per parameter), fetch the full
+        # fp32 param, Adam
+        # exp_avg/exp_avg_sq and grad via DeepSpeed, compute the bias-corrected effective update, and on the
+        # main
+        # process log their stats to JSONL (save_dir/logs/[job_]logs_params_grads_stats.jsonl), wandb and/or
+        # stdout as
+        # configured. The step comes from the first optimizer state entry.
         if self.hparams.job_id is not None:
             log_stats_file = self.hparams.save_dir / "logs" / f"{self.hparams.job_id}_logs_params_grads_stats.jsonl"
         else:
@@ -800,6 +911,15 @@ Batch sizes:
         reduce_op_list,
         ds_name_suffix: str,
     ) -> List[Dict[str, torch.Tensor]]:
+        # [FUNCTION DOC] Gather a list of per-dataset metric mappings (dataset key -> scalar tensor or None)
+        # across processes in one
+        # all_gather. Single process: convert tensors to Python numbers in place and return the list.
+        # Otherwise fill
+        # missing values with placeholder_tensor, stack to (metrics x datasets), all_gather, drop placeholder
+        # entries,
+        # and reduce each with the corresponding reduce op (None if no process had a value). Returns a list of
+        # dataset key -> float/int or None.
+        # KNOWN ISSUE: a genuine metric value equal to the placeholder (-1) is silently dropped.
         """
         Collating all metrics to gather into ONE call to `torch.distributed.all_gather` instead of doing one per metric x dataset_name.
         """
@@ -864,7 +984,17 @@ Batch sizes:
         dataset_name,
         ds_name_suffix="",
     ):
+        # [FUNCTION DOC] HELPER: build per-dataset local metric mappings (only "<dataset_name><suffix>" and
+        # "all" set) for the batch,
+        # gather them across processes (float metrics summed except image/text ratio averaged; count metrics
+        # summed),
+        # and accumulate them into train_logs (loss/z-loss accumulators, counts, tflop counters, fwd-bwd time,
+        # energy,
+        # per-device batch counts), set the latest image/text ratio and cumulative tflops, increment the
+        # global batch
+        # counters, and record lr, step, epoch and current global batch size. Returns train_logs.
         def init_dict():
+            # [FUNCTION DOC] HELPER: return a mapping from every "<dataset value><suffix>" key to None.
             return {f"{e.value}{ds_name_suffix}": None for e in DatasetNames}
 
         local_per_token_loss = init_dict()
@@ -983,18 +1113,28 @@ Batch sizes:
         return train_logs
 
     def _update_datasets_states(self, dataset_idx, dataset_state):
+        # [FUNCTION DOC] HELPER: forward a batch's dataset state to the train loader's update_state.
         # TODO: This step will go away in future PRs. The dataloader already knows the state when it
         # sends it to the trainer. There is no need to send it to trainer and send it back. Let's
         # simplify this as well in the future
         self.train_loader.update_state(dataset_idx, dataset_state)
 
     def _get_additional_step_logs(self):
+        # [FUNCTION DOC] HELPER: return {"job_id", "commit"} (job_id only when set) for attaching to tracker
+        # logs.
         if self.config.hparams.job_id is not None:
             return {"job_id": self.config.hparams.job_id, "commit": self.config.hparams.repo_commit_id}
         else:
             return {"commit": self.config.hparams.repo_commit_id}
 
     def format_print_logs(self, dict_logs, keys_known_formats, skip_keys=[]):
+        # [FUNCTION DOC] Format logs as "key: value | " pairs in the order of keys_known_formats using each
+        # key's format spec;
+        # dict-valued metrics print the "all" entry, plus per-dataset "key/name" entries when PRINT is in
+        # train_logging_per_dataset_info; keys without formatter (excluding skip_keys) are appended raw.
+        # Returns str.
+        # KNOWN ISSUE: a None value with a non-empty format spec (e.g. a dataset with no loss yet) raises
+        # TypeError.
         """
         compact formatting of the logs with pre-specified formatter for each log entry, plus a
         catch-all if new log entries are added but forgotten to be added in keys_known_formats
@@ -1024,6 +1164,9 @@ Batch sizes:
         return log
 
     def format_jsonl_logs(self, dict_logs):
+        # [FUNCTION DOC] Flatten logs into a mapping for JSONL: skip keys containing "_acc", expand dicts to
+        # "key" (for "all") and
+        # "key/name" (only when JSONL per-dataset info is enabled).
         """
         Similar to format_print_logs but for jsonl logs
         """
@@ -1046,6 +1189,9 @@ Batch sizes:
         return log
 
     def format_val_logs(self, val_logs, logger_type=LoggingTypes.PRINT):
+        # [FUNCTION DOC] Format validation logs for PRINT (with fixed formats for loss, images, tokens,
+        # padding, ratio) or JSONL;
+        # ValueError for other logger types.
         keys_known_formats = {
             "val_per_token_loss": ".4f",
             "val_num_images": "",
@@ -1061,6 +1207,9 @@ Batch sizes:
             raise ValueError(f"Unknown logger type: {logger_type}")
 
     def format_train_logs(self, train_logs, logger_type=LoggingTypes.PRINT) -> Union[str, Dict]:
+        # [FUNCTION DOC] Format training logs for PRINT (fixed format specs, accumulator keys skipped) or
+        # JSONL; ValueError for
+        # other logger types.
         keys_known_formats = {
             "per_token_loss": ".4f",
             "lr": ".3E",
@@ -1106,6 +1255,13 @@ Batch sizes:
             raise ValueError(f"Unknown logger type: {logger_type}")
 
     def _log_training(self, curr_opt_step, train_task, train_logs):
+        # [FUNCTION DOC] HELPER: compute per-dataset average loss/z-loss (accumulated sums / per-device
+        # batches), tflops and watts
+        # since the last log; on the main process print a progress line with formatted logs (plus memory usage
+        # if
+        # enabled), append a JSONL record to save_dir/logs/[job_]logs.jsonl, and log to wandb (only "all"
+        # values unless
+        # per-dataset WANDB logging, dropping None). Resets the post-log accumulators and returns train_logs.
         for key in train_logs["per_token_loss_acc"].keys():
             if train_logs["num_per_device_batches_since_training_logged"][key] is not None:
                 train_logs["per_token_loss"][key] = (
@@ -1186,6 +1342,8 @@ Batch sizes:
         return train_logs
 
     def _log_activations(self, curr_opt_step):
+        # [FUNCTION DOC] HELPER: if the activation tracker has collected stats, dump them to JSONL
+        # (save_dir/logs/[job_]logs_activations.jsonl) and/or print them as configured, then clear them.
         if not self.activation_tracker.jsonl_stats:
             return
 
@@ -1217,10 +1375,17 @@ Batch sizes:
         self.activation_tracker.reset_jsonl_stats()
 
     def _check_kill_switch(self):
+        # [FUNCTION DOC] HELPER: set kill_switch_activated if the kill switch file exists.
         if self.hparams.kill_switch_path is not None and self.hparams.kill_switch_path.exists():
             self.kill_switch_activated = True
 
     def _check_jz_time_and_memory(self, curr_opt_step):
+        # [FUNCTION DOC] HELPER: gather host RAM usage percent from local main processes and flag
+        # memory_explosion when the max
+        # reaches the threshold; if a job time limit is set, the main process checks elapsed time since
+        # jz_start_time and broadcasts the flag; on the main process with wandb, log the max memory.
+        # Collective call:
+        # all ranks must call it.
         if self.accelerator.is_local_main_process:
             self.memory_value = torch.tensor(psutil.virtual_memory().percent).to(self.accelerator.device)
         else:
@@ -1242,6 +1407,7 @@ Batch sizes:
             self.accelerator.log({**system_metrics_logs, **self._get_additional_step_logs()}, step=curr_opt_step)
 
     def _check_sigterm_signal(self):
+        # [FUNCTION DOC] HELPER: set sigterm_signal_received if the SIGTERM listener caught a signal.
         if self.sigterm_listener.kill_now:
             self.sigterm_signal_received = True
 
@@ -1252,6 +1418,19 @@ Batch sizes:
         curr_epoch,
         gbs_running,
     ):
+        # [FUNCTION DOC] HELPER: checkpoint to save_dir/opt_step-<step>: dataloader states (resumable_states),
+        # accelerator state
+        # (accelerator_state); on the main process, the model (unwrapped_model; with LoRA also
+        # unwrapped_adapter and
+        # a merged-free base model via lora_unload; under ZeRO-3 only the config and adapter config), the
+        # tokenizer and
+        # resume_run_infos.json (train logs, wandb run id, seed, step, epoch, ramp-up state). Then marks the
+        # folder
+        # with "finished-saving", writes its path to save_dir/latest_opt_step_dir, and if upload_to_s3
+        # launches the
+        # detached sync_and_upload.sh script (also deleting the previous-to-last local checkpoint). Barriers
+        # before
+        # and after.
         self.accelerator.wait_for_everyone()
 
         # create directory and file names
@@ -1351,6 +1530,8 @@ Batch sizes:
             subprocess.Popen(cmd, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
     def _save_batch(self, batch, curr_idx):
+        # [FUNCTION DOC] HELPER: pickle the batch to save_dir/batches/batch_idx_<idx>_proc_<rank>.pkl
+        # (debugging).
         dir_path = self.hparams.save_dir / "batches"
         dir_path.mkdir(parents=True, exist_ok=True)
 
@@ -1358,6 +1539,9 @@ Batch sizes:
             pickle.dump(batch, file)
 
     def _check_if_training_is_over(self, curr_opt_step, max_num_updates):
+        # [FUNCTION DOC] HELPER: run the kill-switch, time/memory (collective) and SIGTERM checks and return
+        # True (with an info log
+        # of the reason) if any fired or the step reached max_num_updates or max_num_updates_this_run.
         self._check_kill_switch()
         self._check_jz_time_and_memory(curr_opt_step=curr_opt_step)
         self._check_sigterm_signal()
@@ -1390,6 +1574,11 @@ Batch sizes:
         train_logs,
         opt_step_is_saved,
     ):
+        # [FUNCTION DOC] HELPER: determine whether training is over and whether to save (every
+        # train_saving_opt_steps steps, or when
+        # the save switch file exists, which is then deleted); save if needed and not already saved for this
+        # step.
+        # Returns (finished_training, opt_step_is_saved).
         # check if should finish the training
         finished_training = self._check_if_training_is_over(curr_opt_step, max_num_updates)
 
@@ -1414,6 +1603,9 @@ Batch sizes:
         return finished_training, opt_step_is_saved
 
     def _reset_train_logs(self, train_logs):
+        # [FUNCTION DOC] HELPER: create train_logs from METRICS_TO_DEFAULT_VALUE_FN when None (except post-log
+        # accumulators), then
+        # reset the post-log accumulators to fresh defaults. Returns train_logs.
         if train_logs is None:
             train_logs = {}
 
@@ -1429,6 +1621,9 @@ Batch sizes:
         return train_logs
 
     def _check_default_dict_in_train_logs(self, train_logs):
+        # [FUNCTION DOC] HELPER: after JSON reload, turn every metric that should be a defaultdict back into
+        # one (preserving loaded
+        # values) so missing dataset keys get their defaults.
         for metric_name, default_value_fn in METRICS_TO_DEFAULT_VALUE_FN.items():
             value = default_value_fn()
             # if the metric was initialized as a defaultdict, we need to convert it again to a defaultdict
@@ -1439,6 +1634,7 @@ Batch sizes:
         return train_logs
 
     def _end_of_epoch_reset_train_logs(self, train_logs):
+        # [FUNCTION DOC] HELPER: reset the per-epoch batch counters; ValueError if train_logs is None.
         if train_logs is None:
             raise ValueError("`train_logs` should not be `None` at the end of an epoch.")
         train_logs.update(
@@ -1450,6 +1646,15 @@ Batch sizes:
         return train_logs
 
     def _do_validation(self, progress, curr_opt_step):
+        # [FUNCTION DOC] HELPER: run the model in eval mode without gradients over the whole validation
+        # loader, accumulating per
+        # dataset (and "all") loss sums, steps, images, text tokens, padding and image/text ratios, with
+        # periodic
+        # progress logs; switch back to train mode. Returns (steps, loss sums, images, tokens, ratio lists,
+        # padding).
+        # KNOWN ISSUE: relies on the validation loader terminating, but CustomChainDataset iterates forever
+        # (only the
+        # cross-rank stop in DataLoaderForIterableWrapperDataset can end it).
         try:
             val_len = len(self.val_loader)
         except TypeError:
@@ -1530,7 +1735,14 @@ Batch sizes:
         val_image_to_text_ratio,
         val_num_padding,
     ):
+        # [FUNCTION DOC] HELPER: average the ratio lists, gather every per-dataset metric across processes,
+        # drop datasets with no
+        # steps, compute mean loss per step, summed counts and mean ratio (over ranks with steps), then on the
+        # main
+        # process print, append a validation JSONL record and log to wandb.
         def convert_to_tensor(x):
+            # [FUNCTION DOC] HELPER: wrap a non-tensor number into a tensor on the accelerator device; tensors
+            # are returned unchanged.
             if not torch.is_tensor(x):
                 return torch.tensor(x, device=self.accelerator.device)
             return x
@@ -1610,6 +1822,21 @@ Batch sizes:
                 self.accelerator.log({**val_logs, **self._get_additional_step_logs()}, step=curr_opt_step)
 
     def train(self, maybe_torch_profile_scheduler=None):
+        # [FUNCTION DOC] Run the training loop and return train_logs. Sets up state, then per epoch: set the
+        # loader epoch, restore
+        # resume states (map-style resume only for one process, else NotImplementedError), and for each
+        # micro-batch:
+        # check stop/save conditions, toggle activation hooks, optionally save the batch, run _do_batch inside
+        # accelerator.accumulate measuring time and GPU energy, advance the optimizer step every grad_acc_size
+        # micro-batches, update logs and dataset states, log training/activations at their intervals, update
+        # the
+        # batch-size ramp-up (increase global batch size by increment every `samples` seen samples until
+        # finish),
+        # check stop/save again, run validation every val_logging_opt_steps (pausing wandb watch), print
+        # timing
+        # breakdowns and step the torch profiler when given. At epoch end increment the epoch, reset per-epoch
+        # logs and
+        # loader state; when max_num_epochs is reached save and stop. Ends wandb tracking if enabled.
         # timing_break_down = self.accelerator.is_main_process and self.hparams.timing_break_down
 
         if self.accelerator.is_main_process:
@@ -1969,4 +2196,5 @@ Batch sizes:
         return train_logs
 
     def _get_system_metrics_logs(self, memory_value_max):
+        # [FUNCTION DOC] HELPER: return {"memory_max_over_nodes": memory_value_max}.
         return {"memory_max_over_nodes": memory_value_max}

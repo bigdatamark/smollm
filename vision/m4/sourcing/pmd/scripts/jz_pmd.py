@@ -1,3 +1,10 @@
+# [MODULE DOC] CLI script (Jean Zay cluster version): build an image PMD subset from a local loading script and save it
+# as arrow shards. Args: `--dataset_name` (expected `jz_conceptual_captions` or `jz_wit`; the "jz_" prefix
+# is stripped for the output folder name), `--loading_script_path`, `--num_proc` (default 1).
+# Loads the dataset with `load_dataset`, converts images to bytes with `process_ds_wrapped` (batch size
+# 1000), then for each split of the resulting DatasetDict writes contiguous shards of about 50,000 rows to
+# "$cnw_ALL_CCFRSCRATCH/general_pmd/image/<name>/<split>/<i:05>-<n:05>" (requires that env var).
+# Raises ValueError if the loaded object is not a DatasetDict. Prints progress messages.
 import argparse
 import math
 import os

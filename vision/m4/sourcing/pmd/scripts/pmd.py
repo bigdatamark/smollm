@@ -1,3 +1,7 @@
+# [MODULE DOC] Script to build all PMD (Public Multimodal Dataset) image subsets using the loader builders from
+# `m4.sourcing.pmd.loader_builder`, convert their images to bytes and save them as arrow shards under
+# "$HOME/general_pmd/image/<dataset>/<split>/". Run as main, it uses 60% of CPU cores as processes,
+# 8 download threads per process and 1 retry.
 import math
 import os
 from multiprocessing import cpu_count
@@ -28,6 +32,11 @@ def build_pmd_subsets(
     retries: int = 3,
     offline_mode: bool = False,
 ):
+    # [FUNCTION DOC] Build, shard and save every PMD subset (coco, sbu_captions, the four localized_narratives variants,
+    # visual_genome, conceptual_12m, red_caps, yfcc100m) by creating a DatasetBuilderConfig with the given
+    # options and calling its build_shard_and_save_to_disk. Params: split (None = all splits), num_proc
+    # (default 16), num_threads_per_proc (default 4), retries (default 3), offline_mode (default False).
+    # Returns None (the method's result).
     return DatasetBuilderConfig(
         dataset_names=[
             "coco",
@@ -50,6 +59,7 @@ def build_pmd_subsets(
 
 
 class DatasetBuilderConfig:
+    # [CLASS DOC] Holds the selected dataset names and builder options and drives building/saving of each subset.
     def __init__(
         self,
         dataset_names: List[str],
@@ -59,6 +69,8 @@ class DatasetBuilderConfig:
         retries: int,
         offline_mode: bool,
     ):
+        # [FUNCTION DOC] Store dataset_names (list of subset keys), split, num_proc, num_threads_per_proc, retries and offline_mode
+        # as attributes.
         self.dataset_names = dataset_names
         self.split = split
         self.num_proc = num_proc
@@ -67,6 +79,11 @@ class DatasetBuilderConfig:
         self.offline_mode = offline_mode
 
     def __get_builders__(self) -> List[BaseLoaderBuilder]:
+        # [FUNCTION DOC] HELPER: instantiate a loader builder for every known subset key (download-based builders get the thread,
+        # retry and offline options; visual_genome uses batch_size 100) and return a list of (name, builder) pairs
+        # for the configured dataset_names, in that order. Raises KeyError for an unknown name.
+        # KNOWN ISSUE: annotated as returning List[BaseLoaderBuilder] but returns (name, builder) tuples; it also
+        # eagerly constructs all builders even if only some names are requested.
         all_builders = {
             "coco": COCOLoaderBuilder(split=self.split, num_proc=self.num_proc),
             "sbu_captions": SBUCaptionsLoaderBuilder(
@@ -123,6 +140,10 @@ class DatasetBuilderConfig:
         return [(dataset_name, all_builders[dataset_name]) for dataset_name in self.dataset_names]
 
     def build_shard_and_save_to_disk(self):
+        # [FUNCTION DOC] For each (name, builder): call builder.build(), convert images to bytes with process_ds_wrapped (batch
+        # size 1000, num_proc), then for each split write contiguous shards of about 50,000 rows to
+        # "$HOME/general_pmd/image/<name>/<split>/<i:05>-<n:05>" via save_to_disk. Prints progress.
+        # Raises ValueError if a built dataset is not a DatasetDict.
         """Build, shard and save"""
         builders = self.__get_builders__()
         for dataset_name, builder in builders:

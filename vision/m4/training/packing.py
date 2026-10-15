@@ -1,3 +1,15 @@
+# [MODULE DOC] Packing logic: converts batches of raw samples (web documents, image-caption pairs, OCR pages,
+# VQA
+# triplets, SFT conversations) into fixed-length model inputs. Images are optionally split into a grid of
+# sub-images plus a global view (utils.image_splitting); each image is represented in the text by
+# FAKE_TOKEN_AROUND_IMAGE_V2, an optional "<row_r_col_c>" or "<global-img>" marker and image_seq_len
+# IMAGE_TOKENs. Token sequences are greedily packed into max_seq_len rows, padded, and returned as a dict of
+# tensors: input_ids, attention_mask, pixel_values (batch, images, 3, H, W, zero padded),
+# pixel_attention_mask, num_images, num_text_tokens and, for SFT, labels. The maximum number of image
+# tensors per row is MAX_NUM_IMAGES_AFTER_SPLIT = (k^2 + (1 if k != 1)) * max_num_images with
+# k = ceil(max_image_size / vision_encoder_max_image_size).
+# Constants: _IMAGE_BONUS_VALUE (2, sampling bonus near images), _MIN_LENGTH_DOCUMENTS_TO_PACK (5 tokens),
+# RANDOM_LINE_BREAK_PROB (0.05, SFT).
 """
 This file defines the data packing logic.
 """
@@ -32,6 +44,13 @@ def get_splitted_images_and_corresponding_text(
     image_seq_len,
     scale_up_factor=None,
 ):
+    # [FUNCTION DOC] Split image with image_splitting (forwarding size, scale-up and scale_up_factor args) and
+    # build its text:
+    # when split into several crops, for each grid row a sequence of FAKE_TOKEN + "<row_i_col_j>" +
+    # image_seq_len
+    # IMAGE_TOKENs per column followed by a newline, then "\n" + FAKE_TOKEN + "<global-img>" + image tokens +
+    # FAKE_TOKEN; when not split, just FAKE_TOKEN + "<global-img>" + image tokens + FAKE_TOKEN. Returns
+    # (list of image crops including the global image, text).
     splitted_images_array, image_rows, image_cols = image_splitting(
         image=image,
         vision_encoder_max_image_size=vision_encoder_max_image_size,
@@ -75,6 +94,13 @@ def remove_extra_images(
     image_token_id: int,
     double_breaking_lines_token_ids: List[int],
 ):
+    # [FUNCTION DOC] Drop the images beyond max_num_images from a token list and its image list (see docstring
+    # strategy): delete
+    # the trailing image patterns (fake token + image_seq_len image tokens), then replace every remaining fake
+    # token from the first removed position onward by the "\n\n" token ids. Mutates input_ids_ in place before
+    # rebuilding it. Returns (new input ids list, first max_num_images images). Raises ValueError if there is
+    # nothing to remove, the image pattern count does not match the images, a pattern has wrong tokens, or the
+    # output checks fail (wrong image count or longer output).
     """
     Removes images if there are more than `max_num_images`.
     Removes the associated image tokens from the text.
@@ -173,6 +199,26 @@ def greedy_packing(
     eos_token_id: int = None,
     assistant_token_ids: List[int] = None,
 ):
+    # [FUNCTION DOC] Pack token sequences with their image lists into rows of at most max_seq_len tokens: each
+    # sequence goes into
+    # the first existing row where it fits (and, unless truncate_images_within_same_example, where the row's
+    # image
+    # count stays <= max_num_images), otherwise starts a new row (dropped if it alone exceeds max_num_images
+    # without truncation). Then, per row: remove extra images (truncate mode) or raise ValueError if too many;
+    # skip rows without images; right-pad ids with pad_token_id; pad images into (max_num_images, 3, maxH,
+    # maxW)
+    # with a boolean pixel mask; build the attention mask; skip (with an error log) rows whose image-token
+    # count
+    # != image_seq_len * images. Results are appended to the output_* lists, which are also returned. With
+    # mask_labels (SFT), labels are copies of input ids where user parts (from BOS up to and including the
+    # "\nAssistant:" tokens after each odd end-of-utterance) are replaced by image_token_id (ignored by the
+    # loss);
+    # rows with an odd number of end-of-utterance tokens are left unmasked with an error log; requires
+    # end_of_utterance, bos, eos and assistant token ids (ValueError otherwise). Raises ValueError on length
+    # mismatch of inputs or a sequence longer than max_seq_len. Returns (input_ids, labels, images,
+    # attention_masks, pixel_attention_masks, num_images, num_text_tokens) lists.
+    # KNOWN ISSUE: the output_* parameters default to shared mutable lists, so calls relying on the defaults
+    # would accumulate results across calls (all callers here pass fresh lists or their own lists).
     """
     Args details:
     `images_to_pack` -> # Each tensor is of size (3, im_height, im_width)
@@ -319,6 +365,12 @@ def greedy_packing(
             )
 
         def find_delimiters_tokens_to_mask(label_list):
+            # [FUNCTION DOC] HELPER: scan a label list and return (start, end) index pairs to mask: a span
+            # starts at BOS or right after an
+            # even (assistant-closing) end-of-utterance token (unless EOS follows) and ends after the odd
+            # (user-closing)
+            # end-of-utterance token plus the assistant prefix tokens. Uses asserts to validate the expected
+            # structure.
             starts_ends_list = []
             start, end = None, None
             counter_eou = 0
@@ -384,6 +436,12 @@ def prepare_result_return(
     output_num_text_tokens,
     output_labels=[],
 ):
+    # [FUNCTION DOC] Batchify packed rows: if there are no rows, return empty tensors for every key; otherwise
+    # stack ids and
+    # attention masks, zero-pad every row's images/pixel masks to the batch max image count, height and width
+    # (None rows skipped; pixel keys omitted if no images), sort rows with numpy lexsort by image width, then
+    # height, then text length (to reduce padding) and return the dict input_ids, attention_mask, num_images,
+    # num_text_tokens, pixel_attention_mask, pixel_values and labels (only if output_labels is non-empty).
     """
     This function returns the end dictionary at the exit of the dataloader.
     Mostly batchify things and pad accordingly.
@@ -469,6 +527,23 @@ def split_pack_and_pad_webdocs(
     skip_ending_two_images=True,
     skip_multiple_consecutive_images=True,
 ):
+    # [FUNCTION DOC] Mapper for web documents. sample has "texts" and "images" (lists per document, aligned,
+    # with None gaps);
+    # ValueError if images missing. For each document: skip it if it lacks any text or image, has more than
+    # max_num_images_per_document images, ends with two images (skip_ending_two_images) or has 3 consecutive
+    # images (skip_multiple_consecutive_images); split it into sub-documents at texts containing
+    # "END_OF_DOCUMENT_TOKEN_TO_BE_REPLACED"; build the text by concatenating texts (space-separated, no space
+    # right after an image) and image texts from get_splitted_images_and_corresponding_text, transforming each
+    # crop with image_transform; skip texts containing image special tokens; tokenize and add EOS/BOS per
+    # flags.
+    # Documents with a single image at the very end, shorter than 5 tokens, or longer than max_seq_len are
+    # skipped; the rest are packed with greedy_packing (no image truncation) and returned via
+    # prepare_result_return. prefix_seed and max_num_samples_per_document only matter in the disabled
+    # long-document sampling code.
+    # KNOWN ISSUE: the long-document sub-sampling branch is unreachable (a bare continue precedes it), and
+    # inside
+    # it list.index failures would raise ValueError not IndexError, and the try/else raises on every success.
+    # last_was_image is not reset between documents.
     """
     Return a batch of samples in the format expected by the model which
     includes `input_ids`, `pixel_values`, `attention_mask`, `image_attention_mask`,
@@ -537,6 +612,8 @@ def split_pack_and_pad_webdocs(
                 continue
 
         def has_consecutive_nones(lst, max_num_nones=3):
+            # [FUNCTION DOC] HELPER: return True if lst contains at least max_num_nones (default 3)
+            # consecutive None items.
             count = 0
             for item in lst:
                 if item is None:
@@ -915,6 +992,11 @@ def split_pack_and_pad_pairs(
     add_begin_of_doc_token=True,
     add_end_of_doc_token=True,
 ):
+    # [FUNCTION DOC] Mapper for image-caption pairs: sample has "text" and "image" lists (ValueError if images
+    # missing). Skips
+    # pairs with a missing element or with image special tokens in the text; prepends the image text for the
+    # (split) image to the stripped caption, tokenizes, adds EOS/BOS per flags, drops sequences longer than
+    # max_seq_len, transforms each crop, then greedy-packs (no truncation) and returns prepare_result_return.
     pad_token_id = tokenizer.pad_token_id
     image_token_id = tokenizer.convert_tokens_to_ids(IMAGE_TOKEN)
     fake_token_around_image_id = tokenizer.convert_tokens_to_ids(FAKE_TOKEN_AROUND_IMAGE_V2)
@@ -1027,6 +1109,21 @@ def split_pack_and_pad_ocr(
     add_begin_of_doc_token=True,
     add_end_of_doc_token=True,
 ):
+    # [FUNCTION DOC] Mapper for OCR documents: sample has "texts" and "images", one list of pages per document
+    # (ValueError if
+    # images missing). Raises ValueError if the token length of max_num_images maximally split images reaches
+    # max_seq_len. Walks pages accumulating page texts (joined by blank lines) and images into an example;
+    # when
+    # adding a page would exceed max_seq_len or MAX_NUM_IMAGES_AFTER_SPLIT, emits the accumulated example and
+    # starts over from the current page; a single page whose text alone is too long is emitted as several
+    # examples (first max_seq_len tokens, then chunks each prefixed with the page's image tokens), all with
+    # the
+    # same image; an example is also emitted at the document end or when the image limit is reached exactly.
+    # Results are greedy-packed and returned via prepare_result_return.
+    # KNOWN ISSUE: when splitting an over-long accumulated example, its token ids include
+    # curr_image_sublist_text
+    # but continuation chunks after the first are not checked against max_seq_len once the image prefix is
+    # added; the loop variable `sample` shadows the input argument.
     pad_token_id = tokenizer.pad_token_id
     image_token_id = tokenizer.convert_tokens_to_ids(IMAGE_TOKEN)
     fake_token_around_image_id = tokenizer.convert_tokens_to_ids(FAKE_TOKEN_AROUND_IMAGE_V2)
@@ -1063,6 +1160,9 @@ def split_pack_and_pad_ocr(
         raise ValueError("`images` must be present in the sample")
 
     def tokenize_text_sublist(curr_text_sublist, curr_image_sublist_text, curr_image_text, tokenizer):
+        # [FUNCTION DOC] HELPER: join the page texts with blank lines, prefix the accumulated image text and
+        # the current image text,
+        # tokenize without special tokens and add EOS/BOS per the outer flags. Returns a list of ids.
         sample_text = "\n\n".join(curr_text_sublist).strip()
         sample_text = f"{curr_image_sublist_text}{curr_image_text}{sample_text}"
 
@@ -1210,6 +1310,18 @@ def split_pack_and_pad_iqa_finetuning(
     add_begin_of_doc_token=True,
     add_end_of_doc_token=True,
 ):
+    # [FUNCTION DOC] Mapper for image/question/answer triplets (VQAv2, DocVQA): sample has "image",
+    # "question", "answer" lists
+    # (ValueError if images missing). Each valid triplet becomes BOS + FAKE + image tokens + FAKE +
+    # "Question: q\nAnswer: a" + EOS (dropped if longer than max_seq_len), one row per triplet without packing
+    # or
+    # splitting: padded input_ids, attention mask, a single transformed image, num_images 1 and
+    # num_text_tokens
+    # (the full length). Returns empty tensors when nothing is valid. No pixel_attention_mask is produced.
+    # KNOWN ISSUE: get_mapper passes max_image_size, vision_encoder_max_image_size and pre_split_* kwargs
+    # which
+    # this signature does not accept (TypeError); add_begin/end_of_doc_token flags are ignored; images are
+    # stacked without padding, so differing sizes fail.
     question_batch = sample["question"]
     answer_batch = sample["answer"]
     image_batch = sample.get("image", None)
@@ -1305,6 +1417,24 @@ def split_pack_and_pad_sft(
     add_begin_of_doc_token=True,
     add_end_of_doc_token=True,
 ):
+    # [FUNCTION DOC] Mapper for SFT conversations: sample has "texts" (per example, a list of turn mappings
+    # with user, assistant,
+    # source) and "images" (ValueError if missing). Skips examples without turns, with image special tokens in
+    # any turn, or (for "PDFA key" sources) with a turn longer than 500 characters. Splits each image
+    # (replacing
+    # the entries of the sample's image list in place) and concatenates their texts; shuffles turn order
+    # (Python global random) unless the source is in the ordered list ["ny_cc_ranking"]; keeps at most 7
+    # turns,
+    # rendered as "User:<images or space>[random newline]<user><EOU>\nAssistant: <assistant><EOU>\n" for the
+    # first
+    # turn and "User: ..." afterwards; strips newlines, tokenizes, adds EOS/BOS per flags, drops examples
+    # longer
+    # than max_seq_len, then greedy-packs with label masking (only assistant answers contribute to the loss)
+    # and
+    # returns prepare_result_return with labels.
+    # KNOWN ISSUE: shuffling and random line breaks use the unseeded global random module, ignoring
+    # prefix_seed,
+    # so results are not reproducible on resume.
     MAX_NUMBER_OF_TURNS = 7
     LIST_OF_SFT_DATASETS_WITH_TURNS_ORDER = ["ny_cc_ranking"]
     pad_token_id = tokenizer.pad_token_id

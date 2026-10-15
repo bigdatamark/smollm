@@ -1,3 +1,10 @@
+# [MODULE DOC] Webdataset decoding pipelines: turn tar shards (local or streamed from S3 via "pipe:bash ...
+# get_file.sh"
+# commands) into decoded, batched samples ready for packing. Supports web documents (interleaved texts and
+# images per document), image-caption pairs, OCR documents (PNG or PDF pages), image/question/answer
+# triplets (VQAv2, DocVQA) and SFT conversations. Each stage is a generator wrapped with
+# wds.filters.pipelinefilter; per-sample errors go to a handler (default: log a warning and continue).
+# Module globals: meta_prefix/meta_suffix ("__", unused here), trace (debug printing flag, False).
 """
 This file defines the data decoding logic (i.e. from web tar hosted on s3 to samples feedable to packing)
 """
@@ -22,6 +29,9 @@ trace = False
 
 
 def check_webdataset_command(command):
+    # [FUNCTION DOC] Validate a shard URL/command: anything without "s3:/" is accepted; an S3 command must
+    # (after stripping)
+    # start with "pipe:bash", end with ".tar" and mention "get_file.sh". Returns bool.
     if "s3:/" not in command:
         return True
 
@@ -39,6 +49,8 @@ def check_webdataset_command(command):
 
 
 def webdoc_valid_sample(sample):
+    # [FUNCTION DOC] HELPER: True if sample is a non-empty dict, not flagged "__bad__", and
+    # sample_has_all_files holds.
     """Check whether a sample is valid.
 
     :param sample: sample to be checked
@@ -53,6 +65,10 @@ def webdoc_valid_sample(sample):
 
 
 def sample_has_all_files(current_sample):
+    # [FUNCTION DOC] HELPER: read the sample's "metadata.value" bytes (newline-separated list of expected file
+    # names) and return
+    # True only if it is present, non-empty, and every listed name appears among the sample's "*.fname"
+    # values.
     meta = current_sample.get("metadata.value", None)
     if meta is None:
         return False
@@ -69,7 +85,10 @@ def sample_has_all_files(current_sample):
 
 
 class ImageDecoder:
+    # [CLASS DOC] Callable that decodes image bytes into a fully loaded PIL image.
     def __call__(self, bytes_):
+        # [FUNCTION DOC] Open bytes_ with PIL from an in-memory buffer, force-load the pixels and return the
+        # image.
         img = PIL.Image.open(io.BytesIO(bytes_))
         img.load()
         return img
@@ -77,12 +96,17 @@ class ImageDecoder:
 
 # Taken from https://github.com/mlfoundations/open_clip/blob/c48111dacac55db24878af229d8a5662c03e6f1c/src/training/data.py#L180-L183
 def log_and_continue(exn):
+    # [FUNCTION DOC] Webdataset error handler: log a warning with the exception repr and return True (continue
+    # processing).
     """Call in an exception handler to ignore any exception, issue a warning, and continue."""
     logging.warning(f"Handling webdataset error ({repr(exn)}). Ignoring.")
     return True
 
 
 def collate_dicts(samples):
+    # [FUNCTION DOC] HELPER: batch collation function turning a list of dict samples into a dict of lists,
+    # using the keys of
+    # the first sample.
     keys = samples[0].keys()
     batched_samples = {key: [sample[key] for sample in samples] for key in keys}
     return batched_samples
@@ -92,6 +116,17 @@ def collate_dicts(samples):
 # Adapt group_by_keys to our webdocument format in which each samples contains several text and image files
 # https://github.com/webdataset/webdataset/blob/039d74319ae55e5696dcef89829be9671802cf70/webdataset/tariterators.py#L195-L250
 def group_by_keys_interleaved(data, handler=log_and_continue):
+    # [FUNCTION DOC] Generator grouping tar file entries ({"fname", "data", "__url__"}) into web-document
+    # samples. File names are
+    # "<prefix>.<idx>.<text|image>.<ext>" or "<prefix>.metadata.txt"; consecutive entries with the same prefix
+    # form one sample keyed "__key__" (prefix) and "__url__", with "<idx or 'metadata'>.value/.type/.fname"
+    # entries. A sample is yielded when the prefix changes (and at the end) if webdoc_valid_sample passes,
+    # otherwise a warning is logged. Unknown data types raise ValueError, which (like any error) is passed to
+    # handler with stream/url appended to its args; handler returning False stops iteration.
+    # KNOWN ISSUE: the duplicate check tests "suffix in current_sample" but keys are stored as
+    # "<suffix>.value",
+    # so duplicates are never detected; with trace enabled, metadata entries reference an undefined/stale idx;
+    # fname.strip("./") strips any leading/trailing '.' and '/' characters, not just a "./" prefix.
     """Return function over iterator that groups key, value pairs into samples."""
     current_sample = None
     for filesample in data:
@@ -138,6 +173,8 @@ def group_by_keys_interleaved(data, handler=log_and_continue):
 
 
 def _tarfile_to_webdocument_samples(src, handler=log_and_continue):
+    # [FUNCTION DOC] HELPER: pipeline stage: open shard URLs, expand tar files, and group entries into
+    # web-document samples.
     streams = url_opener(src, handler=handler)
     files = tar_file_expander(streams, handler=handler)
     samples = group_by_keys_interleaved(files, handler=handler)
@@ -148,6 +185,11 @@ tarfile_to_webdocument_samples = wds.filters.pipelinefilter(_tarfile_to_webdocum
 
 
 def _collate_texts_and_images_webdocument(data, handler=log_and_continue):
+    # [FUNCTION DOC] HELPER: generator converting grouped web-document samples into {"__key__", "__url__",
+    # "texts", "images"}
+    # where texts/images are lists of length max index + 1 holding raw bytes at each index according to its
+    # type
+    # (None elsewhere). Unknown types raise ValueError; errors go to handler.
     for sample in data:
         try:
             max_example_indices = max(
@@ -178,6 +220,8 @@ collate_texts_and_images_webdocument = wds.filters.pipelinefilter(_collate_texts
 
 
 def _decode_image_and_text_webdocument(data, handler=log_and_continue):
+    # [FUNCTION DOC] HELPER: generator decoding each non-None image (to PIL) and text (UTF-8) in a
+    # web-document sample in place.
     image_decoder = ImageDecoder()
     for sample in data:
         try:
@@ -197,12 +241,19 @@ decode_image_and_text_webdocument = wds.filters.pipelinefilter(_decode_image_and
 
 # Image text pairs utils
 def split_keep_2(x):
+    # [FUNCTION DOC] HELPER: key function for group_by_keys on pair tars: strip '.'/'/' characters from both
+    # ends of the file
+    # name and return its first two dot-separated parts (prefix, suffix), e.g. "abc.image.jpg" -> ("abc",
+    # "image").
     x = x.strip("./")
     x_splitter = x.split(".")
     return x_splitter[0], x_splitter[1]
 
 
 def _tarfile_to_pair_samples(src, handler=log_and_continue):
+    # [FUNCTION DOC] HELPER: pipeline stage: open shard URLs, expand tars and group files into samples with
+    # webdataset's
+    # group_by_keys using split_keep_2 (so sample keys are like "image", "text", "json", "pdf", "png").
     streams = url_opener(src, handler=handler)
     files = tar_file_expander(streams, handler=handler)
     samples = group_by_keys(files, keys=split_keep_2, handler=handler)
@@ -213,6 +264,7 @@ tarfile_to_pair_samples = wds.filters.pipelinefilter(_tarfile_to_pair_samples)
 
 
 def _decode_image_and_text_pairs(data, handler=log_and_continue):
+    # [FUNCTION DOC] HELPER: generator decoding sample "image" bytes to PIL and "text" bytes to str, in place.
     image_decoder = ImageDecoder()
     for sample in data:
         try:
@@ -236,6 +288,12 @@ def _decode_pdf_pages(
     sample,
     num_anno_pages,
 ):
+    # [FUNCTION DOC] HELPER: render the first num_anno_pages pages of the PDF bytes in sample["pdf"] with
+    # PyMuPDF at 150 dpi and
+    # return them as a list of grayscale ("L") PIL images. Logs a warning if the PDF page count differs from
+    # num_anno_pages.
+    # KNOWN ISSUE: if the PDF has fewer pages than annotated, loading a missing page raises (only warned
+    # first).
     image_fmt = "L"
     with io.BytesIO(sample["pdf"]) as b:
         # FIXME test and use an alternate pdf reader/render as default
@@ -260,6 +318,17 @@ def _decode_pdf_pages(
 
 
 def _decode_ocr_documents(data, handler=log_and_continue):
+    # [FUNCTION DOC] HELPER: generator decoding OCR samples. The "json" annotation is parsed; with a "png" key
+    # (rendered_text
+    # dataset) the document is one image plus its OCR lines joined by newlines; otherwise PDF pages are
+    # rendered
+    # and each page's text is its "lines" texts (pdfa) or "text" words (idl) joined by spaces. Documents with
+    # more
+    # than MAX_NUM_PAGES (1) pages are yielded as consecutive chunks of that many pages. Yields
+    # {"images": [...], "texts": [...]}; errors go to handler.
+    # KNOWN ISSUE: all chunks of one document are the same dict object mutated in place, so downstream
+    # batching
+    # that keeps references sees only the last chunk repeated.
     # Only used for rendered_text dataset
     image_decoder = ImageDecoder()
     # Limit the number of pages to avoid OOM
@@ -307,6 +376,7 @@ decode_ocr_documents = wds.filters.pipelinefilter(_decode_ocr_documents)
 
 # Image/question/asnwer triplets utils
 def _decode_iqa_triplets(data, handler=log_and_continue):
+    # [FUNCTION DOC] HELPER: generator decoding "image" to PIL and "question"/"answer" bytes to str, in place.
     image_decoder = ImageDecoder()
     for sample in data:
         try:
@@ -327,6 +397,9 @@ decode_iqa_triplets = wds.filters.pipelinefilter(_decode_iqa_triplets)
 
 # SFT utils
 def _decode_image_and_text_sft(data, handler=log_and_continue):
+    # [FUNCTION DOC] HELPER: generator for SFT samples: decode non-None images to PIL and parse non-None texts
+    # as JSON (UTF-8),
+    # dropping None entries, in place.
     image_decoder = ImageDecoder()
     for sample in data:
         try:
@@ -355,6 +428,12 @@ def _get_web_dataset(
     shuffle_after_tarfile_to_samples_buffer_size=100,
     shuffle_after_batching_buffer_size=1000,
 ):
+    # [FUNCTION DOC] HELPER: assemble a wds.DataPipeline: shard list (urls optionally shuffled in place),
+    # optional shuffle buffer,
+    # split_by_node, optional shuffle buffer, the tar-to-samples ops, optional shuffle buffer, the
+    # decode/batch
+    # ops, and an optional final shuffle buffer (a buffer size of None skips that shuffle; defaults
+    # 100/100/100/1000).
     if shuffle_initial_urls_list:
         random.shuffle(urls)
 
@@ -392,6 +471,11 @@ def get_webdataset(
     shuffle_after_tarfile_to_samples_buffer_size,
     shuffle_after_batching_buffer_size,
 ):
+    # [FUNCTION DOC] Build the webdataset pipeline for ds_type: each type uses split_by_worker plus the
+    # matching tar grouping
+    # (web-document grouping for WEB_DOCUMENTS and SFT, pair grouping otherwise), the matching decoder(s), and
+    # partial batching of batch_size with collate_dicts; shuffle options are forwarded to _get_web_dataset.
+    # Raises ValueError for unsupported types.
     if ds_type == DatasetTypes.WEB_DOCUMENTS:
         tar_to_samples_ops = [
             wds.split_by_worker,

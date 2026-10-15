@@ -1,3 +1,15 @@
+# [MODULE DOC] Dataset and dataloader construction for m4 training. Datasets come either from HF `datasets`
+# (local
+# save_to_disk folders or hub datasets) or from webdataset tar pipelines (dataset_utils). Two modes:
+# (1) pre-processed (realtime_processing False): HF datasets are mapped through the packing functions up
+# front,
+# concatenated, and served by a map-style DataLoaderForMappedWrapperDataset with a ResumableSampler (marked
+# unmaintained); (2) realtime processing: each dataset is wrapped in an iterable wrapper that shards by
+# rank/worker, packs on the fly into fixed-size batches with overflow carry-over and resumable state, the
+# wrappers are chained/interleaved by CustomChainDataset, and served by DataLoaderForIterableWrapperDataset
+# which tracks per-worker resume state and stops all ranks together. Batches yielded by the iterable path are
+# tuples (dataset_idx, dataset_name, dataset_state, batch dict of tensors).
+# Import side effects: PIL MAX_IMAGE_PIXELS disabled and truncated images allowed globally.
 """
 This file defines the dataloader logic.
 """
@@ -84,6 +96,8 @@ dataset[idx]:
 
 
 def to_tensor(batch):
+    # [FUNCTION DOC] HELPER: convert, in place, every non-tensor value of the batch mapping to a torch tensor;
+    # return the batch.
     for key in batch:
         if not torch.is_tensor(batch[key]):
             batch[key] = torch.tensor(batch[key])
@@ -92,6 +106,9 @@ def to_tensor(batch):
 
 # We don't want collate_fn to add extra dim --> can't use a lambda because of `multiprocessing` pickle requirements!
 def simple_collate(x):
+    # [FUNCTION DOC] HELPER: DataLoader collate function returning the single (already batched) element x[0],
+    # avoiding an extra
+    # batch dimension; a named function so it can be pickled for worker processes.
     return x[0]
 
 
@@ -115,6 +132,16 @@ def get_mapper(
     add_end_of_doc_token: bool = True,
     max_num_images_per_document: Optional[int] = None,
 ):
+    # [FUNCTION DOC] Return the packing function for dataset_type with its keyword arguments bound
+    # (functools.partial): tokenizer,
+    # image_transform, max_seq_len (256), max_num_images (5), max_image_size (384),
+    # vision_encoder_max_image_size (384), pre_split_scale_up_max/frequency, image_seq_len and BOS/EOS flags;
+    # WEB_DOCUMENTS additionally gets max_num_samples_per_document and max_num_images_per_document. Mapping:
+    # IMAGE_CAPTION_PAIRS -> split_pack_and_pad_pairs, OCR -> ..._ocr, VQAV2_TASK_FINETUNING/DOCVQA ->
+    # ..._iqa_finetuning, SFT -> ..._sft, WEB_DOCUMENTS -> ..._webdocs. Raises ValueError when pad_dataset is
+    # False
+    # or is_t5 is True (both deprecated). T5 noise args are otherwise unused.
+    # KNOWN ISSUE: an unsupported dataset_type falls through all branches and fails with UnboundLocalError.
     mapper_kwargs = {
         "tokenizer": tokenizer,
         "image_transform": image_transform,
@@ -162,6 +189,10 @@ def get_dataloaders(
     val_image_transforms,
     image_seq_len: int,
 ):
+    # [FUNCTION DOC] Build the training dataloader (train seed and transforms) and, if hparams.do_validation,
+    # the validation
+    # dataloader (val seed and transforms) via get_dataloader_from_config; return (train_loader, val_loader or
+    # None).
     logger.info("Getting the train dataloader")
     train_loader = get_dataloader_from_config(
         tokenizer=tokenizer,
@@ -193,6 +224,12 @@ def get_dataloaders(
 
 
 def load_hf_dataset(dataset_path):
+    # [FUNCTION DOC] Load an HF dataset from a spec "path", "path:split" or "path:config:split". An existing
+    # local path is first
+    # tried with load_from_disk and, on FileNotFoundError, with load_dataset (optionally with config name);
+    # otherwise load_dataset from the hub using HF_TOKEN from the environment (or True) as auth token. If a
+    # split
+    # is given, return that split; else the loaded object (Dataset or DatasetDict).
     split_name = None
     config_name = None
     if ":" in dataset_path:
@@ -236,6 +273,16 @@ def get_dataset_hf(
     realtime_processing: bool = True,
     is_t5: bool = False,
 ):
+    # [FUNCTION DOC] Load every HF dataset path of dataset_config (training or validation paths; a single
+    # ".txt" path is read as
+    # a newline-separated list of paths) and return them as a list. Without realtime processing, each is
+    # additionally mapped in batches (map_batch_size, map_num_proc) through get_mapper, choosing the pairs
+    # packer
+    # if the first row has "meta" and "source" columns and the web-documents packer otherwise, removing
+    # original
+    # columns.
+    # KNOWN ISSUE: the non-realtime path reads dataset_config.image_seq_len, which DatasetParams does not
+    # define (AttributeError); `is_paired_dataset` is computed by loading the first row even in realtime mode.
     dataset_list = []
     hf_datasets_paths = (
         dataset_config.training_datasets_paths if is_train else dataset_config.validation_datasets_paths
@@ -294,6 +341,12 @@ def get_dataset_webdataset(
     is_train: bool = True,
     realtime_processing: bool = True,
 ):
+    # [FUNCTION DOC] Build a webdataset pipeline for dataset_config: returns None when there are no paths;
+    # requires realtime
+    # processing (else NotImplementedError) and exactly one ".txt" file listing shard URLs/commands (else
+    # ValueError); validates each with check_webdataset_command (ValueError if any invalid). Uses
+    # map_batch_size as webdataset batch size and the config's shuffle options for training (no shuffling for
+    # validation).
     if not realtime_processing:
         raise NotImplementedError("WebDataset is only supported for realtime processing")
 
@@ -342,6 +395,9 @@ def get_dataset(
     is_t5: bool = False,
     use_webdataset: bool = False,
 ):
+    # [FUNCTION DOC] Dispatch to get_dataset_webdataset (use_webdataset True) or get_dataset_hf; returns a
+    # webdataset pipeline,
+    # None, or a list of HF datasets.
     if use_webdataset:
         return get_dataset_webdataset(
             dataset_config=dataset_config,
@@ -379,6 +435,21 @@ def get_dataloader(
     data_param: Optional[DataParams] = None,
     image_seq_len=None,
 ):
+    # [FUNCTION DOC] Build the dataloader for all datasets named in DatasetNames (those without paths yield
+    # empty lists/None),
+    # using per-dataset image transforms keyed by lower-cased dataset name; is_t5 is derived from model_name.
+    # Pre-processed mode: concatenate all datasets, optionally select the first N examples, wrap in
+    # MapWrapperDataset with a numpy rng seeded by (seed, rank) and return a DataLoaderForMappedWrapperDataset
+    # with a ResumableSampler(sampler_rng), drop_last. Realtime mode: for each non-empty dataset, concatenate
+    # HF
+    # datasets (ValueError if len // num_workers < batch_size; optional select) into IterableWrapperHFDataset,
+    # or use IterableWrapperWebdataset for a webdataset pipeline (ValueError for other types); constructor
+    # kwargs come from the dataset's DatasetParams fields that match the wrapper's signature. Chain them with
+    # CustomChainDataset (accumulation / interleaving probabilities) and return a
+    # DataLoaderForIterableWrapperDataset with simple_collate.
+    # KNOWN ISSUE: data_param is dereferenced before the "data_param must be provided" None check, so a
+    # missing
+    # data_param raises AttributeError instead.
     if is_train:
         select_n_examples = data_param.select_n_examples_train
     else:
@@ -515,6 +586,11 @@ def get_dataloader_from_config(
     world_size=None,
     sampler_rng=None,
 ):
+    # [FUNCTION DOC] Call get_dataloader with options taken from config.data_param (workers, pin_memory,
+    # batch_size,
+    # persistent_workers, realtime_processing, data_param) and config.hparams (model_name; accumulate_datasets
+    # is True when loss_weights_per_dataset is set), plus the given tokenizer, transforms, seed, rank,
+    # world_size, sampler_rng and image_seq_len.
     dataloader = get_dataloader(
         tokenizer=tokenizer,
         image_transforms=image_transforms,
@@ -540,7 +616,13 @@ def get_dataloader_from_config(
 # the given epoch (seeded with a generator!). We are using this instead of just seeding the "default Sampler"
 # so we can quickly "short-circuit" and bypass any and all "seen" indices (see `__iter__`).
 class ResumableSampler(Sampler):
+    # [CLASS DOC] Map-style sampler producing a random permutation of the dataset indices from its own torch
+    # generator
+    # (deliberately not named `generator` so accelerate does not synchronize it), skipping the first
+    # n_seen_examples indices when resuming.
     def __init__(self, data_source, sample_generator):
+        # [FUNCTION DOC] Store the data source and the torch.Generator sample_generator; indices None,
+        # n_seen_examples 0.
         super().__init__(data_source)
         self.data_source, self.indices = data_source, None
 
@@ -554,12 +636,16 @@ class ResumableSampler(Sampler):
         self.n_seen_examples = 0
 
     def set_state(self, n_seen_examples_per_worker):
+        # [FUNCTION DOC] Set n_seen_examples to the sum of the per-worker seen counts in the given mapping.
         self.n_seen_examples = sum(n_seen_examples_per_worker.values())
 
     def get_index_order(self):
+        # [FUNCTION DOC] Return a random permutation of range(len(data_source)) as a list, drawn from
+        # sample_generator.
         return torch.randperm(len(self.data_source), generator=self.sample_generator).tolist()
 
     def __iter__(self):
+        # [FUNCTION DOC] Draw a new permutation, drop the first n_seen_examples indices and yield the rest.
         self.indices = self.get_index_order()
 
         # Resume logic -> advance by `n_seen_examples`
@@ -568,18 +654,27 @@ class ResumableSampler(Sampler):
         yield from self.indices
 
     def __len__(self):
+        # [FUNCTION DOC] Return the dataset length (not reduced by skipped indices).
         return len(self.data_source)
 
 
 # Super simple wrapper around dataset; mostly for compatibility with IterableWrapperDataset
 class MapWrapperDataset(torch.utils.data.Dataset):
+    # [CLASS DOC] Map-style wrapper around an HF dataset that returns (0, worker id, example) tuples and
+    # advances a transform
+    # rng on resume.
     def __init__(self, dataset, transform_rng):
+        # [FUNCTION DOC] Store the wrapped dataset and the numpy transform rng; n_seen_examples_per_worker
+        # starts empty.
         self.wrapped_dataset, self.transform_rng = dataset, transform_rng
 
         # For "instant" resuming
         self.n_seen_examples_per_worker = {}
 
     def state_dict(self):
+        # [FUNCTION DOC] Return {"wrapped_dataset": wrapped_dataset.state_dict()}.
+        # KNOWN ISSUE: HF datasets have no state_dict/load_state_dict methods, so this and load_state_dict
+        # fail.
         state_dict = {}
 
         # recurse into its dataset
@@ -588,17 +683,26 @@ class MapWrapperDataset(torch.utils.data.Dataset):
         return state_dict
 
     def load_state_dict(self, state_dict):
+        # [FUNCTION DOC] Forward state_dict["wrapped_dataset"] to the wrapped dataset's load_state_dict.
         # recurse into its dataset
         self.wrapped_dataset.load_state_dict(state_dict["wrapped_dataset"])
 
     @property
     def dataset(self):
+        # [FUNCTION DOC] Property: the wrapped dataset.
         return self.wrapped_dataset
 
     def set_state(self, n_seen_examples_per_worker):
+        # [FUNCTION DOC] Store the mapping worker id -> number of examples already seen.
         self.n_seen_examples_per_worker = n_seen_examples_per_worker
 
     def __getitem__(self, idx):
+        # [FUNCTION DOC] Return (0, worker id, wrapped_dataset[idx]). On the first call in a worker with a
+        # non-zero seen count, draw
+        # that many numbers from transform_rng to fast-forward it, then zero the count.
+        # KNOWN ISSUE: assumes a DataLoader worker process; with num_workers=0 get_worker_info() is None and
+        # this
+        # raises AttributeError.
         # Dummy dataset idx used for compatibility with CustomChainDataset
         dummy_dataset_idx = 0
         worker_info = torch.utils.data.get_worker_info()
@@ -613,10 +717,14 @@ class MapWrapperDataset(torch.utils.data.Dataset):
         return dummy_dataset_idx, worker_info.id, self.wrapped_dataset[idx]
 
     def __len__(self):
+        # [FUNCTION DOC] Return the length of the wrapped dataset.
         return len(self.wrapped_dataset)
 
 
 class IterableWrapperHFDataset(torch.utils.data.IterableDataset):
+    # [CLASS DOC] Iterable wrapper over an HF dataset that, per rank and DataLoader worker, packs raw examples
+    # on the fly with
+    # the dataset-type mapper and yields fixed-size batches together with resumable state.
     def __init__(
         self,
         dataset,
@@ -650,6 +758,15 @@ class IterableWrapperHFDataset(torch.utils.data.IterableDataset):
         shuffle_after_packing=False,
         max_num_images_per_document=None,
     ):
+        # [FUNCTION DOC] Store the dataset and build the mapper via get_mapper from the packing params
+        # (max_num_images 5,
+        # max_seq_len 256, image sizes 384, scale-up, padding, samples/images per document, T5 and BOS/EOS
+        # options,
+        # dataset_type, image_seq_len). Also stores batch_size, shuffle, seed, epoch 0, rank, world_size,
+        # mapper_batch_size (raw examples per mapper call, default 128), drop_last, shuffle_after_packing and
+        # dataset_name; resume state worker_idx_tracker (worker -> (map_start_idx, last_key_idx, overflow
+        # batch)) is
+        # empty and start_worker_idx is 0.
         self.dataset = dataset
         self.mapper = get_mapper(
             tokenizer=tokenizer,
@@ -692,20 +809,30 @@ class IterableWrapperHFDataset(torch.utils.data.IterableDataset):
         self.dataset_name = dataset_name
 
     def set_state(self, worker_idx_tracker, start_worker_idx):
+        # [FUNCTION DOC] Set the resume tracker mapping and the worker index offset to start from.
         self.worker_idx_tracker = worker_idx_tracker
         self.start_worker_idx = start_worker_idx
 
     def set_epoch(self, epoch):
+        # [FUNCTION DOC] Set the epoch used to seed the distributed sampler and rngs.
         self.epoch = epoch
 
     def state_dict(self):
+        # [FUNCTION DOC] Return an empty dict (state is handled by the dataloader).
         state_dict = {}
         return state_dict
 
     def load_state_dict(self, state_dict):
+        # [FUNCTION DOC] No-op.
+        # KNOWN ISSUE: this class has no reset_state method, but CustomChainDataset.__iter__ calls reset_state
+        # on
+        # every dataset at the end of an epoch, which would raise AttributeError for HF-backed datasets.
         pass
 
     def _get_worker_id_and_worker_total_num(self):
+        # [FUNCTION DOC] HELPER: return (worker id rotated by start_worker_idx modulo number of workers,
+        # number of workers); (0, 1)
+        # outside worker processes.
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is None:
             worker_total_num = 1
@@ -718,6 +845,10 @@ class IterableWrapperHFDataset(torch.utils.data.IterableDataset):
         return worker_id, worker_total_num
 
     def _get_worker_indices(self):
+        # [FUNCTION DOC] HELPER: compute this rank's indices with a torch DistributedSampler (shuffle, seed,
+        # drop_last, current
+        # epoch), then take every worker_total_num-th index starting at the worker id. Returns (indices,
+        # worker id).
         sampler = torch.utils.data.DistributedSampler(
             self.dataset,
             num_replicas=self.world_size,
@@ -738,6 +869,25 @@ class IterableWrapperHFDataset(torch.utils.data.IterableDataset):
         return worker_indices, worker_id
 
     def __iter__(self):
+        # [FUNCTION DOC] Generator. Raises ValueError if rank or world_size is unset. Starting from the resume
+        # position
+        # (map_start_idx, last_key_idx, overflow batch) for this worker, loop over the worker's indices in
+        # chunks of
+        # mapper_batch_size: run the mapper on the chunk with torch's global seed temporarily set to
+        # "<seed><worker><i>" (restored afterwards) and prefix_seed (seed, epoch, rank, worker, i) for
+        # deterministic
+        # augmentation; prepend any overflow from the previous chunk (ValueError if keys differ), zero-padding
+        # pixel_values / pixel_attention_mask to the max number of images, height and width of both parts;
+        # optionally
+        # shuffle rows (shuffle_after_packing). If fewer than batch_size rows, keep everything as overflow;
+        # otherwise
+        # slice into batch_size batches, yielding (0, dataset name, state, batch) where state holds
+        # worker_idx,
+        # map_start_idx, last_key_idx and the previous overflow batch; a trailing partial slice becomes the
+        # overflow.
+        # On resume, batches of the first chunk up to last_key_idx are skipped. Leftover overflow at the end
+        # of the
+        # data is dropped.
         # Dummy dataset idx used for compatibility with CustomChainDataset
         dummy_dataset_idx = 0
 
@@ -864,6 +1014,9 @@ class IterableWrapperHFDataset(torch.utils.data.IterableDataset):
 
 
 class IterableWrapperWebdataset(torch.utils.data.IterableDataset):
+    # [CLASS DOC] Iterable wrapper over a webdataset pipeline (already split by node/worker and batched) that
+    # packs each
+    # incoming batch with the dataset-type mapper and yields fixed-size batches like IterableWrapperHFDataset.
     def __init__(
         self,
         dataset,
@@ -897,6 +1050,9 @@ class IterableWrapperWebdataset(torch.utils.data.IterableDataset):
         shuffle_after_packing=False,
         max_num_images_per_document=None,
     ):
+        # [FUNCTION DOC] Same parameters and attributes as IterableWrapperHFDataset.__init__; additionally
+        # keeps the pipeline and
+        # creates an iterator over it as self.dataset.
         self._webdataset = dataset
         self.dataset = iter(self._webdataset)
         self.mapper = get_mapper(
@@ -939,26 +1095,33 @@ class IterableWrapperWebdataset(torch.utils.data.IterableDataset):
         self.dataset_name = dataset_name
 
     def set_state(self, worker_idx_tracker, start_worker_idx):
+        # [FUNCTION DOC] Set the resume tracker mapping and the worker index offset.
         self.worker_idx_tracker = worker_idx_tracker
         self.start_worker_idx = start_worker_idx
 
     def reset_state(self):
+        # [FUNCTION DOC] Reset every tracked worker to (0, -1, empty overflow) and the worker offset to 0.
         for key in self.worker_idx_tracker.keys():
             self.worker_idx_tracker[key] = (0, -1, {})
         self.start_worker_idx = 0
 
     def set_epoch(self, epoch):
+        # [FUNCTION DOC] Set the epoch and recreate the pipeline iterator.
         self.epoch = epoch
         self.dataset = iter(self._webdataset)  # Reset dataset iterator
 
     def state_dict(self):
+        # [FUNCTION DOC] Return an empty dict.
         state_dict = {}
         return state_dict
 
     def load_state_dict(self, state_dict):
+        # [FUNCTION DOC] No-op.
         pass
 
     def _get_worker_id_and_worker_total_num(self):
+        # [FUNCTION DOC] HELPER: same as the HF wrapper: (rotated worker id, number of workers), (0, 1)
+        # outside workers.
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is None:
             worker_total_num = 1
@@ -971,6 +1134,9 @@ class IterableWrapperWebdataset(torch.utils.data.IterableDataset):
         return worker_id, worker_total_num
 
     def _get_worker_indices(self):
+        # [FUNCTION DOC] HELPER: copied from the HF wrapper; unused here.
+        # KNOWN ISSUE: would fail if called, since a DistributedSampler cannot be built over a pipeline
+        # iterator.
         sampler = torch.utils.data.DistributedSampler(
             self.dataset,
             num_replicas=self.world_size,
@@ -991,6 +1157,17 @@ class IterableWrapperWebdataset(torch.utils.data.IterableDataset):
         return worker_indices, worker_id
 
     def __iter__(self):
+        # [FUNCTION DOC] Generator. Raises ValueError if rank/world_size unset. Repeatedly pulls the next
+        # batch from the pipeline
+        # iterator (stopping, with an info log, at its end), maps it with the torch seed temporarily set to
+        # "<seed><worker><i>" and prefix_seed (seed, epoch, rank, worker, i) where i counts pulled batches
+        # from the
+        # resumed map_start_idx, merges it with any overflow (same padding logic as the HF wrapper),
+        # optionally
+        # shuffles rows, and yields (0, dataset name, state, batch) for each full batch_size slice; partial
+        # remainders
+        # carry over. The state's previous_overflow_batch is always empty; resume does not skip data (the
+        # pipeline is not rewound), it only restores counters for seeding.
         # Dummy dataset idx used for compatibility with CustomChainDataset
         dummy_dataset_idx = 0
 
@@ -1123,6 +1300,14 @@ class IterableWrapperWebdataset(torch.utils.data.IterableDataset):
 
 
 class CustomChainDataset(torch.utils.data.IterableDataset):
+    # [CLASS DOC] Iterable dataset that chains several wrapper datasets. Training: infinitely picks, for each
+    # batch, a dataset
+    # either round-robin (accumulate_datasets, used when gradients are accumulated across datasets) or at
+    # random
+    # with proba_interleaving_dataset (default uniform), restarting all datasets with a new epoch when the
+    # chosen one is exhausted. Validation: iterates datasets one after another. Tracks per-worker counters
+    # used
+    # for seeding and resume.
     r"""Dataset for chaining multiple :class:`IterableDataset` s.
 
     This class is useful to assemble different existing dataset streams. The
@@ -1149,6 +1334,13 @@ class CustomChainDataset(torch.utils.data.IterableDataset):
     def __init__(
         self, datasets, num_workers, rank, accumulate_datasets=False, proba_interleaving_dataset=None, is_train=True
     ):
+        # [FUNCTION DOC] Validate that all datasets are IterableDatasets (ValueError otherwise), store them,
+        # num_workers (at least 1)
+        # and is_train. For validation, warn if accumulation/probabilities were given and disable them; for
+        # training
+        # with no accumulation, set dataset_proba (given or uniform) and raise ValueError if it does not sum
+        # to 1
+        # (+/- 0.001). Seed = sum of dataset seeds; epoch 0; per-worker last-index tracker reset to 0.
         super(CustomChainDataset, self).__init__()
 
         for d in datasets:
@@ -1187,18 +1379,24 @@ class CustomChainDataset(torch.utils.data.IterableDataset):
         self.reset_state()
 
     def reset_state(self):
+        # [FUNCTION DOC] Reset the per-worker counter mapping to 0 for each worker id.
         self.chain_dataset_last_idx_tracker = {worker_id: 0 for worker_id in range(self.num_workers)}
 
     def update_state(self, dataset_state):
+        # [FUNCTION DOC] Store dataset_state["chain_dataset_last_idx"] for dataset_state["worker_idx"].
         self.chain_dataset_last_idx_tracker[dataset_state["worker_idx"]] = dataset_state["chain_dataset_last_idx"]
 
     def load_resume_states(self, resumable_states):
+        # [FUNCTION DOC] For each dataset, call set_state with its (worker_idx_tracker, start_worker_id) pair
+        # from resumable_states;
+        # start_worker_id ends up as the last dataset's value.
         for idx, d in enumerate(self.datasets):
             worker_idx_tracker, start_worker_id = resumable_states[idx]
             d.set_state(worker_idx_tracker, start_worker_id)
             self.start_worker_id = start_worker_id
 
     def state_dict(self):
+        # [FUNCTION DOC] Return the per-worker counter mapping and the list of child dataset state dicts.
         state_dict = {}
 
         state_dict["chain_dataset_last_idx_tracker"] = self.chain_dataset_last_idx_tracker
@@ -1209,6 +1407,8 @@ class CustomChainDataset(torch.utils.data.IterableDataset):
         return state_dict
 
     def load_state_dict(self, state_dict):
+        # [FUNCTION DOC] Restore counters for workers already known (unknown workers get 0) and forward child
+        # state dicts.
         for key in state_dict["chain_dataset_last_idx_tracker"].keys():
             if key in self.chain_dataset_last_idx_tracker:
                 self.chain_dataset_last_idx_tracker[key] = state_dict["chain_dataset_last_idx_tracker"][key]
@@ -1220,6 +1420,7 @@ class CustomChainDataset(torch.utils.data.IterableDataset):
             d.load_state_dict(state_dict["datasets"][idx])
 
     def set_epoch(self, epoch):
+        # [FUNCTION DOC] Set the epoch here and on all child datasets.
         #  TODO: change this and fix trainer as well when epoch logic
         #  described in iter is implemented
         self.epoch = epoch
@@ -1227,6 +1428,8 @@ class CustomChainDataset(torch.utils.data.IterableDataset):
             d.set_epoch(epoch)
 
     def _get_worker_id(self):
+        # [FUNCTION DOC] HELPER: return the DataLoader worker id rotated by start_worker_id (0 outside
+        # workers).
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is None:
             worker_total_num = 1
@@ -1239,6 +1442,19 @@ class CustomChainDataset(torch.utils.data.IterableDataset):
         return worker_id
 
     def __iter__(self):
+        # [FUNCTION DOC] Generator yielding (dataset_idx, dataset_name, dataset_state, batch) with
+        # chain_dataset_last_idx added to
+        # the state. For training, each step seeds a numpy rng with (seed, epoch, rank, worker, counter) to
+        # choose the
+        # dataset (or advances round-robin from the stored index). On exhaustion: in validation, move to the
+        # next
+        # dataset; otherwise increment the epoch, reset counters and child states, set child epochs and
+        # recreate
+        # iterators.
+        # KNOWN ISSUE: the loop never terminates (even in validation, after the last dataset it restarts at
+        # the same
+        # dataset_idx); callers must bound iteration. Child reset_state is missing on
+        # IterableWrapperHFDataset.
         ds_iterators = [iter(d) for d in self.datasets]
         worker_id = self._get_worker_id()
 
@@ -1287,7 +1503,11 @@ class CustomChainDataset(torch.utils.data.IterableDataset):
 
 # this class is currently not being maintained
 class DataLoaderForMappedWrapperDataset(torch.utils.data.DataLoader):
+    # [CLASS DOC] torch DataLoader for the map-style path that forwards state_dict/load_state_dict to its
+    # dataset
+    # (not maintained).
     def state_dict(self):
+        # [FUNCTION DOC] Return {"dataset": dataset.state_dict()}.
         state_dict = {}
 
         # recurse into its dataset
@@ -1296,6 +1516,7 @@ class DataLoaderForMappedWrapperDataset(torch.utils.data.DataLoader):
         return state_dict
 
     def load_state_dict(self, state_dict):
+        # [FUNCTION DOC] Forward state_dict["dataset"] to the dataset.
         # recurse into its dataset
         self.dataset.load_state_dict(state_dict["dataset"])
 
@@ -1311,7 +1532,17 @@ class DataLoaderForMappedWrapperDataset(torch.utils.data.DataLoader):
 
 
 class DataLoaderForIterableWrapperDataset(torch.utils.data.DataLoader):
+    # [CLASS DOC] torch DataLoader for the realtime path. Tracks, per chained dataset, a per-worker resume
+    # tracker and the next
+    # worker index so training can resume exactly; saves/loads that state per rank; stops all ranks as soon as
+    # any rank's iterator is exhausted.
     def __init__(self, dataset, seed, **kwargs):
+        # [FUNCTION DOC] Store seed; pop rank and world_size from kwargs, falling back to AcceleratorState
+        # (also giving the device)
+        # when either is missing; default device is cuda if available. With world_size 1, switch torch
+        # multiprocessing sharing strategy to "file_system" (global side effect). Push rank/world_size onto
+        # the
+        # dataset, init the DataLoader with remaining kwargs, and reset resume state for each chained dataset.
         self.seed = seed
         self.rank = kwargs.pop("rank", None)
         self.world_size = kwargs.pop("world_size", None)
@@ -1342,6 +1573,8 @@ class DataLoaderForIterableWrapperDataset(torch.utils.data.DataLoader):
         self.reset_state()
 
     def reset_state(self):
+        # [FUNCTION DOC] Clear the per-dataset worker trackers and next worker indices, and reset the chain
+        # dataset's counters.
         for dataset_idx in range(self.dataset_count):
             self.worker_idx_tracker[dataset_idx] = {}
             self.next_worker_idx[dataset_idx] = 0
@@ -1358,6 +1591,14 @@ class DataLoaderForIterableWrapperDataset(torch.utils.data.DataLoader):
         self.dataset.reset_state()
 
     def update_state(self, dataset_idx, dataset_state):
+        # [FUNCTION DOC] Record a consumed batch's state: update the chain dataset counters, store
+        # (map_start_idx, last_key_idx,
+        # previous_overflow_batch) for the batch's worker in dataset_idx's tracker, and set the next worker
+        # index to
+        # the following worker (modulo num_workers).
+        # KNOWN ISSUE: the loop variable shadows dataset_idx and sets next_worker_idx for every dataset, not
+        # only the
+        # one that produced the batch.
         self.dataset.update_state(dataset_state)
 
         self.worker_idx_tracker[dataset_idx][dataset_state["worker_idx"]] = (
@@ -1370,22 +1611,27 @@ class DataLoaderForIterableWrapperDataset(torch.utils.data.DataLoader):
             self.next_worker_idx[dataset_idx] = (dataset_state["worker_idx"] + 1) % self.num_workers
 
     def set_epoch(self, epoch):
+        # [FUNCTION DOC] Forward the epoch to the chain dataset.
         # Ensure each epoch has a different sequence to sample from
         self.dataset.set_epoch(epoch)
 
     def load_resume_states(self):
+        # [FUNCTION DOC] Push the stored resume states into the chain dataset's children.
         self.dataset.load_resume_states(self.get_resume_states())
 
     def get_resume_state(self, dataset_idx):
+        # [FUNCTION DOC] Return (worker tracker, next worker index) for one dataset index.
         return self.worker_idx_tracker[dataset_idx], self.next_worker_idx[dataset_idx]
 
     def get_resume_states(self):
+        # [FUNCTION DOC] Return a list of [worker tracker, next worker index] for every dataset index.
         return [
             [self.worker_idx_tracker[dataset_idx], self.next_worker_idx[dataset_idx]]
             for dataset_idx in range(self.dataset_count)
         ]
 
     def state_dict(self):
+        # [FUNCTION DOC] Return worker trackers, next worker indices and the chain dataset's state dict.
         state_dict = {}
 
         state_dict["worker_idx_tracker"] = self.worker_idx_tracker
@@ -1397,6 +1643,7 @@ class DataLoaderForIterableWrapperDataset(torch.utils.data.DataLoader):
         return state_dict
 
     def load_state_dict(self, state_dict):
+        # [FUNCTION DOC] Restore worker trackers, next worker indices and the chain dataset's state.
         self.worker_idx_tracker = state_dict["worker_idx_tracker"]
         self.next_worker_idx = state_dict["next_worker_idx"]
 
@@ -1404,6 +1651,8 @@ class DataLoaderForIterableWrapperDataset(torch.utils.data.DataLoader):
         self.dataset.load_state_dict(state_dict["dataset"])
 
     def save_state(self, path):
+        # [FUNCTION DOC] Create path and save state_dict with torch.save to path/m4_states_<rank>.pkl; logs
+        # the location.
         """
         Saves state_dict to `m4_states_{process_index}.pkl`
         """
@@ -1414,6 +1663,7 @@ class DataLoaderForIterableWrapperDataset(torch.utils.data.DataLoader):
         torch.save(self.state_dict(), location)
 
     def load_state(self, path):
+        # [FUNCTION DOC] Load path/m4_states_<rank>.pkl with torch.load and apply it via load_state_dict.
         """
         Loads the state_dict at `m4_states_{process_index}.pkl`
         """
@@ -1422,6 +1672,11 @@ class DataLoaderForIterableWrapperDataset(torch.utils.data.DataLoader):
         self.load_state_dict(torch.load(location))
 
     def __iter__(self):
+        # [FUNCTION DOC] Generator over the underlying DataLoader iterator; after each fetch, all-reduce a
+        # "stopped" flag across
+        # ranks (when world_size > 1 and torch.distributed is initialized) and stop as soon as any rank is
+        # exhausted,
+        # so no rank blocks in a collective.
         main_iterator = super().__iter__()
 
         stopped = torch.tensor(0.0, device=self.device)
@@ -1444,7 +1699,13 @@ class DataLoaderForIterableWrapperDataset(torch.utils.data.DataLoader):
 
 # This class isn't being maintained (or tested) at the moment
 class MappedResumableState:
+    # [CLASS DOC] Resume-state tracker for the map-style path (unmaintained): owns train/val torch generators
+    # for the samplers,
+    # remembers their state at the start of each epoch, and counts examples seen per worker.
     def __init__(self, train_seed, val_seed, world_size, rank, dataloader_num_workers, using_iterable_dataset=False):
+        # [FUNCTION DOC] Store seeds, world size, rank, number of workers and iterable flag; create per-worker
+        # seen counters (0),
+        # train/val generators seeded with train_seed/val_seed, and snapshot their states. epoch starts None.
         self.train_seed, self.val_seed, self.world_size, self.rank = train_seed, val_seed, world_size, rank
         self.dataloader_num_workers, self.using_iterable_dataset = dataloader_num_workers, using_iterable_dataset
         self.epoch = None
@@ -1461,6 +1722,9 @@ class MappedResumableState:
         self.sampler_rng_val_state = self.sampler_rng_val.get_state()
 
     def set_epoch(self, epoch):
+        # [FUNCTION DOC] When the epoch changes, record it and snapshot both generator states (taken before
+        # the sampler iterates,
+        # so a resume replays the same order within the epoch).
         # At the start of each epoch, the iter(sampler) gets called, which advances the random state; this isn't
         #   great, as it means that if we save the random state post-hoc, when we resume, we're "skipping" to the
         #   next epoch. To preserve the _same_ order within an epoch, we actually need to save the random state
@@ -1472,6 +1736,9 @@ class MappedResumableState:
             self.sampler_rng_val_state = self.sampler_rng_val.get_state()
 
     def update_state(self, state_trackers):
+        # [FUNCTION DOC] Add the number of elements of the state_trackers tensor (worker ids of a batch) to
+        # the seen count of the
+        # worker given by its first element, assuming one worker produced the whole batch.
         # Gate based on `self.using_iterable_dataset`
 
         # For a Map-style dataset, `state_trackers` is a Tensor containing all worker_ids responsible for fetching
@@ -1480,13 +1747,18 @@ class MappedResumableState:
         self.n_seen_examples_per_worker[state_trackers[0].item()] += state_trackers.numel()
 
     def update_next_worker_idx(self, curr_worker_idx):
+        # [FUNCTION DOC] Set next_worker_idx to the worker after curr_worker_idx (modulo number of workers).
         self.next_worker_idx = (curr_worker_idx + 1) % self.dataloader_num_workers
 
     def get_resume_state(self):
+        # [FUNCTION DOC] Return the per-worker seen-examples mapping.
         # Return minimal `state` to "fast-forward" a given Dataset/DataLoader
         return self.n_seen_examples_per_worker
 
     def state_dict(self):
+        # [FUNCTION DOC] Return epoch, world size, worker count, both generator states with their sums as
+        # checksums, and the
+        # per-worker seen counts.
         return {
             "epoch": self.epoch,
             "world_size": self.world_size,
@@ -1499,6 +1771,9 @@ class MappedResumableState:
         }
 
     def load_state_dict(self, state_dict):
+        # [FUNCTION DOC] Raise ValueError if world size or worker count differ from the saved ones; otherwise
+        # restore epoch,
+        # generator states and per-worker seen counts. Checksums are not verified.
         # Verify same "world size" and "num workers" on a resume!
         if self.world_size != state_dict["world_size"]:
             raise ValueError(f"Current world_size {self.world_size} != Loaded world_size {state_dict['world_size']}")

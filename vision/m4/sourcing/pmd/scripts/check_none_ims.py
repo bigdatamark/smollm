@@ -1,3 +1,9 @@
+# [MODULE DOC] CLI script: count rows whose "image" column is None in a sharded on-disk dataset. Expects
+# `--dataset_folder` to contain one sub-folder per split, each containing shards saved with
+# `save_to_disk`; `--num_proc` (default 1) sets filter parallelism. For every split it loads each shard,
+# filters to the None-image rows, and prints the split's total size, the count without image and the last
+# 10 such rows. Sets PIL `ImageFile.LOAD_TRUNCATED_IMAGES = True` globally at import.
+# KNOWN ISSUE: the "last 10 instances" print uses only the last shard's filtered rows, not the whole split.
 import argparse
 import os
 from typing import Dict
@@ -10,6 +16,8 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 def get_example_with_none_image(batch: Dict) -> Dict:
+    # [FUNCTION DOC] HELPER: batched filter predicate; given a batch mapping with an "image" list, return a list of booleans that
+    # are True where the image is None. (Annotated return type says Dict but a list is returned.)
     result_bools = [im is None for im in batch["image"]]
     return result_bools
 

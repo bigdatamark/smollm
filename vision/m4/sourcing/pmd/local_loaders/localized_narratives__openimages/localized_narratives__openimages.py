@@ -1,4 +1,8 @@
 # coding=utf-8
+# [MODULE DOC] HuggingFace `datasets` loading script for the Open Images subset of Localized Narratives, as
+# pre-processed for PMD (Public Multimodal Dataset). Downloads per-split JSONL annotation files from the
+# facebook/pmd hub repo and yields one example per line, with the image referenced by its public S3 URL
+# (images themselves are not downloaded). Citation/description/homepage/license are empty placeholders.
 # Copyright 2020 The HuggingFace Datasets Authors and the current dataset script contributor.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -57,6 +61,10 @@ _FEATURES = datasets.Features(
 
 
 def _split_to_single_caption(annotations):
+    # [FUNCTION DOC] HELPER: split each annotation's multi-sentence "caption" paragraph on "." into one annotation per sentence.
+    # Input: iterable of annotation mappings with a "caption" key. Output: new list of deep copies, one per
+    # non-empty sentence, with "caption" set to the stripped sentence plus a trailing "." and "original_caption"
+    # set to the full paragraph. Not used by the builder in this file (annotations are already split upstream).
     """This function is mainly used in Localized Narratives where a paragraph can contain
     multiple relevant captions to a single image. We split the paragraph into multiple
     captions and then return each as an individual sample.
@@ -75,9 +83,13 @@ def _split_to_single_caption(annotations):
 
 
 class LocalizedNarrativesOpenImages(datasets.GeneratorBasedBuilder):
+    # [CLASS DOC] `datasets.GeneratorBasedBuilder` for Localized Narratives / Open Images with features dataset_id,
+    # image_id, annotator_id (int32), caption, original_caption, image_url (all strings except annotator_id).
     """Builder for Open Images subset of Localized Narratives."""
 
     def _info(self):
+        # [FUNCTION DOC] Return a `datasets.DatasetInfo` built from the module-level description, features, homepage, license and
+        # citation constants.
         return datasets.DatasetInfo(
             description=_DESCRIPTION,
             features=_FEATURES,
@@ -87,6 +99,8 @@ class LocalizedNarrativesOpenImages(datasets.GeneratorBasedBuilder):
         )
 
     def _split_generators(self, dl_manager):
+        # [FUNCTION DOC] Download the train/validation/test annotation JSONL files via `dl_manager` (network/cache side effect) and
+        # return one `SplitGenerator` per split, passing the local annotation file path and the split name.
         annotation_files = dl_manager.download(_ANNOTATION_URLs)
         return [
             datasets.SplitGenerator(
@@ -97,6 +111,9 @@ class LocalizedNarrativesOpenImages(datasets.GeneratorBasedBuilder):
         ]
 
     def _generate_examples(self, annotation_file: str, split: str):
+        # [FUNCTION DOC] Read the JSONL annotation file line by line and yield (running integer key, example) pairs. Each example
+        # copies dataset_id, image_id, annotator_id, caption and original_caption from the JSON record and builds
+        # image_url as the open-images-dataset S3 URL "<split>/<image_id>.jpg".
         counter = 0
         with open(annotation_file, "r", encoding="utf-8") as fi:
             for idx, line in enumerate(fi):

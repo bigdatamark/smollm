@@ -1,3 +1,11 @@
+# [MODULE DOC] Testing utilities for the m4 test suite (largely adapted from HuggingFace transformers):
+# environment flag
+# parsing, skip decorators keyed on torch/GPU/deepspeed/bitsandbytes/bf16 availability, seeding, tensor
+# equality helpers, stdout/stderr/logger capture context managers, a TestCase subclass with resolved repo
+# paths and auto-removed temp dirs, environment mocking, xdist-aware port numbers, small file IO helpers,
+# pytest report-generation hooks, and an asyncio-based subprocess runner for distributed tests.
+# Module globals: _torch_available (whether torch imported), torch_device ("cuda", "cpu" or None),
+# DEFAULT_MASTER_PORT (10999), pytest_opt_registered (options already added to pytest).
 # Copyright 2020 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -47,10 +55,14 @@ except Exception:
 
 
 def is_torch_available():
+    # [FUNCTION DOC] Return True if torch was importable at module import time.
     return _torch_available
 
 
 def parse_flag_from_env(key, default=False):
+    # [FUNCTION DOC] Read env var key and convert it to a boolean-like int with strtobool
+    # (yes/no/true/false/1/0...). Returns
+    # default (False) if unset. Raises ValueError "If set, <key> must be yes or no." for unparsable values.
     try:
         value = os.environ[key]
     except KeyError:
@@ -67,6 +79,8 @@ def parse_flag_from_env(key, default=False):
 
 
 def parse_int_from_env(key, default=None):
+    # [FUNCTION DOC] Read env var key as an int; return default (None) if unset; raise ValueError if not an
+    # integer string.
     try:
         value = os.environ[key]
     except KeyError:
@@ -80,6 +94,8 @@ def parse_int_from_env(key, default=None):
 
 
 def require_torch(test_case):
+    # [FUNCTION DOC] Test decorator: return the test wrapped with unittest.skip when torch is not installed,
+    # else unchanged.
     """
     Decorator marking a test that requires PyTorch.
 
@@ -93,6 +109,9 @@ def require_torch(test_case):
 
 
 def require_torch_no_gpus(test_case):
+    # [FUNCTION DOC] Test decorator: skip the test if any CUDA device is visible; otherwise return it
+    # unchanged.
+    # KNOWN ISSUE: imports torch before checking is_torch_available, so it raises ImportError without torch.
     """
     Decorator marking a test that requires a setup without GPUs (in PyTorch). These tests are skipped on a machine with GPUs.
 
@@ -107,6 +126,7 @@ def require_torch_no_gpus(test_case):
 
 
 def require_torch_multi_gpu(test_case):
+    # [FUNCTION DOC] Test decorator: skip unless torch is installed and at least 2 CUDA devices are visible.
     """
     Decorator marking a test that requires a multi-GPU setup (in PyTorch). These tests are skipped on a machine without
     multiple GPUs.
@@ -125,6 +145,7 @@ def require_torch_multi_gpu(test_case):
 
 
 def require_torch_non_multi_gpu(test_case):
+    # [FUNCTION DOC] Test decorator: skip unless torch is installed and at most 1 CUDA device is visible.
     """
     Decorator marking a test that requires 0 or 1 GPU setup (in PyTorch).
     """
@@ -140,6 +161,7 @@ def require_torch_non_multi_gpu(test_case):
 
 
 def require_torch_up_to_2_gpus(test_case):
+    # [FUNCTION DOC] Test decorator: skip unless torch is installed and at most 2 CUDA devices are visible.
     """
     Decorator marking a test that requires 0 or 1 or 2 GPU setup (in PyTorch).
     """
@@ -162,6 +184,7 @@ else:
 
 
 def require_torch_gpu(test_case):
+    # [FUNCTION DOC] Test decorator: skip unless the module-level torch_device is "cuda".
     """Decorator marking a test that requires CUDA and PyTorch."""
     if torch_device != "cuda":
         return unittest.skip("test requires CUDA")(test_case)
@@ -170,10 +193,12 @@ def require_torch_gpu(test_case):
 
 
 def is_deepspeed_available():
+    # [FUNCTION DOC] Return True if the deepspeed package can be found (import spec lookup, no import).
     return importlib.util.find_spec("deepspeed") is not None
 
 
 def require_deepspeed(test_case):
+    # [FUNCTION DOC] Test decorator: skip unless deepspeed is available.
     """
     Decorator marking a test that requires deepspeed
     """
@@ -184,10 +209,12 @@ def require_deepspeed(test_case):
 
 
 def is_bnb_available():
+    # [FUNCTION DOC] Return True if the bitsandbytes package can be found (import spec lookup, no import).
     return importlib.util.find_spec("bitsandbytes") is not None
 
 
 def require_bnb(test_case):
+    # [FUNCTION DOC] Test decorator: skip unless bitsandbytes is available.
     """
     Decorator marking a test that requires bitsandbytes
     """
@@ -200,6 +227,8 @@ def require_bnb(test_case):
 
 
 def require_bnb_non_decorator():
+    # [FUNCTION DOC] Call inside a test body: raise unittest SkipTest if bitsandbytes is not available;
+    # otherwise do nothing.
     """
     Non-Decorator function that would skip a test if bitsandbytes is missing
     """
@@ -208,6 +237,9 @@ def require_bnb_non_decorator():
 
 
 def set_seed(seed: int = 42):
+    # [FUNCTION DOC] Seed Python random, numpy and (if available) torch CPU and all CUDA RNGs with seed
+    # (default 42). Global
+    # RNG state side effect.
     """
     Helper function for reproducible behavior to set the seed in ``random``, ``numpy``, ``torch``
 
@@ -223,6 +255,7 @@ def set_seed(seed: int = 42):
 
 
 def get_gpu_count():
+    # [FUNCTION DOC] Return torch.cuda.device_count() if torch is available, else 0.
     """
     Return the number of available gpus (regardless of whether torch or tf is used)
     """
@@ -235,6 +268,9 @@ def get_gpu_count():
 
 
 def torch_assert_equal(actual, expected, **kwargs):
+    # [FUNCTION DOC] Assert exact equality of tensors/numbers via torch.testing.assert_close with rtol=atol=0;
+    # extra kwargs are
+    # forwarded. Raises AssertionError on mismatch (including shape/dtype mismatch).
     """
     compare two tensors or non-tensor numbers for their equality
     """
@@ -243,6 +279,8 @@ def torch_assert_equal(actual, expected, **kwargs):
 
 
 def torch_assert_close(actual, expected, **kwargs):
+    # [FUNCTION DOC] Assert closeness via torch.testing.assert_close with default tolerances; kwargs are
+    # forwarded.
     """
     compare two tensors or non-tensor numbers for their closeness.
     """
@@ -251,6 +289,9 @@ def torch_assert_close(actual, expected, **kwargs):
 
 
 def is_torch_bf16_available():
+    # [FUNCTION DOC] Return True only if torch is available, CUDA is available, the current device has compute
+    # capability >= 8
+    # (Ampere), CUDA major version >= 11 and torch version >= 1.9; else False.
     # from https://github.com/huggingface/transformers/blob/26eb566e43148c80d0ea098c76c3d128c0281c16/src/transformers/file_utils.py#L301
     if is_torch_available():
         import torch
@@ -269,6 +310,7 @@ def is_torch_bf16_available():
 
 
 def require_torch_bf16(test_case):
+    # [FUNCTION DOC] Test decorator: skip unless is_torch_bf16_available().
     """Decorator marking a test that requires CUDA hardware supporting bf16 and PyTorch >= 1.9."""
     if not is_torch_bf16_available():
         return unittest.skip("test requires CUDA hardware supporting bf16 and PyTorch >= 1.9")(test_case)
@@ -277,6 +319,9 @@ def require_torch_bf16(test_case):
 
 
 def get_tests_dir(append_path=None):
+    # [FUNCTION DOC] Return the absolute directory of the calling file (found via the call stack), optionally
+    # joined with
+    # append_path. Used so tests can locate fixtures regardless of the working directory.
     """
     Args:
         append_path: optional path to append to the tests dir path
@@ -296,6 +341,9 @@ def get_tests_dir(append_path=None):
 
 
 def parameterized_custom_name_func_join_params(func, param_num, param):
+    # [FUNCTION DOC] `name_func` for parameterized.expand: return "<test func name>_<all positional params
+    # joined by '_'>",
+    # made identifier-safe with parameterized.to_safe_name (lower-cased), e.g. test_x_0_true.
     """
     customize the test name generator function as we want all params to appear in the sub-test
     name, as by default it shows only the first param or for multiple params it just uses a unique sequence of ids and no params at all.
@@ -339,16 +387,25 @@ def parameterized_custom_name_func_join_params(func, param_num, param):
 # final message
 # it can handle a single string or a multiline buffer
 def apply_print_resets(buf):
+    # [FUNCTION DOC] HELPER: remove, on every line, everything up to and including the last carriage return,
+    # so captured output
+    # of overwritten progress lines contains only the final text. Works on single or multi-line strings.
     return re.sub(r"^.*\r", "", buf, 0, re.M)
 
 
 def assert_screenout(out, what):
+    # [FUNCTION DOC] Assert that what (case-insensitive) occurs in out after apply_print_resets; raises
+    # AssertionError otherwise.
     out_pr = apply_print_resets(out).lower()
     match_str = out_pr.find(what.lower())
     assert match_str != -1, f"expecting to find {what} in output: f{out_pr}"
 
 
 class CaptureStd:
+    # [CLASS DOC] Context manager that redirects sys.stdout and/or sys.stderr to in-memory buffers. On exit
+    # restores the
+    # streams, optionally replays captured text to them, and exposes .out (stdout with print resets applied),
+    # .err (raw stderr) and .combined (out followed by err). Before exit, .out/.err hold placeholder messages.
     """
     Context manager to capture:
 
@@ -403,6 +460,12 @@ class CaptureStd:
     """
 
     def __init__(self, out=True, err=True, replay=True):
+        # [FUNCTION DOC] Configure capture: out/err (default True) choose which streams to capture; replay
+        # (default True) chooses
+        # whether captured text is written back to the real stream on exit. Creates StringIO buffers or None.
+        # KNOWN ISSUE: the placeholder for self.combined is only set inside the err=False branch (indentation
+        # bug);
+        # it is harmless because __enter__ always resets combined to "".
         self.replay = replay
 
         if out:
@@ -422,6 +485,9 @@ class CaptureStd:
             self.combined = "error: CaptureStd context is unfinished yet, called too early"
 
     def __enter__(self):
+        # [FUNCTION DOC] Save and replace sys.stdout/sys.stderr with the buffers for captured streams, reset
+        # combined to "" and
+        # return self.
         if self.out_buf is not None:
             self.out_old = sys.stdout
             sys.stdout = self.out_buf
@@ -435,6 +501,9 @@ class CaptureStd:
         return self
 
     def __exit__(self, *exc):
+        # [FUNCTION DOC] Restore the original streams, replay captured text if requested, set .out (with
+        # apply_print_resets) and
+        # .err, and append them to .combined. Does not suppress exceptions (returns None).
         if self.out_buf is not None:
             sys.stdout = self.out_old
             captured = self.out_buf.getvalue()
@@ -452,6 +521,7 @@ class CaptureStd:
             self.combined += self.err
 
     def __repr__(self):
+        # [FUNCTION DOC] Return "stdout: <out>\n" and/or "stderr: <err>\n" for the captured streams.
         msg = ""
         if self.out_buf:
             msg += f"stdout: {self.out}\n"
@@ -467,20 +537,27 @@ class CaptureStd:
 
 
 class CaptureStdout(CaptureStd):
+    # [CLASS DOC] CaptureStd variant that captures only stdout.
     """Same as CaptureStd but captures only stdout"""
 
     def __init__(self, replay=True):
+        # [FUNCTION DOC] Initialize CaptureStd with err=False and the given replay flag.
         super().__init__(err=False, replay=replay)
 
 
 class CaptureStderr(CaptureStd):
+    # [CLASS DOC] CaptureStd variant that captures only stderr.
     """Same as CaptureStd but captures only stderr"""
 
     def __init__(self, replay=True):
+        # [FUNCTION DOC] Initialize CaptureStd with out=False and the given replay flag.
         super().__init__(out=False, replay=replay)
 
 
 class CaptureLogger:
+    # [CLASS DOC] Context manager that attaches a StreamHandler writing to a StringIO buffer to the given
+    # logging logger;
+    # after exit the captured text is available as .out.
     """
     Context manager to capture `logging` streams
 
@@ -505,26 +582,33 @@ class CaptureLogger:
     """
 
     def __init__(self, logger):
+        # [FUNCTION DOC] Store the logger and create the buffer and StreamHandler; .out starts as "".
         self.logger = logger
         self.io = StringIO()
         self.sh = logging.StreamHandler(self.io)
         self.out = ""
 
     def __enter__(self):
+        # [FUNCTION DOC] Add the handler to the logger and return self.
         self.logger.addHandler(self.sh)
         return self
 
     def __exit__(self, *exc):
+        # [FUNCTION DOC] Remove the handler and store the captured buffer contents in .out.
         self.logger.removeHandler(self.sh)
         self.out = self.io.getvalue()
 
     def __repr__(self):
+        # [FUNCTION DOC] Return "captured: <out>\n".
         return f"captured: {self.out}\n"
 
 
 @contextlib.contextmanager
 # adapted from https://stackoverflow.com/a/64789046/9201239
 def ExtendSysPath(path: Union[str, os.PathLike]) -> Iterator[None]:
+    # [FUNCTION DOC] Context manager (generator) that temporarily inserts path (str or PathLike) at the front
+    # of sys.path and
+    # removes it on exit, even on error.
     """
     Temporary add given path to `sys.path`.
 
@@ -544,6 +628,10 @@ def ExtendSysPath(path: Union[str, os.PathLike]) -> Iterator[None]:
 
 
 class TestCasePlus(unittest.TestCase):
+    # [CLASS DOC] unittest.TestCase subclass providing resolved path accessors (test file, its dir, repo root,
+    # tests dir,
+    # tests/test_data dir, source dir; each with a "_str" variant), auto-removed temporary directories and an
+    # environment copy with PYTHONPATH set for launching subprocesses.
     """This class extends `unittest.TestCase` with additional features.
 
     Feature 1: A set of fully resolved important file and dir path accessors.
@@ -625,6 +713,13 @@ class TestCasePlus(unittest.TestCase):
     """
 
     def setUp(self):
+        # [FUNCTION DOC] Initialize the list of temp dirs to remove, and resolve paths from the file defining
+        # the test class: the
+        # repo root is the first of parents 1..3 that contains both "m4" and "tests" directories; tests_dir =
+        # root/tests, data_dir = root/tests/test_data, src_dir = root.
+        # KNOWN ISSUE: if no parent matches, the loop leaves tmp_dir as parents[3] (always truthy), so the
+        # ValueError
+        # is never raised and a wrong root is used silently.
         # get_auto_remove_tmp_dir feature:
         self.teardown_tmp_dirs = []
 
@@ -646,53 +741,68 @@ class TestCasePlus(unittest.TestCase):
 
     @property
     def test_file_path(self):
+        # [FUNCTION DOC] Property: path of the file defining the test class (a string, despite the class doc
+        # saying pathlib).
         return self._test_file_path
 
     @property
     def test_file_path_str(self):
+        # [FUNCTION DOC] Property: test_file_path as a string.
         return str(self._test_file_path)
 
     @property
     def test_file_dir(self):
+        # [FUNCTION DOC] Property: pathlib directory containing the test file.
         return self._test_file_dir
 
     @property
     def test_file_dir_str(self):
+        # [FUNCTION DOC] Property: test_file_dir as a string.
         return str(self._test_file_dir)
 
     @property
     def tests_dir(self):
+        # [FUNCTION DOC] Property: pathlib path of the repo's tests directory.
         return self._tests_dir
 
     @property
     def tests_dir_str(self):
+        # [FUNCTION DOC] Property: tests_dir as a string.
         return str(self._tests_dir)
 
     @property
     def data_dir(self):
+        # [FUNCTION DOC] Property: pathlib path of tests/test_data.
         return self._data_dir
 
     @property
     def data_dir_str(self):
+        # [FUNCTION DOC] Property: data_dir as a string.
         return str(self._data_dir)
 
     @property
     def repo_root_dir(self):
+        # [FUNCTION DOC] Property: pathlib path of the repository root.
         return self._repo_root_dir
 
     @property
     def repo_root_dir_str(self):
+        # [FUNCTION DOC] Property: repo_root_dir as a string.
         return str(self._repo_root_dir)
 
     @property
     def src_dir(self):
+        # [FUNCTION DOC] Property: directory containing the m4 package (same as repo root).
         return self._src_dir
 
     @property
     def src_dir_str(self):
+        # [FUNCTION DOC] Property: src_dir as a string.
         return str(self._src_dir)
 
     def get_env(self):
+        # [FUNCTION DOC] Return a copy of os.environ whose PYTHONPATH is "<src_dir>:<tests_dir>:<previous
+        # PYTHONPATH or empty>".
         """
         Return a copy of the ``os.environ`` object that sets up ``PYTHONPATH`` correctly. This is useful
         for invoking external programs from the test suite - e.g. distributed training.
@@ -710,6 +820,13 @@ class TestCasePlus(unittest.TestCase):
         return env
 
     def get_auto_remove_tmp_dir(self, tmp_dir=None, before=None, after=None):
+        # [FUNCTION DOC] Create and return a pathlib temp dir. If tmp_dir is given it must start with "./"
+        # (else ValueError); it is
+        # resolved, emptied first when before (default True) and the dir exists, created, and by default
+        # (after
+        # None -> False) kept. Without tmp_dir a unique dir is made with tempfile.mkdtemp and by default
+        # (after None
+        # -> True) removed. When after is True the dir is registered for deletion in tearDown.
         """
         Args:
             tmp_dir (:obj:`string`, `optional`):
@@ -779,9 +896,12 @@ class TestCasePlus(unittest.TestCase):
         return tmp_dir
 
     def get_auto_remove_tmp_dir_str(self, *args, **kwargs):
+        # [FUNCTION DOC] Same as get_auto_remove_tmp_dir but return the path as a string.
         return str(self.get_auto_remove_tmp_dir(*args, **kwargs))
 
     def tearDown(self):
+        # [FUNCTION DOC] Recursively delete every registered temp dir (ignoring errors) and clear the
+        # registry.
         # get_auto_remove_tmp_dir feature: remove registered temp dirs
         for path in self.teardown_tmp_dirs:
             shutil.rmtree(path, ignore_errors=True)
@@ -789,6 +909,9 @@ class TestCasePlus(unittest.TestCase):
 
 
 def mockenv(**kwargs):
+    # [FUNCTION DOC] Return a mock.patch.dict over os.environ with the given keyword env vars, usable as
+    # decorator or context
+    # manager. Values must be strings for os.environ.
     """
     this is a convenience wrapper, that allows this ::
 
@@ -804,6 +927,10 @@ def mockenv(**kwargs):
 # from https://stackoverflow.com/a/34333710/9201239
 @contextlib.contextmanager
 def mockenv_context(*remove, **update):
+    # [FUNCTION DOC] Context manager that updates os.environ in place with the update mapping and removes the
+    # variable names
+    # in remove; on exit restores previous values of overwritten/removed variables and deletes variables that
+    # were newly added.
     """
     Temporarily updates the ``os.environ`` dictionary in-place. Similar to mockenv
 
@@ -837,6 +964,8 @@ def mockenv_context(*remove, **update):
 
 
 def get_xdist_worker_id():
+    # [FUNCTION DOC] Return the pytest-xdist worker number parsed from PYTEST_XDIST_WORKER ("gwN" -> N), or 0
+    # when unset.
     """
     when run under pytest-xdist returns the worker id (int), otherwise returns 0
     """
@@ -848,6 +977,8 @@ DEFAULT_MASTER_PORT = 10999
 
 
 def get_unique_port_number():
+    # [FUNCTION DOC] Return DEFAULT_MASTER_PORT plus the xdist worker id, so concurrent workers use distinct
+    # ports.
     """
     When the test suite runs under pytest-xdist we need to make sure that concurrent tests won't use
     the same port number. We can accomplish that by using the same base and always adding the xdist
@@ -860,16 +991,20 @@ def get_unique_port_number():
 
 
 def write_file(file, content):
+    # [FUNCTION DOC] Write the string content to file (overwriting).
     with open(file, "w") as f:
         f.write(content)
 
 
 def read_json_file(file):
+    # [FUNCTION DOC] Load and return JSON from file.
     with open(file, "r") as fh:
         return json.load(fh)
 
 
 def replace_str_in_file(file, text_to_search, replacement_text):
+    # [FUNCTION DOC] Replace all occurrences of text_to_search with replacement_text in the file, rewriting it
+    # in place.
     file = Path(file)
     text = file.read_text()
     text = text.replace(text_to_search, replacement_text)
@@ -883,6 +1018,9 @@ pytest_opt_registered = {}
 
 
 def pytest_addoption_shared(parser):
+    # [FUNCTION DOC] Add the "--make-reports" pytest option (string prefix for report names, default False) to
+    # parser unless
+    # already registered in pytest_opt_registered, so multiple conftest.py files can call it safely.
     """
     This function is to be called from `conftest.py` via `pytest_addoption` wrapper that has to be defined there.
 
@@ -902,6 +1040,15 @@ def pytest_addoption_shared(parser):
 
 
 def pytest_terminal_summary_main(tr, id):
+    # [FUNCTION DOC] Write separate report files under reports/<id>/ (id defaults to "tests") at the end of a
+    # pytest run:
+    # durations (sorted descending, stopping at < 0.05s), failures_long, failures_short, failures_line,
+    # errors,
+    # warnings, summary_short and stats, by temporarily swapping the terminal reporter's writer to each file
+    # and
+    # calling its private summary methods with emulated -rA reportchars. The passes report is intentionally
+    # skipped. Restores the original writer, reportchars and tbstyle afterwards. Relies on private _pytest
+    # API.
     """
     Generate multiple reports at the end of test suite run - each report goes into a dedicated file in the current
     directory. The report files are prefixed with the test suite name.
@@ -968,6 +1115,9 @@ def pytest_terminal_summary_main(tr, id):
                 f.write(f"{rep.duration:02.2f}s {rep.when:<8} {rep.nodeid}\n")
 
     def summary_failures_short(tr):
+        # [FUNCTION DOC] HELPER: write a "FAILURES SHORT STACK" section with, for each failed report, its
+        # headline and only the last
+        # frame of the long traceback (earlier frames are cut with a regex on the "_ _ _" separators).
         # expecting that the reports were --tb=long (default) so we chop them off here to the last frame
         reports = tr.getreports("failed")
         if not reports:
@@ -1038,13 +1188,18 @@ def pytest_terminal_summary_main(tr, id):
 
 
 class _RunOutput:
+    # [CLASS DOC] HELPER: simple record of a finished subprocess: returncode, stdout and stderr (lists of
+    # decoded lines).
     def __init__(self, returncode, stdout, stderr):
+        # [FUNCTION DOC] Store returncode, stdout and stderr.
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
 
 
 async def _read_stream(stream, callback):
+    # [FUNCTION DOC] HELPER: coroutine that reads lines from an asyncio stream until EOF and passes each
+    # (bytes) to callback.
     while True:
         line = await stream.readline()
         if line:
@@ -1054,6 +1209,13 @@ async def _read_stream(stream, callback):
 
 
 async def _stream_subprocess(cmd, env=None, stdin=None, timeout=None, quiet=False, echo=False) -> _RunOutput:
+    # [FUNCTION DOC] HELPER: coroutine that launches cmd (list of strings) with asyncio using env/stdin,
+    # streams stdout and
+    # stderr line by line into lists (also echoing them with "stdout:"/"stderr:" labels unless quiet), prints
+    # the
+    # command first when echo, waits for completion and returns a _RunOutput.
+    # KNOWN ISSUE: passes bare coroutines to asyncio.wait, which is deprecated and an error on Python 3.11+;
+    # the timeout is also ineffective (as the comment admits) and pending readers are not cancelled.
     if echo:
         print("\nRunning: ", " ".join(cmd))
 
@@ -1078,6 +1240,9 @@ async def _stream_subprocess(cmd, env=None, stdin=None, timeout=None, quiet=Fals
     err = []
 
     def tee(line, sink, pipe, label=""):
+        # [FUNCTION DOC] HELPER: decode a bytes line as UTF-8, strip trailing whitespace, append to sink and
+        # print it with label to
+        # pipe unless quiet.
         line = line.decode("utf-8").rstrip()
         sink.append(line)
         if not quiet:
@@ -1095,6 +1260,12 @@ async def _stream_subprocess(cmd, env=None, stdin=None, timeout=None, quiet=Fals
 
 
 def execute_subprocess_async(cmd, env=None, stdin=None, timeout=180, quiet=False, echo=True) -> _RunOutput:
+    # [FUNCTION DOC] Run cmd synchronously via _stream_subprocess on the current event loop (timeout 180, echo
+    # on by default).
+    # Raises RuntimeError with the joined stderr if the return code is > 0, or if the process produced no
+    # output
+    # at all. Returns the _RunOutput.
+    # KNOWN ISSUE: negative return codes (killed by signal) are not treated as failures.
     loop = asyncio.get_event_loop()
     result = loop.run_until_complete(
         _stream_subprocess(cmd, env=env, stdin=stdin, timeout=timeout, quiet=quiet, echo=echo)

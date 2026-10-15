@@ -1,3 +1,8 @@
+# [MODULE DOC] Helpers for the n-gram extraction / search tools: building the SQLite database for a shard from
+# CSV dumps,
+# and encoding token-id n-grams (n = 1..4) as unique integers. With token ids offset by one into [1, V]
+# (V = vocab size), an n-gram (a, b, c) maps to a*V^2 + b*V + c, so ranges for different n do not overlap and
+# 4-grams still fit in int64 for V = 50,257.
 import csv
 import os
 import sqlite3
@@ -7,6 +12,13 @@ import numpy as np
 
 
 def create_database(shard_name: str):
+    # [FUNCTION DOC] Create data/extracted_databases/<shard_name>.db unless it already exists (then print and
+    # return). Creates
+    # table ngrams(shard, document, ngrams) loaded from <shard_name>.ngrams.csv plus an index on ngrams, table
+    # urls(document, url) from <shard_name>.urls.csv, and table htmls(document, html) from
+    # <shard_name>.htmls.csv (raising the csv field size limit to sys.maxsize globally first). Commits, closes
+    # and
+    # prints progress. Raises if CSV files are missing.
     """
     If the databse does not exist, create it
     TODO: update so that we can take in multiple shards
@@ -89,10 +101,16 @@ def create_database(shard_name: str):
 
 
 def unique_tolist(l_):
+    # [FUNCTION DOC] HELPER: return the sorted unique values of an array-like as a Python list.
     return np.unique(l_).tolist()
 
 
 def get_ngrams(ids: np.ndarray, voc_size: int, n: int):
+    # [FUNCTION DOC] Return the sorted unique n-gram ids of a 1-D integer numpy array ids for n in 1..4, using
+    # voc_size as base
+    # (ids are first offset by +1). Raises ValueError (no message) if there are fewer than n ids, and
+    # ValueError
+    # for n >= 5 (or n < 1).
     ids = ids + 1  # offset by one otherwise the mapping is not bijective...
     V_pow = [voc_size**i for i in range(4)]
 

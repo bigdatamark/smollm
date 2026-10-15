@@ -1,7 +1,17 @@
+# [MODULE DOC] Debug helpers meant to be called with a Trainer instance as `self` (they read self.vl_optim) to
+# inspect
+# Adam-style optimizer state.
 """ Trainer debug utils """
 
 
 def dump_optim_states(self):
+    # [FUNCTION DOC] Print, for the first N entries of the optimizer state (N = number of param groups), the
+    # step count and
+    # whether exp_avg and exp_avg_sq are all zeros.
+    # KNOWN ISSUE: optimizer state is keyed per parameter, not per param group, so slicing it to the number of
+    # param groups inspects the first few parameters only, mislabelled as "param group"; also the builtin
+    # all() over
+    # a tensor only works elementwise for 1-D tensors.
     """dumps basic information about the state of the optimizer"""
 
     print("*** Optim States Dump:")
@@ -19,6 +29,12 @@ def dump_optim_states(self):
 
 
 def validate_optim_states_are_reset(self):
+    # [FUNCTION DOC] Check that a freshly reset optimizer has step == 1 and all-zero exp_avg / exp_avg_sq for
+    # the same first N
+    # state entries; raise ValueError naming the offending entry otherwise.
+    # KNOWN ISSUE: same per-parameter vs per-group slicing issue as dump_optim_states; the error messages
+    # label
+    # the exp_avg / exp_avg_sq tensors as "step".
     """
     for a new or fully reset optimizer we expect all zeros `exp_avg` and `exp_avg_sq` state tensors and step=1
     """

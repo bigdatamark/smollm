@@ -1,3 +1,12 @@
+# [MODULE DOC] Training configuration for m4 (IDEFICS-style vision-language) training, defined as dataclasses
+# parsed with
+# simple_parsing from the command line and/or a YAML config file. Groups: Hparams (general/model/training/
+# logging/wandb/LoRA settings), OptimizerParams, DataParams (with one DatasetParams subclass instance per
+# dataset), ResumeParams (filled automatically when resuming), and the top-level Parameters which validates
+# and post-processes everything. Running the module prints the parsed config and saves it to save_dir.
+# KNOWN ISSUE: nested dataclass instances (e.g. Hparams(), GlobalBatchSizeRampUp()) are used as plain field
+# defaults, so the same default object is shared between all Parameters instances (and is rejected by
+# dataclasses on Python 3.11+); Hparams.jz_start_time is evaluated once at import, not at job start.
 import json
 import logging
 import time
@@ -19,6 +28,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CfgFileConfig:
+    # [CLASS DOC] Arguments for the config file itself: config (optional path to a YAML file) and save_config
+    # (default True,
+    # whether save_config_state writes the final config).
     """Config file args"""
 
     # path to config file
@@ -29,6 +41,9 @@ class CfgFileConfig:
 
 @dataclass
 class GlobalBatchSizeRampUp:
+    # [CLASS DOC] Global batch size ramp-up settings: start with `start`, increase by `increment` every
+    # `samples` consumed
+    # samples, until reaching `finish`. All None means no ramp-up.
     """These are init variables that are used to set up the GBS ramp up protocol"""
 
     # global batch size ramp up protocol:
@@ -44,6 +59,10 @@ class GlobalBatchSizeRampUp:
 
 @dataclass
 class GlobalBatchSizeRampUpRunningParams:
+    # [CLASS DOC] Runtime state of the batch size ramp-up (computed by the trainer, persisted for resuming):
+    # samples seen
+    # globally, current global batch size, sample count for the next increment, current grad accumulation
+    # size.
     """The are running variables that are used to tell when to increment GBS and when to stop doing
     that, they are never set directly in the config file, but are calculated when the training starts.
     """
@@ -56,6 +75,14 @@ class GlobalBatchSizeRampUpRunningParams:
 
 @dataclass
 class Hparams:
+    # [CLASS DOC] General hyper-parameters: seed, preprocessing-only mode, job time limits, tokenizer/model
+    # names and params
+    # (tokenizer params/added tokens are strings to be evaluated), model_config dict (vision/perceiver configs
+    # and freezing flags), LoRA options, batch sizes (batch_size is deprecated), ramp-up, grad accumulation
+    # and
+    # clipping, per-dataset loss weights, step/epoch limits, kill/save switch files, logging/saving intervals,
+    # activation/gradient logging targets, wandb settings, repo commit id, profiler flag, and name patterns of
+    # modules to LoRA-ify or unfreeze.
     """General Hyperparameters"""
 
     # --------------------
@@ -201,6 +228,10 @@ class Hparams:
 
 @dataclass
 class ResumeParams:
+    # [CLASS DOC] Resume-related paths and state: checkpoint directory (opt_step_dir) or resume_last to use
+    # the
+    # save_dir/latest_opt_step_dir pointer, derived accelerator/model/LoRA/config paths, restored train logs,
+    # optimizer step, epoch, dataset state and batch-size ramp-up running state.
     # ----------------------
     # Resume run Parameters
     # ----------------------
@@ -222,6 +253,13 @@ class ResumeParams:
 
 @dataclass
 class DatasetParams:
+    # [CLASS DOC] Per-dataset parameters: dataset_name (required), max images per sample, max sequence length,
+    # training and
+    # validation dataset paths, padding vs packing, map batch size/num_proc, samples per document, BOS/EOS
+    # insertion, shuffling options (after packing and for the webdataset pipeline buffers), T5 MLM noise
+    # settings, dataset_type, random image scale-up settings and min/max image sizes;
+    # vision_encoder_max_image_size
+    # is filled in later from the vision config.
     # This always need to be specified as it is needed by dataset utils down the line
     dataset_name: DatasetNames
     # max number of images per sample
@@ -273,36 +311,48 @@ class DatasetParams:
 
 @dataclass
 class ImageCaptionPairedDatasetParams(DatasetParams):
+    # [CLASS DOC] DatasetParams with dataset_type defaulting to IMAGE_CAPTION_PAIRS.
     dataset_type: DatasetTypes = DatasetTypes.IMAGE_CAPTION_PAIRS
 
 
 @dataclass
 class OCRDatasetParams(DatasetParams):
+    # [CLASS DOC] DatasetParams with dataset_type defaulting to OCR.
     dataset_type: DatasetTypes = DatasetTypes.OCR
 
 
 @dataclass
 class DOCVQADatasetParams(DatasetParams):
+    # [CLASS DOC] DatasetParams with dataset_type defaulting to DOCVQA.
     dataset_type: DatasetTypes = DatasetTypes.DOCVQA
 
 
 @dataclass
 class VQAv2TaskFineTuningPairedDatasetParams(DatasetParams):
+    # [CLASS DOC] DatasetParams with dataset_type defaulting to VQAV2_TASK_FINETUNING.
     dataset_type: DatasetTypes = DatasetTypes.VQAV2_TASK_FINETUNING
 
 
 @dataclass
 class WebDocumentsDatasetParams(DatasetParams):
+    # [CLASS DOC] DatasetParams with dataset_type defaulting to WEB_DOCUMENTS.
     dataset_type: DatasetTypes = DatasetTypes.WEB_DOCUMENTS
 
 
 @dataclass
 class SFTDatasetParams(DatasetParams):
+    # [CLASS DOC] DatasetParams with dataset_type defaulting to SFT.
     dataset_type: DatasetTypes = DatasetTypes.SFT
 
 
 @dataclass
 class DataParams(Serializable):
+    # [CLASS DOC] Data loading parameters: webdataset vs HF datasets, dataloader workers/pin_memory/persistent
+    # workers,
+    # realtime (on-the-fly) processing, train/val seeds, example subselection counts, dataset interleaving
+    # probabilities, and one DatasetParams field per supported dataset (pmd, laion, laion_coco, tikz,
+    # image_website_code, ocr, docvqa, cm4, wiki, vqav2_task_finetuning, sft). A batch_size attribute is added
+    # by Parameters.__post_init__.
     """Data Parameters"""
 
     # what software to use for the dataset
@@ -347,6 +397,10 @@ class DataParams(Serializable):
 
 @dataclass
 class OptimizerParams:
+    # [CLASS DOC] Optimizer settings: optimizer name (default AdamW) and params (lr, betas, weight_decay, and
+    # no_decay name
+    # substrings excluded from weight decay), LR scheduler name/params (constant with 5000 warmup steps), and
+    # z_loss coefficient.
     """Optimization parameters"""
 
     # --------------------
@@ -372,6 +426,9 @@ class OptimizerParams:
 
 @dataclass
 class Parameters(Serializable):
+    # [CLASS DOC] Top-level config combining hparams, optim_param, data_param and resume_param; should_verify
+    # is an
+    # init-only flag controlling the extra-keys verification. Serializable to/from YAML.
     """base options."""
 
     hparams: Hparams = Hparams()
@@ -381,6 +438,12 @@ class Parameters(Serializable):
     should_verify: InitVar[bool] = True
 
     def verify(self, should_verify: bool):
+        # [FUNCTION DOC] HELPER: if should_verify, compare the instance attributes with a default instance;
+        # raise ValueError for an
+        # attribute name not present in the defaults, and TypeError for an attribute that is still a raw dict.
+        # KNOWN ISSUE: any dict-valued attribute raises TypeError even when it has no extra keys (diff is
+        # computed
+        # but not checked for emptiness).
         if not should_verify:
             return
 
@@ -397,6 +460,27 @@ class Parameters(Serializable):
                 raise ValueError(f"{key} is not a valid parameter for {self.__class__.__name__}")
 
     def __post_init__(self, should_verify: bool = True):
+        # [FUNCTION DOC] Validate and derive settings after construction: run verify; propagate
+        # select_n_examples to train/val
+        # variants when unset; fill repo_commit_id from the enclosing git repo's HEAD; reject lora_name
+        # without
+        # use_lora, realtime processing with 0 workers, batch_size together with batch_size_per_gpu > 1
+        # (otherwise
+        # copy deprecated batch_size into batch_size_per_gpu with a warning), and set batch_size to None and
+        # data_param.batch_size to batch_size_per_gpu; convert logging type lists to LoggingTypes; reject
+        # using both
+        # interleaving probabilities and loss weights, and probabilities not summing to 1 (+/- 0.001); with
+        # LoRA,
+        # require frozen vision/text layers if patterns target them. If save_dir exists, set resume_run to
+        # whether it
+        # contains "opt_step" dirs (warn if resume_run was explicitly False). When resuming, resolve
+        # opt_step_dir
+        # (from save_dir/latest_opt_step_dir when resume_last, with mutual-exclusion and existence checks
+        # raising
+        # ValueError), read resume_run_infos.json and fill resume paths (accelerator_state, unwrapped_model,
+        # unwrapped_adapter, config.json, tokenizer), train logs, step, epoch, dataset state, ramp-up running
+        # state,
+        # wandb_run_id (cleared if wandb disabled) and seed. Reads files and git; logs warnings/info.
         """Post-initialization code"""
         self.verify(should_verify=should_verify)
 
@@ -545,6 +629,11 @@ class Parameters(Serializable):
 
     @classmethod
     def parse(cls):
+        # [FUNCTION DOC] Classmethod: first parse only the config-file args (CfgFileConfig) from sys.argv; if
+        # a config path is given,
+        # load Parameters from the YAML file and use it as defaults; then parse the full argument set (unknown
+        # args,
+        # e.g. pytest's, are ignored) and return the resulting Parameters with save_config attached.
         cfgfile_parser = ArgumentParser(add_help=False)
         cfgfile_parser.add_arguments(CfgFileConfig, dest="cfgfile")
         cfgfile_args, rest = cfgfile_parser.parse_known_args()
@@ -573,6 +662,9 @@ class Parameters(Serializable):
         return parameters
 
     def save_config_state(self):
+        # [FUNCTION DOC] If save_config is set, create hparams.save_dir and save the config as YAML to
+        # "<job_id>_config.yaml" (or
+        # "config.yaml" when no job id) inside it.
         if self.save_config:
             self.hparams.save_dir.mkdir(parents=True, exist_ok=True)
             if self.hparams.job_id is not None:
@@ -583,6 +675,7 @@ class Parameters(Serializable):
 
 
 def get_config(print_config: bool = True):
+    # [FUNCTION DOC] Parse and return Parameters, printing them first when print_config (default True).
     parameters: Parameters = Parameters.parse()
     if print_config:
         print(parameters)

@@ -1,3 +1,22 @@
+# [MODULE DOC] Main training entry point (run as a script, typically via accelerate launch). Configures
+# logging (rich
+# handler unless M4_DISABLE_RICH; verbosity from M4_VERBOSITY on the main process, ERROR elsewhere), enables
+# TF32, parses the config, creates the Accelerator (grad accumulation, process-group timeout), honours the
+# kill switch, seeds, creates save_dir, then builds the model: resumes from the checkpoint (plus LoRA
+# adapter), loads a base model for fine-tuning (frozen parts and additional vocab = 39 + added tokens,
+# optional trained adapter), or creates a new model from pretrained backbones. Optionally adds a new LoRA
+# adapter on parameters matching patterns_to_loraify and re-enables gradients for patterns_to_unfreeze.
+# Computes the per-image token count (resampler latents or (image_size/patch_size)^2 / pixel_shuffle^2),
+# loads the tokenizer, builds train/val image transforms per dataset (also setting
+# vision_encoder_max_image_size on each dataset param), builds dataloaders (local main process first, then
+# the others, to share preprocessing caches), validates loss_weights_per_dataset against the dataset count,
+# exits early when just_preprocess, sets max_num_tokens (-1 for iterable datasets), saves the config,
+# creates the Trainer and trains (optionally under the torch profiler writing to save_dir/torch_profiler).
+# Finally the main process writes save_dir/train_logs.json and prints the per-token loss. Optional timing
+# breakdown printed when timing_break_down.
+# KNOWN ISSUE: tokenizer.pad_token_id is hard-coded to 2 and the fine-tuning additional vocab size is
+# hard-coded to 39 + added tokens; config strings are evaluated with eval. Raises NotImplementedError when
+# resuming without realtime_processing.
 import json
 import logging
 import os
