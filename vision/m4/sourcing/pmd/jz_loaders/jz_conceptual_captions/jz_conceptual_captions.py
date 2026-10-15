@@ -1,4 +1,11 @@
 # coding=utf-8
+# [MODULE DOC] `datasets` builder script for Conceptual Captions (CC3M, "unlabeled" config) on the Jean Zay
+# cluster: reads
+# the TSV annotation files and pre-downloaded images under $DSDIR/conceptual_captions and outputs the PMD
+# schema (image, text, source="conceptual_captions", meta={"image_url"}). Images are opened/verified in a
+# multiprocessing pool, in chunks of CHUNK_SIZE rows, producing Arrow tables. Sets datasets logging to INFO.
+# KNOWN ISSUE: _HOMEPAGE points to the CC-100 page, not Conceptual Captions; _LICENSE contains a typo
+# ("ofsq").
 # Copyright 2022 The HuggingFace Datasets Authors and the current dataset script contributor.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -93,6 +100,8 @@ _DESCRIPTIONS = {
 
 
 class JZConceptualCaptions(datasets.ArrowBasedBuilder):
+    # [CLASS DOC] ArrowBasedBuilder with a single "unlabeled" config; uses all CPUs (num_proc) and chunks of
+    # 1000 rows.
     """Builder for Conceptual Captions dataset."""
 
     VERSION = datasets.Version("1.0.0")
@@ -105,6 +114,8 @@ class JZConceptualCaptions(datasets.ArrowBasedBuilder):
     CHUNK_SIZE = 1_000
 
     def _info(self):
+        # [FUNCTION DOC] Return DatasetInfo with the PMD `_FEATURES` schema, description, homepage, license
+        # and citation.
         return datasets.DatasetInfo(
             description=_DESCRIPTION,
             features=_FEATURES,
@@ -115,6 +126,9 @@ class JZConceptualCaptions(datasets.ArrowBasedBuilder):
         )
 
     def _split_generators(self, dl_manager):
+        # [FUNCTION DOC] Return TRAIN and VALIDATION split generators whose `annotations_file` is the
+        # corresponding TSV under
+        # get_jz_dataset_dir()/conceptual_captions (raises ValueError outside JZ). `dl_manager` is unused.
         annotation_data_paths = _ANNOTATION_LOCAL_PATHS[self.config.name]
         splits = [
             datasets.SplitGenerator(
@@ -135,6 +149,10 @@ class JZConceptualCaptions(datasets.ArrowBasedBuilder):
         return splits
 
     def _generate_examples(self, annotations_file):
+        # [FUNCTION DOC] HELPER: read the TSV (caption, image url, local path relative to the dataset dir or
+        # "N/A"; asserts 3 columns)
+        # and yield lists of up to CHUNK_SIZE dicts {image_path (Path or None), text, source, meta JSON with
+        # image_url}.
         buffer = []
         with open(annotations_file, encoding="utf-8") as f:
             for row in csv.reader(f, delimiter="\t"):
@@ -161,6 +179,9 @@ class JZConceptualCaptions(datasets.ArrowBasedBuilder):
                 yield buffer
 
     def _generate_tables(self, annotations_file):
+        # [FUNCTION DOC] Yield (index, pyarrow Table) for each chunk, built in parallel with a Pool(num_proc)
+        # `imap` (order kept)
+        # over _create_table, then log warnings with the totals of missing / unopenable / unverifiable images.
         rows_iterator = self._generate_examples(annotations_file)
 
         counter_images_not_found = 0
@@ -182,6 +203,15 @@ class JZConceptualCaptions(datasets.ArrowBasedBuilder):
         logger.warning(f"Skipped {counter_images_not_verified} images (not verified).")
 
     def _create_table(self, examples):
+        # [FUNCTION DOC] HELPER: for each example open the image with PIL if the path exists and verify it;
+        # failures set the image to
+        # None and increment the not-found / opening-error / not-verified counters. Replaces image_path by
+        # image
+        # (closed after verify) and returns (not_found, opening_error, not_verified, Arrow table encoded with
+        # _FEATURES).
+        # KNOWN ISSUE: when opening fails the image is None and verify() then also fails, so the image is
+        # counted in
+        # both the opening-error and not-verified counters.
         counter_images_not_found = 0
         count_images_opening_error = 0
         counter_images_not_verified = 0
@@ -229,6 +259,8 @@ class JZConceptualCaptions(datasets.ArrowBasedBuilder):
         )
 
     def _recast(self, examples):
+        # [FUNCTION DOC] HELPER: convert a list of example dicts into a column mapping {image, text, source,
+        # meta}.
         return {
             "image": [ex["image"] for ex in examples],
             "text": [ex["text"] for ex in examples],

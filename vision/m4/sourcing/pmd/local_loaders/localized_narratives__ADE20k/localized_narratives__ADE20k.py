@@ -1,4 +1,8 @@
 # coding=utf-8
+# [MODULE DOC] `datasets` builder script for the ADE20k subset of Localized Narratives (as packaged for PMD):
+# downloads the
+# caption JSONL files (facebook/pmd hub repo) and the ADEChallengeData2016 image zip, and yields one example
+# per narrative with its ids, annotator, caption, original caption and image path.
 # Copyright 2020 The HuggingFace Datasets Authors and the current dataset script contributor.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -55,9 +59,12 @@ _FEATURES = datasets.Features(
 
 
 class LocalizedNarrativesADE20k(datasets.GeneratorBasedBuilder):
+    # [CLASS DOC] GeneratorBasedBuilder with train and validation splits.
     """Builder for ADE20K subset of Localized Narratives."""
 
     def _info(self):
+        # [FUNCTION DOC] Return DatasetInfo with this module's `_FEATURES` (citation/description/license are
+        # empty TODOs).
         return datasets.DatasetInfo(
             description=_DESCRIPTION,
             features=_FEATURES,
@@ -67,6 +74,9 @@ class LocalizedNarrativesADE20k(datasets.GeneratorBasedBuilder):
         )
 
     def _split_generators(self, dl_manager):
+        # [FUNCTION DOC] Download the annotation files and extract the image archive; return one split
+        # generator per annotation split
+        # with the annotation file and the image dir ADEChallengeData2016/images/<training|validation>.
         annotation_files = dl_manager.download(_ANNOTATION_URLs)
         image_base_dir = Path(dl_manager.download_and_extract(_IMAGES_URL)) / "ADEChallengeData2016" / "images"
 
@@ -82,6 +92,9 @@ class LocalizedNarrativesADE20k(datasets.GeneratorBasedBuilder):
         ]
 
     def _generate_examples(self, annotation_file: str, base_image_path: Path):
+        # [FUNCTION DOC] Yield (line index, example) for each JSONL line; image = absolute path
+        # <base_image_path>/<image_id>.jpg
+        # (existence not checked).
         with open(annotation_file, "r", encoding="utf-8") as fi:
             for idx, line in enumerate(fi):
                 annotation = json.loads(line)

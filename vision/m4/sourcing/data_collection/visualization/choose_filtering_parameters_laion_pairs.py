@@ -1,3 +1,8 @@
+# [MODULE DOC] Streamlit app (script only, no functions) to help choose filtering thresholds for image/text
+# pair datasets.
+# Loads a pickled DataFrame of per-pair stats from ./large_files/stats_vis_choose_filtering_params.pkl
+# (produced by get_stats_vis_choose_filtering_parameters_laion_pairs.py; `img` column holds HTML <img> tags),
+# lets the user pick the number of rows (head) and a sort column/order, and renders it as raw HTML.
 import pandas as pd
 import streamlit as st
 

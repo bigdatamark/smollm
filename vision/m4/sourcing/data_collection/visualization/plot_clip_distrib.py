@@ -1,3 +1,12 @@
+# [MODULE DOC] Script (no functions) comparing CLIP score distributions. Loads reference CLIP scores (.npy,
+# 10k each) for
+# RedCaps, SBU captions and LAION-400M, writes an overlaid histogram (NB_BINS bins, percent) to
+# distributions_reference.png; then reads extracted pairs from image_text_pairs.jsonl and, for alt text,
+# extracted text and formatted filename, plots their CLIP score histogram against RedCaps+SBU combined with
+# the
+# KL divergence (kl_div) in the legend, saved to distributions_extracted.png (needs kaleido for write_image).
+# KNOWN ISSUE: all paths use "./m4/sourcing.data_collection/..." (dot instead of slash), which likely does not
+# exist; also the module-level name `all` shadows the builtin.
 import json
 
 import numpy as np

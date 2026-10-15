@@ -1,4 +1,9 @@
 # coding=utf-8
+# [MODULE DOC] `datasets` builder script for COCO 2014 captions with the Karpathy splits (subset relevant for
+# PMD).
+# Downloads the Karpathy caption JSON (from the facebook/pmd hub repo) and the COCO train2014/val2014 image
+# zips,
+# and yields one example per caption with image path, Karpathy metadata and the caption struct.
 # Copyright 2020 The HuggingFace Datasets Authors and the current dataset script contributor.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -62,9 +67,13 @@ _FEATURES = datasets.Features(
 
 
 class COCO(datasets.GeneratorBasedBuilder):
+    # [CLASS DOC] GeneratorBasedBuilder producing train / validation / test splits following the Karpathy
+    # split field.
     """COCO - only the subset relavant for PMD."""
 
     def _info(self):
+        # [FUNCTION DOC] Return DatasetInfo with this module's `_FEATURES` (image + Karpathy fields; citation
+        # etc. are empty TODOs).
         return datasets.DatasetInfo(
             description=_DESCRIPTION,
             features=_FEATURES,
@@ -74,6 +83,10 @@ class COCO(datasets.GeneratorBasedBuilder):
         )
 
     def _split_generators(self, dl_manager):
+        # [FUNCTION DOC] Download/extract annotations and image zips via dl_manager and return TRAIN,
+        # VALIDATION and TEST split
+        # generators with the annotation file, image folders mapping (train/validation -> extracted dir) and
+        # split key.
         annotation_file = os.path.join(dl_manager.download_and_extract(_KARPATHY_FILES_URL), "dataset_coco.json")
         image_folders = {k: Path(v) for k, v in dl_manager.download_and_extract(_IMAGES_URLS).items()}
 
@@ -105,6 +118,13 @@ class COCO(datasets.GeneratorBasedBuilder):
         ]
 
     def _generate_examples(self, annotation_file, image_folders, split_key):
+        # [FUNCTION DOC] Yield (counter, example) for each caption of each image belonging to `split_key`
+        # (train = "train" + "restval",
+        # validation = "val", test = "test"). The image path is <val folder>/val2014/<filename> if the
+        # filename contains
+        # "val2014", else <train folder>/train2014/<filename>.
+        # KNOWN ISSUE: the `filepath` field is filled with the filename instead of the Karpathy `filepath`
+        # value.
         counter = 0
         with open(annotation_file, "r", encoding="utf-8") as fi:
             annotations = json.load(fi)

@@ -1,3 +1,10 @@
+# [MODULE DOC] Streamlit app to tune and apply web-document filtering interactively. Loads a web-document
+# dataset from disk
+# (must contain an `original_idx` column), exposes every node-level and doc-level filter of
+# WebDocumentFilteringNodeLevel / WebDocumentFilteringDocLevel with defaults from a YAML config, runs the
+# filtering on button press (results kept in st.session_state), and displays original / retained / discarded
+# documents. As a script: wide layout, paths under ./large_files and the config in configs/. Disables PIL's
+# decompression-bomb pixel limit globally.
 import json
 import random
 from datetime import timedelta
@@ -24,6 +31,9 @@ Image.MAX_IMAGE_PIXELS = None
 
 
 class Visualization:
+    # [CLASS DOC] Stateful page holding config params, model/data paths, the loaded dataset, all filter
+    # choices (cond_* flags
+    # and cutoffs as attributes), the selected mode, dataset and documents.
     def __init__(
         self,
         path_web_documents_dataset,
@@ -33,6 +43,9 @@ class Visualization:
         path_sentencepiece_model,
         path_kenlm_model,
     ):
+        # [FUNCTION DOC] Store the dataset path and model paths (common words JSON, fastText lang-id,
+        # SentencePiece, KenLM) and load
+        # the filtering parameters mapping from the YAML config file.
         self.path_web_documents_dataset = path_web_documents_dataset
         with open(path_config_filter_web_documents) as f:
             self.filtering_params = yaml.load(f, Loader=yaml.FullLoader)
@@ -42,6 +55,8 @@ class Visualization:
         self.path_kenlm_model = path_kenlm_model
 
     def visualization(self):
+        # [FUNCTION DOC] Render the page: title, dataset loading, filtering controls/execution, mode,
+        # document choice, display.
         self.set_title()
         self.load_dataset()
         self.filtering()
@@ -50,9 +65,13 @@ class Visualization:
         self.display_document()
 
     def set_title(self):
+        # [FUNCTION DOC] Show the page title.
         st.title("Visualization of web documents and filtering")
 
     def load_dataset(self):
+        # [FUNCTION DOC] Load the dataset from disk, keep its first 100/300/1000/3000/10000 rows (user
+        # choice, capped at size), and
+        # initialize the session-state retained/discarded datasets to None if absent.
         st.header("Select the size of the dataset")
 
         self.full_dataset = load_from_disk(self.path_web_documents_dataset)
@@ -79,6 +98,21 @@ class Visualization:
                     st.session_state.discarded_web_document_dataset = None
 
     def filtering(self):
+        # [FUNCTION DOC] Show controls for every node-level filter (image format, image size/aspect ratio,
+        # number of words, character
+        # and word repetition, special char / stopword / flagged word / punctuation / common word ratios,
+        # lang-id score,
+        # perplexity) and doc-level filter (number of images plus the same text filters), defaulted from the
+        # config.
+        # On "Perform filtering": map the node-level filter over the dataset, filter with the doc-level
+        # filter into
+        # session_state.retained_web_document_dataset, and store documents whose original_idx is not retained
+        # in
+        # session_state.discarded_web_document_dataset (filtered at node level). Shows elapsed time. Loads
+        # models.
+        # KNOWN ISSUE: passes the global `path_common_words` (defined only under `__main__`) instead of
+        # self.path_common_words to both filters, so it fails with NameError when the class is used from
+        # elsewhere.
         st.header("Filtering")
 
         st.subheader("Filtering at node level")
@@ -649,6 +683,8 @@ class Visualization:
                 idx_retained_docs = set(st.session_state.retained_web_document_dataset["original_idx"])
 
                 def keep_discarded_docs(web_document):
+                    # [FUNCTION DOC] HELPER: filter predicate; True if the document's original_idx is not
+                    # among the retained ones.
                     if web_document["original_idx"] not in idx_retained_docs:
                         return True
                     return False
@@ -663,6 +699,9 @@ class Visualization:
             st.success(f"Filtering done in {timedelta(seconds=tot_time)} (HH:MM:SS)!")
 
     def select_mode(self):
+        # [FUNCTION DOC] Select the mode (all original / retained / discarded documents) and set self.dataset
+        # accordingly; warns when
+        # the chosen filtered dataset has not been computed yet (None).
         st.header("Select a mode")
         options_mode = ["All original web documents", "Retained web documents", "Discarded web documents"]
         self.mode = st.selectbox(label="Select a mode", options=options_mode)
@@ -680,6 +719,12 @@ class Visualization:
             )
 
     def choose_document(self):
+        # [FUNCTION DOC] If a dataset is available, choose a document (random button or index), store it in
+        # self.current_doc and its
+        # unfiltered version (via original_idx into full_dataset) in self.current_doc_original; else
+        # current_doc = None.
+        # KNOWN ISSUE: `if self.dataset` uses Dataset truthiness (its length), so an empty dataset is treated
+        # as None.
         if self.dataset:
             st.header("Choose a document")
             if st.button("Select a random document"):
@@ -702,7 +747,12 @@ class Visualization:
             self.current_doc = None
 
     def display_document(self):
+        # [FUNCTION DOC] Display the current document; for retained/discarded modes optionally side by side
+        # with the original.
         def display_single_doc(doc, subheader_name=None):
+            # [FUNCTION DOC] HELPER: display a document's nodes (text with st.text, images as markdown links
+            # to metadata src) under an
+            # optional subheader.
             if subheader_name:
                 st.subheader(subheader_name)
             texts = doc["texts"]

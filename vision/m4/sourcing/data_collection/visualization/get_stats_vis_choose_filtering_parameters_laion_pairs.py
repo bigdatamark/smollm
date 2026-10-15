@@ -1,3 +1,9 @@
+# [MODULE DOC] Script (runs on import) computing per-pair statistics for an image/text pair dataset (LAION
+# 100k subset,
+# ./large_files/laion_2b_en_100k, split "train", at most 100k rows) for the threshold-choosing Streamlit app.
+# Loads common words, fastText lang-id, SentencePiece and KenLM models from ./large_files, maps every example
+# (all CPUs) to a row of stats rounded to 3 decimals, and pickles the resulting DataFrame to
+# ./large_files/stats_vis_choose_filtering_params.pkl. Sets PIL LOAD_TRUNCATED_IMAGES globally.
 import base64
 import json
 from io import BytesIO
@@ -50,6 +56,8 @@ kenlm_model = kenlm.Model(PATH_KENLM_MODEL)
 
 
 def transform_img(img):
+    # [FUNCTION DOC] HELPER: convert a PIL image to RGB, shrink to fit 50x50, return an HTML <img> tag with
+    # base64 PNG data.
     img = img.convert("RGB")
     img.thumbnail((50, 50))
     with BytesIO() as buffer:
@@ -59,6 +67,12 @@ def transform_img(img):
 
 
 def get_stats_map_func(example):
+    # [FUNCTION DOC] Map function replacing an example ({image, text, meta JSON}) with display columns: img
+    # (HTML thumbnail),
+    # caption, original width/height, aspect ratio, number of words, char repetition ratio (length 10), word
+    # repetition ratio (length 1), special char / stopword / flagged word / common word ratios, lang-id score,
+    # perplexity (unrounded) and CLIP score (`similarity` from the meta JSON). Column names contain "\n" for
+    # compact table headers.
     img = example["image"]
     txt = example["text"]
     example["img"] = transform_img(img)

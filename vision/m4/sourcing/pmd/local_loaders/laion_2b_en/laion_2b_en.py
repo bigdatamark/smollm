@@ -1,3 +1,7 @@
+# [MODULE DOC] `datasets` builder script for LAION-2B-en already downloaded in webdataset format (img2dataset
+# tar files in
+# DL_DATASET_PATH, relative to the current working dir). Outputs the PMD schema directly (image bytes, text,
+# source="laion_2b_en", meta = the sample's JSON metadata string).
 # Copyright 2020 The HuggingFace Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -48,9 +52,12 @@ DL_DATASET_PATH = "./large_files/laion_tar_files/"  # Path to the downloaded dat
 
 
 class LAION2BENDataset(datasets.GeneratorBasedBuilder):
+    # [CLASS DOC] GeneratorBasedBuilder with a single TRAIN split read from the local tar shards.
     VERSION = datasets.Version("1.0.0")
 
     def _info(self):
+        # [FUNCTION DOC] Return DatasetInfo with the PMD-style features (image, text, source, meta) and LAION
+        # citation/license.
         features = datasets.Features(
             {
                 "image": datasets.Image(),
@@ -68,6 +75,8 @@ class LAION2BENDataset(datasets.GeneratorBasedBuilder):
         )
 
     def _split_generators(self, _):
+        # [FUNCTION DOC] Return a single TRAIN split generator without kwargs (the downloader argument is
+        # ignored).
         return [
             datasets.SplitGenerator(
                 name=datasets.Split.TRAIN,
@@ -76,6 +85,12 @@ class LAION2BENDataset(datasets.GeneratorBasedBuilder):
         ]
 
     def _generate_examples(self):
+        # [FUNCTION DOC] For each *.tar in DL_DATASET_PATH, read all members into memory, grouping by sample
+        # name: .jpg -> image bytes,
+        # .json -> metadata (kept only if status == "success"), .txt -> caption (utf-8). Yield (running
+        # index, example)
+        # for samples having an image, a caption and successful metadata. Loads a whole tar shard in memory
+        # at once.
         idx = -1
         tar_paths = glob.glob(os.path.join(DL_DATASET_PATH, "*.tar"))
         for tar_path in tar_paths:

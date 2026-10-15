@@ -1,4 +1,8 @@
 # coding=utf-8
+# [MODULE DOC] `datasets` builder script for the COCO subset of Localized Narratives (as packaged for PMD):
+# downloads the
+# caption JSONL files (facebook/pmd hub repo), the COCO 2017 train/val image zips and the Karpathy split file,
+# and yields one example per narrative, skipping images in the Karpathy val/test splits (evaluation leakage).
 # Copyright 2020 The HuggingFace Datasets Authors and the current dataset script contributor.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -59,9 +63,12 @@ _FEATURES = datasets.Features(
 
 
 class LocalizedNarrativesCOCO(datasets.GeneratorBasedBuilder):
+    # [CLASS DOC] GeneratorBasedBuilder with train and validation splits.
     """Builder for COCO subset of Localized Narratives."""
 
     def _info(self):
+        # [FUNCTION DOC] Return DatasetInfo with this module's `_FEATURES` (citation/description/license are
+        # empty TODOs).
         return datasets.DatasetInfo(
             description=_DESCRIPTION,
             features=_FEATURES,
@@ -71,6 +78,11 @@ class LocalizedNarrativesCOCO(datasets.GeneratorBasedBuilder):
         )
 
     def _split_generators(self, dl_manager):
+        # [FUNCTION DOC] Download annotations, image zips and the Karpathy file; build invalid_images (COCO
+        # id -> 1 for Karpathy val
+        # and test images); return one split generator per annotation split with the annotation file, image
+        # dir
+        # <extracted>/<train2017|val2017> and invalid_images.
         annotation_files = dl_manager.download(_ANNOTATION_URLs)
         image_folder = dl_manager.download_and_extract(_IMAGES_URLS)
         karpathy_coco_file = os.path.join(dl_manager.download_and_extract(_KARPATHY_FILES_URL), "dataset_coco.json")
@@ -95,6 +107,11 @@ class LocalizedNarrativesCOCO(datasets.GeneratorBasedBuilder):
         ]
 
     def _generate_examples(self, annotation_file, base_image_path, invalid_images):
+        # [FUNCTION DOC] Yield (counter, example) for each JSONL line whose int image_id is not in
+        # invalid_images; image = absolute path
+        # <base_image_path>/<image_id zero-padded to 12 digits>.jpg (existence not checked).
+        # KNOWN ISSUE: the Karpathy val/test exclusion is applied to the validation split too, removing most
+        # of it.
         counter = 0
         with open(annotation_file, "r", encoding="utf-8") as fi:
             for idx, line in enumerate(fi):

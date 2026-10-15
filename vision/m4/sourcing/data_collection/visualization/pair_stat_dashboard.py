@@ -1,3 +1,9 @@
+# [MODULE DOC] Streamlit dashboard comparing image/text pair extraction methods on the first N documents of
+# the streamed
+# `bs-modeling-metadata/c4-en-html-with-metadata` dataset. Extracted images are split into "DOM" (found in the
+# simplified DOM tree) and "Residual" (found only in the raw HTML). Metrics are stored in three DataFrames
+# (rows = metric names, columns = methods): aggregate counts, and "3D" frames whose cells are lists of
+# per-image / per-text values. Adds the repo root to sys.path on import. As a script: 10 docs, CLIP scores on.
 import sys
 import time
 from pathlib import Path
@@ -22,6 +28,10 @@ from m4.sourcing.data_collection.processors import (
 
 
 def check_image_quality(media_info):
+    # [FUNCTION DOC] HELPER: return (is_good_quality, width + height) for an extracted image dict using
+    # `original_width` /
+    # `original_height`; good quality = both > 64 and 1/5 < height/width < 5.
+    # KNOWN ISSUE: the docstring says it returns width and height separately; it returns their sum.
     """
     Args_ : Media Node
     Returns :
@@ -39,6 +49,9 @@ def check_image_quality(media_info):
 
 
 def check_text(media_info):
+    # [FUNCTION DOC] HELPER: return (has_text, lengths) where lengths maps formatted_filename / alt_text /
+    # extracted_text to the
+    # length of that field (0 if missing/None); has_text is True if any length > 0.
     """
     Args_ : Media Node
     Returns :
@@ -62,6 +75,9 @@ def check_text(media_info):
 
 
 def check_CLIP(media_info):
+    # [FUNCTION DOC] HELPER: return (max CLIP score, number of positive CLIP scores, mapping text type ->
+    # score) from the
+    # `clip_score_image_<type>` fields; missing or non-comparable scores are skipped (left at 0).
     """
     Args_ : Media Node
     Returns :
@@ -94,6 +110,13 @@ def check_CLIP(media_info):
 def update_df_metrics_and_lists_for_extraction_method(
     media_info, aggregate_metrics_df, image_centric_df, text_centric_df, extraction_method_name
 ):
+    # [FUNCTION DOC] HELPER: update the metric frames in place for one extracted image under column
+    # `extraction_method_name`:
+    # increment image / good-quality / with-text counts, append width+height, and append per-text lengths and
+    # CLIP scores (0 when CLIP disabled) plus max/count CLIP per image. Returns the three frames.
+    # KNOWN ISSUE: reads `use_clip_scores` as a module global, defined only under `__main__` (NameError on
+    # import
+    # use); the function's caller-level `use_clip_scores` argument is ignored.
     """_summary_
     Given a Media_Node and the Extraction_Method_Name used to get this Media_Node,
     this function uses the Media_Node's values to update the 2D Dataframes' numbers
@@ -129,6 +152,11 @@ def get_extraction_evaluation_metrics(
     num_docs_to_consider=100,
     use_clip_scores=True,
 ):
+    # [FUNCTION DOC] Stream the first `num_docs_to_consider` documents, run TextMediaPairsExtractor (full DOM
+    # simplification,
+    # merged text nodes, residual images, CLIP scores if `use_clip_scores`) on each, time it, and aggregate
+    # metrics per method. Returns (method names ["DOM", "Residual"], aggregate_metrics_df, image_centric_df,
+    # text_centric_df, average extraction time in seconds per document). Network + model inference.
     """_summary_
 
     Args:
@@ -246,7 +274,12 @@ def get_extraction_evaluation_metrics(
 
 
 class Visualization:
+    # [CLASS DOC] Computes the metrics on construction and renders them with Streamlit (metrics, Altair bar
+    # charts, Plotly
+    # distribution plots).
     def __init__(self, num_docs, use_clip_scores=True):
+        # [FUNCTION DOC] Store params, compute metrics via get_extraction_evaluation_metrics and keep the
+        # frames and their row names.
         self.num_docs = num_docs
         self.use_clip_scores = use_clip_scores
 
@@ -265,6 +298,9 @@ class Visualization:
         self.df_text_centric_metric_names = list(self.text_centric_df.index.values)
 
     def visualize(self):
+        # [FUNCTION DOC] Render the full dashboard: recall metrics, quality metrics, bar charts of
+        # counts/size, and distribution plots
+        # of size, CLIP scores (if enabled) and DOM text lengths (values capped by `max_value`).
         self.image_text_pair_recall()
         self.images_quality_recall()
         self.display_bar_charts(
@@ -303,6 +339,9 @@ class Visualization:
         )
 
     def image_text_pair_recall(self):
+        # [FUNCTION DOC] Show average extraction time and 3 metrics: % of DOM images with text, % of Residual
+        # images with text, and
+        # DOM images with text over all images. ZeroDivisionError if a method has no images.
         st.header("Most important stats:")
         avg_extraction_time = self.avg_extraction_time
         DOM_Recall = self.get_percentage_ratio(
@@ -325,6 +364,9 @@ class Visualization:
         col3.metric(label="DOM Recall over All Images", value=f"{DOM_General_Recall:.2f}%")
 
     def images_quality_recall(self):
+        # [FUNCTION DOC] Show 3 metrics: % good-quality among DOM images, among Residual images, and DOM
+        # share of all good-quality
+        # images. ZeroDivisionError if denominators are 0.
         col1, col2, col3 = st.columns(3)
         DOM_quality_images__DOM_images = self.get_percentage_ratio(
             ratio_numerator=self.aggregate_metrics_df["DOM"]["images_of_quality_nbr"],
@@ -346,12 +388,15 @@ class Visualization:
 
     # Helper Methods
     def get_percentage_ratio(self, ratio_numerator=0, denominator=1):
+        # [FUNCTION DOC] HELPER: return numerator / denominator * 100.
         ratio_in_percentage = ratio_numerator / denominator * 100
         return ratio_in_percentage
 
     def get_bar_chart_from_aggregate_metrics(
         self, metrics_values, metrics_names, x_label_categories, x_label, y_label, bar_size=30
     ):
+        # [FUNCTION DOC] HELPER: build an Altair bar chart from parallel lists of values, captions (color)
+        # and x categories.
         df = pd.DataFrame(
             {
                 y_label: metrics_values,
@@ -364,6 +409,9 @@ class Visualization:
         return chart
 
     def get_chart_infos_from_3D_df(self, df, col_list, rows_list, reduction="mean"):
+        # [FUNCTION DOC] HELPER: for each (method, metric) return arrays of the mean of the cell's list and
+        # of names
+        # "<method>_avg_<metric>". Only reduction "mean" is supported (otherwise NameError/stale name).
         lists = []
         names_list = []
         for col in col_list:
@@ -376,6 +424,9 @@ class Visualization:
         return np.array(lists), np.array(names_list)
 
     def get_dist_infos_from_3D_df(self, df, col_list, rows_list, max_value=None):
+        # [FUNCTION DOC] HELPER: for each (method, metric) return the cell's list (values clipped to
+        # `max_value` if truthy) and the
+        # name "<method>_<metric>", as two parallel lists.
         lists = []
         names_list = []
         for col in col_list:
@@ -392,6 +443,9 @@ class Visualization:
     def display_distribution_plot(
         self, list_extraction_methods, list_metric_to_compare, title=None, bin_size=[1, 1], max_value=None
     ):
+        # [FUNCTION DOC] HELPER: plot a Plotly distplot of the given metrics for the given methods, looking
+        # them up in the image- or
+        # text-centric frame depending on the first metric's name; `bin_size` must have one entry per curve.
         if list_metric_to_compare[0] in self.df_image_centric_metric_names:
             lists_of_metrics_to_plot, list_of_metric_names_to_plot = self.get_dist_infos_from_3D_df(
                 self.image_centric_df,
@@ -412,6 +466,9 @@ class Visualization:
         st.plotly_chart(fig, use_container_width=True)
 
     def display_bar_charts(self, header, list_metric_to_compare):
+        # [FUNCTION DOC] Render one Altair bar chart per metric in side-by-side columns: aggregate metrics
+        # directly, list metrics
+        # as their per-method mean. Optional header.
         """
         Given a list of metrics to compare, makes one bar chart per metric and compares over
         all extraction methods.

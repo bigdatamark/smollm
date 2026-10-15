@@ -1,3 +1,8 @@
+# [MODULE DOC] Tag and attribute vocabularies used to simplify HTML DOM trees: UNWRAP_TAGS (inline style tags
+# whose
+# content is kept but tag removed), structure / media / media_wiki (media without "figure") tag lists,
+# INTERESTING_TAGS_SET (tags kept in the tree; others removed), MEDIA_CONTAIN_INTERESTING_ATTRIBUTES_SET
+# (per-source set of tags whose attributes are kept) and the list/set of media attributes kept.
 from enum import Enum
 
 
@@ -104,6 +109,9 @@ contain_interesting_attributes = ["source"]
 
 
 class InterestingAttributesSetCategory(Enum):
+    # [CLASS DOC] Enum selecting which media tag set to use: COMMONCRAWL ("CommonCrawl") or WIKIPEDIA
+    # ("Wikipedia", which
+    # excludes `figure`). Used as key of MEDIA_CONTAIN_INTERESTING_ATTRIBUTES_SET.
     COMMONCRAWL = "CommonCrawl"
     WIKIPEDIA = "Wikipedia"
 

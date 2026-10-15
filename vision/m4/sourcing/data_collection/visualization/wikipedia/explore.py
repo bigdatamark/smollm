@@ -1,3 +1,9 @@
+# [MODULE DOC] Streamlit exploration script (runs on import, wide layout) for Wikipedia Enterprise HTML
+# dumps: loads the
+# dataset from a hard-coded local loading script, keeps documents containing a `role~='note'` node, lets the
+# user pick one of the first 1000, renders it, and shows every note node and every node whose class equals one
+# of `classes_to_remove` (Wikipedia maintenance banners).
+# KNOWN ISSUE: the index input allows up to 999 even if fewer documents matched (IndexError).
 import random
 from functools import partial
 
@@ -18,6 +24,11 @@ classes_to_remove = [
 
 
 def filter_doc_with_matching_class(example, classes_to_remove):
+    # [FUNCTION DOC] Filter predicate: True if the document's `html` contains a node matching
+    # `[role~='note']`.
+    # KNOWN ISSUE: loops over `classes_to_remove` but ignores `class_` (the class selector is commented out),
+    # so
+    # the result only depends on the note role; the parameter is effectively unused.
     current_html = example["html"]
     tree = HTMLParser(current_html)
     for class_ in classes_to_remove:
@@ -30,6 +41,9 @@ def filter_doc_with_matching_class(example, classes_to_remove):
 
 @st.experimental_memo  # it is caching but is incredibly slow when N is big.
 def load_examples(num_docs):
+    # [FUNCTION DOC] Streamlit-memoized: load the "train" split from the hard-coded local script path, filter
+    # with
+    # filter_doc_with_matching_class, and return the first min(num_docs, len) examples as a list.
     dataset = load_dataset("/home/lucile/data/wikipedia/html_enterprise/script/wikipedia.py")[
         "train"
     ]  # load_from_disk("/home/lucile/data/wikipedia/test/arrow")

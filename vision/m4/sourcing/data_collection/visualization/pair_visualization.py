@@ -1,3 +1,9 @@
+# [MODULE DOC] Streamlit app to balance precision and recall of the text/image pair extraction: extracts
+# pairs from the first
+# N streamed `c4-en-html-with-metadata` documents, shows statistics, lets the user enable PairFiltering
+# filters
+# (defaults from a YAML config), and compares retained vs discarded pairs. As a script (run from the vision/
+# dir): wide layout, config ./m4/sourcing/data_collection/configs/config_filter_text_image_pairs.yaml.
 import time
 
 import plotly.figure_factory as ff
@@ -15,11 +21,18 @@ from m4.sourcing.data_collection.processors import (
 
 
 class Visualization:
+    # [CLASS DOC] Stateful page: UI choices and results (extracted / retained / discarded pairs, each a
+    # media-info dict) are
+    # stored as attributes by the step methods.
     def __init__(self, path_config_filter_text_image_pairs):
+        # [FUNCTION DOC] Load the filtering default parameters (mapping) from the YAML file at the given path.
         with open(path_config_filter_text_image_pairs) as f:
             self.filtering_params = yaml.load(f, Loader=yaml.FullLoader)
 
     def visualization(self):
+        # [FUNCTION DOC] Render the full page by running all steps in order (title, extraction options,
+        # extraction, stats, filter
+        # options, filtering, retained/discarded stats, discarded analysis).
         self.set_title()
         self.choose_extraction_options()
         self.extraction()
@@ -30,9 +43,12 @@ class Visualization:
         self.analysis_discarded_pairs()
 
     def set_title(self):
+        # [FUNCTION DOC] Show the page title.
         st.title("Visualization to help balance precision and recall of the extraction strategy")
 
     def choose_extraction_options(self):
+        # [FUNCTION DOC] Ask for the number of documents (1-1000, default 100) and whether to compute CLIP
+        # scores (default False).
         st.header("Extraction options")
         self.num_docs = st.number_input(
             "Number of documents to perform the extraction on", min_value=1, max_value=1000, value=100
@@ -42,6 +58,8 @@ class Visualization:
         )
 
     def extraction(self):
+        # [FUNCTION DOC] Run (cached) extraction and store the flat list of extracted pairs in
+        # self.extracted_pairs.
         self.extracted_pairs = Visualization.get_extracted_pairs(
             num_docs=self.num_docs,
             should_compute_clip_scores=self.should_compute_clip_scores,
@@ -50,9 +68,16 @@ class Visualization:
     @staticmethod
     @st.cache(suppress_st_warning=True)
     def get_extracted_pairs(num_docs, should_compute_clip_scores):
+        # [FUNCTION DOC] Static, Streamlit-cached: stream the first `num_docs` documents, run a
+        # TextMediaPairsExtractor (full DOM
+        # simplification, merged text nodes, residual images, CLIP scores if requested) on each with a
+        # progress bar,
+        # and return the concatenated list of extracted media dicts. Shows elapsed time and balloons.
         st.header("Extraction")
 
         def load_examples(num_docs):
+            # [FUNCTION DOC] HELPER: return the first `num_docs` examples of the streamed dataset as a list
+            # (HF auth token required).
             dataset = load_dataset(
                 "bs-modeling-metadata/c4-en-html-with-metadata",
                 streaming=True,
@@ -92,6 +117,8 @@ class Visualization:
         extraction_progress_bar = st.progress(0.0)
 
         def extract_pairs(doc, ind):
+            # [FUNCTION DOC] HELPER: extract pairs for one document and advance the progress bar to
+            # (ind+1)/num_docs.
             extracted_pairs = extractor(html_str=doc["html"], page_url=doc["url"])
             extraction_progress_bar.progress((ind + 1) / num_docs)
             return extracted_pairs
@@ -110,10 +137,17 @@ class Visualization:
 
     @staticmethod
     def plot_distributions(hist_data, group_labels, bin_size, title):
+        # [FUNCTION DOC] Static: plot overlaid distributions (Plotly distplot, no rug, up to 3 series with
+        # fixed colors) with a dashed
+        # vertical line at each series mean. Series that are empty or constant are removed first (Plotly
+        # fails on
+        # singular data) -- this mutates the passed `hist_data` and `group_labels` lists.
+        # KNOWN ISSUE: if every series is removed, create_distplot is called with no data and fails.
         """hist_data is a list of statistics lists (works up to 3, if more is needed, add some colors
         and annotation colors)"""
 
         def check_same_number_list(list_):
+            # [FUNCTION DOC] HELPER: True if the list is empty or all elements are equal.
             # Useful to check if a matrix is singular, otherwise Plotly raises an error
             # Lists without any element or with only one are automatically discarded
             if not list_:
@@ -146,9 +180,13 @@ class Visualization:
 
     @staticmethod
     def truncate(list_, max_val):
+        # [FUNCTION DOC] Static HELPER: return the list with each value capped at `max_val`.
         return [el if el < max_val else max_val for el in list_]
 
     def statistics_without_filtering(self):
+        # [FUNCTION DOC] Show distributions over all extracted pairs: image widths/heights/pixel counts
+        # (capped), word counts of each
+        # text type, and CLIP scores per text type (if computed).
         st.header("Statistics (without filtering)")
 
         def image_sizes(
@@ -159,6 +197,9 @@ class Visualization:
             max_num_pixels=1_000_000,
             bin_size_num_pixels=1_000,
         ):
+            # [FUNCTION DOC] HELPER: three columns with distributions of original width, height and number of
+            # pixels, each capped at the
+            # given max and plotted with the given bin size.
             st.subheader("Image sizes")
             col1, col2, col3 = st.columns(3)
 
@@ -197,6 +238,8 @@ class Visualization:
                 )
 
         def text_lengths():
+            # [FUNCTION DOC] HELPER: distribution of space-separated word counts for formatted filename, alt
+            # text and extracted text.
             st.subheader("Text lengths")
             Visualization.plot_distributions(
                 [
@@ -209,6 +252,7 @@ class Visualization:
             )
 
         def clip_scores():
+            # [FUNCTION DOC] HELPER: if CLIP scores were computed, distribution of CLIP scores per text type.
             if self.should_compute_clip_scores:
                 st.subheader("CLIP scores")
                 Visualization.plot_distributions(
@@ -230,6 +274,13 @@ class Visualization:
         clip_scores()
 
     def choose_filtering_options(self):
+        # [FUNCTION DOC] Show filtering controls and store choices on self: text type to pair (stored
+        # snake_case in self.text_key),
+        # and for each filter an enable checkbox plus its thresholds (valid formats, original/rendered
+        # width/height
+        # min/max, max aspect ratio, word count min/max, max special char ratio, max repetition ratio, min
+        # CLIP score),
+        # with defaults from the YAML config. Threshold attributes exist only when their filter is enabled.
         st.header("Filtering options")
 
         text_keys = ["Formatted filename", "Alt text", "Extracted text"]
@@ -392,7 +443,11 @@ class Visualization:
             )
 
     def filtering(self):
+        # [FUNCTION DOC] Split self.extracted_pairs into self.retained_pairs and self.discarded_pairs with
+        # the enabled filters.
         def should_keep_pair(pair):
+            # [FUNCTION DOC] HELPER: True if the pair has the chosen text type and passes every enabled
+            # PairFiltering check.
             # pair = media_info
             if self.text_key not in pair:
                 return False
@@ -447,9 +502,14 @@ class Visualization:
         self.discarded_pairs = [pair for pair, keep_pair in all_pairs if not keep_pair]
 
     def get_statistics_on_extracted_pairs(self):
+        # [FUNCTION DOC] Show counts and percentages of retained/discarded pairs and compare their
+        # distributions (image sizes, word
+        # counts and CLIP scores for the chosen text type). ZeroDivisionError if no pairs were extracted.
         st.header("Statistics for retained and discarded pairs")
 
         def number_pairs():
+            # [FUNCTION DOC] HELPER: show retained and discarded counts with percentages of all extracted
+            # pairs.
             st.subheader("Number of pairs")
             st.markdown(
                 "*Retained pairs*: "
@@ -470,6 +530,8 @@ class Visualization:
             max_num_pixels=1_000_000,
             bin_size_num_pixels=1_000,
         ):
+            # [FUNCTION DOC] HELPER: retained vs discarded distributions of original width, height and number
+            # of pixels (capped).
             st.subheader("Image sizes")
             col1, col2, col3 = st.columns(3)
 
@@ -518,6 +580,8 @@ class Visualization:
                 )
 
         def text_lengths():
+            # [FUNCTION DOC] HELPER: retained vs discarded distributions of word counts of the chosen text
+            # type.
             st.subheader("Text lengths")
             num_words_retained_pairs = [
                 len(pair[self.text_key].split(" ")) for pair in self.retained_pairs if self.text_key in pair
@@ -533,6 +597,8 @@ class Visualization:
             )
 
         def clip_scores():
+            # [FUNCTION DOC] HELPER: if CLIP scores were computed, retained vs discarded distributions of the
+            # chosen text type's score.
             if self.should_compute_clip_scores:
                 st.subheader("CLIP scores")
                 clip_scores_retained_pairs = [
@@ -558,6 +624,9 @@ class Visualization:
         clip_scores()
 
     def analysis_discarded_pairs(self):
+        # [FUNCTION DOC] Show how many pairs were discarded overall, how many lack the chosen text type, and
+        # for each enabled filter
+        # how many discarded pairs fail it (a pair can be counted under several filters).
         num_discarded_tot = len(self.discarded_pairs)
         perc_discarded_tot = round(num_discarded_tot / len(self.extracted_pairs) * 100, 1)
         st.header(
@@ -576,6 +645,8 @@ class Visualization:
             )
 
             def display_discarded_by_filter(should_use_filter, func_filter, msg_filter):
+                # [FUNCTION DOC] HELPER: if the filter is enabled, show count and percentage of discarded
+                # pairs failing `func_filter`.
                 if should_use_filter:
                     num_discarded_filter = len([1 for pair in self.discarded_pairs if not func_filter(pair)])
                     perc_discarded_filter = round(num_discarded_filter / num_discarded_tot * 100, 1)

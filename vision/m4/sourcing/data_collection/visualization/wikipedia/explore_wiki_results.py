@@ -1,3 +1,8 @@
+# [MODULE DOC] Streamlit script (runs on import, wide layout) to inspect Wikipedia HTML extraction results:
+# loads shard 30
+# of a hard-coded local processed dataset (with columns html, texts, images), drops rows with null html, lets
+# the user pick a document, and shows the raw HTML rendering next to the extracted texts and images
+# (images captioned with the text of the same node). `original_data_dir` and `exclude_shards` are unused.
 import random
 from pathlib import Path
 

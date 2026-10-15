@@ -1,3 +1,14 @@
+# [MODULE DOC] Streamlit app to help choose node-level filtering thresholds for web documents. As a script:
+# loads a web
+# document dataset shard, common-words JSON, fastText lang-id, SentencePiece and KenLM models from
+# ./large_files, samples N documents (shuffle seed 42), computes the selected statistics (image sizes/aspect
+# ratio or text statistics from FilteringFunctions) per image or per paragraph, plots histograms with the
+# top/bottom 5% removed, and shows the examples with their stats in a table (images as base64 thumbnails).
+# KNOWN ISSUE: the option "langage identification confidence score" never matches the check for "language
+# ...",
+# so that statistic is never computed.
+# KNOWN ISSUE: st.set_page_config is called after st.title, which Streamlit rejects (must be the first call).
+# KNOWN ISSUE: mixing image and text statistics is not handled; the last selected stat decides `type_exs`.
 import base64
 import json
 from io import BytesIO
@@ -24,10 +35,16 @@ from m4.sourcing.data_collection.utils.filtering_utils import (
 
 
 def non_empty_els_from_list(list_):
+    # [FUNCTION DOC] HELPER: return the list without None elements.
     return [el for el in list_ if el is not None]
 
 
 def get_exs_and_stats(web_document_dataset, type_exs, funcs_compute_stats, text_node_level=True):
+    # [FUNCTION DOC] Collect examples and statistics. For each row, takes the non-None entries of column
+    # `type_exs` ("texts" or
+    # "images"); texts are either joined per document with blank lines (text_node_level=False) or split into
+    # paragraphs on "\n\n" (default). Returns a dict: "exs" -> list of examples, plus for each name in
+    # `funcs_compute_stats` (name -> callable on one example) the list of values rounded to 2 decimals.
     exs = []
     for idx_row in range(web_document_dataset.num_rows):
         new_els = non_empty_els_from_list(web_document_dataset[idx_row][type_exs])
@@ -214,6 +231,8 @@ if __name__ == "__main__":
     if type_exs == "images":
 
         def transform_img(img):
+            # [FUNCTION DOC] HELPER: shrink a PIL image in place to fit 50x50 and return an HTML <img> tag
+            # embedding it as base64 PNG.
             img.thumbnail((50, 50))
             with BytesIO() as buffer:
                 img.save(buffer, "png")

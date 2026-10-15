@@ -1,3 +1,11 @@
+# [MODULE DOC] Constants for text quality filtering (no functions): NON_PRINTING_CHARACTERS_RE (control chars
+# 0-31 and
+# 127-159), DIGITS_RE, UNICODE_PUNCTUATION (mapping of unicode punctuation to ASCII equivalents),
+# SPECIAL_CHARACTERS (ASCII punctuation/digits/whitespace + many unicode symbols + all English emojis),
+# STOPWORDS (set of English function words), FLAGGED_WORDS (set of adult/explicit words) and PUNCTUATION.
+# KNOWN ISSUE: the module-level name `emoji` (imported package) is rebound to a list of emojis on import.
+# KNOWN ISSUE: relies on `emoji.UNICODE_EMOJI`, which no longer exists in emoji>=2.0 (import fails).
+# KNOWN ISSUE: UNICODE_PUNCTUATION maps the fullwidth digit "１" to a double quote, which looks wrong.
 import re
 import string
 

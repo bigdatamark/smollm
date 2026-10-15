@@ -1,3 +1,9 @@
+# [MODULE DOC] Load one shard of the "modelling metadata" C4 HTML dataset (jsonl.gz files) with an explicit
+# feature schema
+# and save it to disk. `features` is a JSON-like serialization of the datasets Features (html, url, text, c4
+# shard/timestamp, HTML metadata spans, head/footer/title, preprocessing errors and several metadata_* lists).
+# CLI: --dataset-path, --save-dir, --shard-name; saves to <save-dir>/tmp-<shard> then renames to
+# <save-dir>/<shard> (atomic-ish). Sets datasets logging verbosity to INFO on import.
 import argparse
 import logging
 from pathlib import Path
@@ -86,6 +92,10 @@ features = {
 
 
 def convert_types(features):
+    # [FUNCTION DOC] HELPER: recursively convert the serialized schema into datasets objects: a dict with
+    # "_type" becomes
+    # datasets.<_type>(dtype) (e.g. Value("int64")), other dicts are converted per key, lists per element.
+    # Any other input returns None.
     if isinstance(features, dict) and "_type" in features:
         return getattr(datasets, features["_type"])(features["dtype"])
     elif isinstance(features, dict):
@@ -95,6 +105,10 @@ def convert_types(features):
 
 
 def load_modelling_metadata_dataset(dataset_path: str, shard_name: str, cache_path: str = None):
+    # [FUNCTION DOC] Load the jsonl.gz file `<shard_name>.jsonl.gz` from `dataset_path` (a local dir or
+    # loading script/hub repo)
+    # with the converted Features, caching under `cache_path` (default: HF datasets cache). Returns the
+    # DatasetDict produced by load_dataset (split "train").
     final_features = convert_types(features)
 
     if cache_path is None:

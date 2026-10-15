@@ -1,4 +1,8 @@
 # coding=utf-8
+# [MODULE DOC] `datasets` builder script for the Flickr30k subset of Localized Narratives (as packaged for
+# PMD): downloads the
+# train/validation/test caption JSONL files (facebook/pmd hub repo); images must be manually downloaded into
+# <data_dir>/flickr30k-images. Yields one example per narrative whose image file exists.
 # Copyright 2020 The HuggingFace Datasets Authors and the current dataset script contributor.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -56,10 +60,13 @@ _FEATURES = datasets.Features(
 
 
 class LocalizedNarrativesFlickr30K(datasets.GeneratorBasedBuilder):
+    # [CLASS DOC] GeneratorBasedBuilder with train, validation and test splits; requires a manual data dir.
     """Builder for Flickr30k subset of Localized Narratives."""
 
     @property
     def manual_download_instructions(self):
+        # [FUNCTION DOC] Property: return the text explaining how to manually download and place the
+        # Flickr30k images.
         return """\
     You need to go to http://shannon.cs.illinois.edu/DenotationGraph/data/index.html,
     and manually download the dataset ("Flickr 30k images."). Once it is completed,
@@ -71,6 +78,8 @@ class LocalizedNarrativesFlickr30K(datasets.GeneratorBasedBuilder):
     """
 
     def _info(self):
+        # [FUNCTION DOC] Return DatasetInfo with this module's `_FEATURES` (citation/description/license are
+        # empty TODOs).
         return datasets.DatasetInfo(
             description=_DESCRIPTION,
             features=_FEATURES,
@@ -80,6 +89,10 @@ class LocalizedNarrativesFlickr30K(datasets.GeneratorBasedBuilder):
         )
 
     def _split_generators(self, dl_manager):
+        # [FUNCTION DOC] Download the annotation files and return one split generator per split with the
+        # annotation file and the
+        # manual image folder <manual_dir>/flickr30k-images. Raises FileNotFoundError if that folder does not
+        # exist.
         annotation_files = dl_manager.download(_ANNOTATION_URLs)
 
         path_to_manual_file = Path(dl_manager.manual_dir) / _LOCAL_IMAGE_FOLDER_NAME
@@ -99,6 +112,9 @@ class LocalizedNarrativesFlickr30K(datasets.GeneratorBasedBuilder):
         ]
 
     def _generate_examples(self, annotation_file: str, base_image_path: Path):
+        # [FUNCTION DOC] Group annotations by string image_id, then for every *.jpg in base_image_path (glob
+        # order) whose basename is an
+        # annotated image id, yield (counter, example) for each of its narratives with the image file path.
         annotations = {}
         with open(annotation_file, "r", encoding="utf-8") as fi:
             for line in fi:

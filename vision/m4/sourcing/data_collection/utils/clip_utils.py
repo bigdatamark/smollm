@@ -1,3 +1,7 @@
+# [MODULE DOC] CLIP image-text similarity. On import, loads `openai/clip-vit-base-patch32` model and
+# processor (network /
+# HF cache) and moves the model to `cuda:0` if available (module globals `model`, `processor`, `device`).
+# Running as a script scores 3 captions against a COCO image downloaded from the web and prints the result.
 import requests
 import torch
 from PIL import Image
@@ -18,6 +22,15 @@ else:
 
 
 def compute_clip_score(texts, image, num_max_words=NUM_MAX_WORDS):
+    # [FUNCTION DOC] Compute CLIP similarity between each text and the image(s). texts: list of str, each
+    # truncated to its first
+    # `num_max_words` space-separated words (default 50; None disables). image: PIL/array/tensor or a list of
+    # them.
+    # Tokenizes with padding, runs the model on `device`, returns a 1-D CPU tensor of length len(texts):
+    # dot products of the (normalized) text and image embeddings for the FIRST image only (proportional to
+    # logits).
+    # Gradients are not disabled. KNOWN ISSUE: docstring names the parameter `images`; extra images are
+    # ignored.
     """
     Args
         texts: List[str]

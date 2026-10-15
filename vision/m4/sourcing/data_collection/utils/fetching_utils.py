@@ -1,3 +1,8 @@
+# [MODULE DOC] Image download with an on-disk cache. Cache dir = env M4_IMAGES_CACHE, else $XDG_CACHE_HOME/m4
+# (default
+# ~/.cache/m4); created on import. Files are named by sha256 of the url; failed downloads leave an empty
+# `<hash>.blank` marker. The global `existing_files` (listing of the cache dir at import time) is used as an
+# in-process index and appended to as new files are written.
 import io
 import os
 import urllib
@@ -14,17 +19,20 @@ os.makedirs(M4_IMAGES_CACHE, exist_ok=True)
 
 
 def loading_existing_images():
+    # [FUNCTION DOC] HELPER: return the list of file names currently in the cache dir.
     files = [f for f in os.listdir(M4_IMAGES_CACHE)]
     return files
 
 
 def convert_to_rgb(image):
+    # [FUNCTION DOC] HELPER: return the PIL image converted to RGB if its mode is not already RGB.
     if image.mode != "RGB":
         image = image.convert("RGB")
     return image
 
 
 def hash_url_to_filename(url):
+    # [FUNCTION DOC] HELPER: return the hex sha256 digest of the utf-8 encoded url (used as cache file name).
     """
     Adapted from datasets.
     """
@@ -42,6 +50,14 @@ existing_files = loading_existing_images()
 
 
 def fetch_single_image(image_url, timeout=None, retries=0, retry_none=False):
+    # [FUNCTION DOC] Return a RGB PIL image for `image_url`, or None. Uses the cached file if present;
+    # returns None if a `.blank`
+    # marker exists (unless `retry_none`). Otherwise downloads with urllib (datasets user agent, `timeout`
+    # seconds,
+    # up to `retries`+1 attempts, all exceptions swallowed), saves the image in its original format to the
+    # cache or
+    # writes a `.blank` marker on failure, and updates `existing_files`. Not safe across processes (stale
+    # index).
     global existing_files
     image_url_hashed = hash_url_to_filename(image_url)
 

@@ -1,3 +1,7 @@
+# [MODULE DOC] Streamlit app to visualize DOM tree simplification, web page rendering and text/image pair
+# extraction on the
+# first documents of the streamed `bs-modeling-metadata/c4-en-html-with-metadata` dataset. As a script: wide
+# layout, 1000 docs, DOM visualization Jinja template at assets/DOM_tree_viz.html next to this file.
 import os
 import pathlib
 import random
@@ -16,11 +20,23 @@ from m4.sourcing.data_collection.utils import make_selectolax_tree
 
 
 class Visualization:
+    # [CLASS DOC] Holds the loaded examples, the DOM visualization template and the processing objects
+    # (DOMTreeSimplificator
+    # with all simplifications on, two PreExtractionSimplificators with/without merging consecutive text
+    # nodes,
+    # and a TextMediaPairsExtractor that also extracts images outside the simplified tree and CLIP scores).
     def __init__(self, num_docs, dom_viz_template_path):
+        # [FUNCTION DOC] Load the first `num_docs` examples (dicts with `html`, `url`, ...) and the Jinja
+        # template from
+        # `dom_viz_template_path`, then build the processors. Network access to the HF hub.
         self.num_docs = num_docs
 
         @st.experimental_memo  # it is caching but is incredibly slow when N is big.
         def load_examples(num_docs):
+            # [FUNCTION DOC] HELPER: Streamlit-memoized; take the first `num_docs` examples of the streamed
+            # dataset as a list. Uses the
+            # local HF auth token; on FileNotFoundError falls back to the `DOMDOM_READ_TOKEN` Streamlit
+            # secret.
             try:
                 dataset = load_dataset(
                     "bs-modeling-metadata/c4-en-html-with-metadata",
@@ -41,6 +57,7 @@ class Visualization:
         self.examples = load_examples(num_docs)
 
         def load_dom_viz_template(dom_viz_template_path):
+            # [FUNCTION DOC] HELPER: read the file and return it as a jinja2 Template.
             with open(dom_viz_template_path, "r") as file:
                 template_string = file.read()
             return Template(template_string)
@@ -78,6 +95,8 @@ class Visualization:
         )
 
     def visualization(self):
+        # [FUNCTION DOC] Render the whole page: title, mode selector, document selector, then the section for
+        # the chosen mode.
         st.title(
             "Visualization of DOM tree simplification strategies, "
             "web document rendering, and text-image pair extractions"
@@ -88,6 +107,8 @@ class Visualization:
         self.extraction_mode()
 
     def choose_mode(self):
+        # [FUNCTION DOC] Show a selectbox and store the chosen mode ("Simplification" or "Extraction",
+        # default Extraction) in self.mode.
         st.header("Mode")
         self.mode = st.selectbox(
             label="Choose a mode",
@@ -96,6 +117,9 @@ class Visualization:
         )
 
     def choose_example(self):
+        # [FUNCTION DOC] Show a "random document" button and a number input (0..num_docs-1, defaulting to the
+        # random index when the
+        # button was pressed, else 0) and store the chosen example in self.current_example.
         st.header("Document")
         if st.button("Select a random document"):
             dct_idx = random.randint(a=0, b=self.num_docs - 1)
@@ -112,7 +136,12 @@ class Visualization:
         self.current_example = self.examples[idx]
 
     def get_dom_viz_html(self, html):
+        # [FUNCTION DOC] Return the DOM visualization HTML: the <body> HTML of `html` (script tags stripped)
+        # rendered into the
+        # template as `body_html`.
         def get_body_html_string(html):
+            # [FUNCTION DOC] HELPER: parse html with selectolax, strip <script> tags, return the body's HTML
+            # string.
             tree = make_selectolax_tree(html)
             tree.strip_tags(["script"])
             return tree.body.html
@@ -122,6 +151,9 @@ class Visualization:
         return rendered_dom
 
     def simplification_mode(self):
+        # [FUNCTION DOC] If mode is "Simplification": simplify the current HTML and display side by side (raw
+        # vs simplified) the
+        # rendered pages, DOM tree visualizations and HTML source code.
         if self.mode == "Simplification":
             current_html = self.current_example["html"]
             current_url = self.current_example["url"]
@@ -129,6 +161,8 @@ class Visualization:
             simplified_current_html = self.dom_tree_simplificator(current_html, type_return="str")
 
             def display_rendered_webpages():
+                # [FUNCTION DOC] HELPER: show raw and simplified HTML rendered in two iframe components, with
+                # the page url.
                 st.header("Rendered webpage")
                 st.markdown(f"Webpage url: {current_url}")
                 col1, col2 = st.columns(2)
@@ -140,6 +174,8 @@ class Visualization:
                     st.components.v1.html(simplified_current_html, height=450, scrolling=True)
 
             def display_dom_trees():
+                # [FUNCTION DOC] HELPER: show the DOM tree visualizations of the raw and simplified HTML side
+                # by side.
                 st.header("DOM trees")
                 col1, col2 = st.columns(2)
                 with col1:
@@ -152,6 +188,7 @@ class Visualization:
                     st.components.v1.html(simplified_rendered_dom, height=600, scrolling=True)
 
             def display_html_codes():
+                # [FUNCTION DOC] HELPER: show raw and simplified HTML source (wrapped in <xmp>) side by side.
                 st.header("HTML codes")
                 col1, col2 = st.columns(2)
                 with col1:
@@ -166,6 +203,13 @@ class Visualization:
             display_html_codes()
 
     def extraction_mode(self):
+        # [FUNCTION DOC] If mode is "Extraction": simplify the HTML to a tree, compute the pre-extraction
+        # node lists (merged and not
+        # merged texts), run the extractor, and display renderings (with relative image paths replaced by
+        # absolute
+        # ones), the table of extracted images with their attributes and CLIP scores, the simplified DOM tree
+        # and the
+        # simplified HTML code.
         if self.mode == "Extraction":
             current_html = self.current_example["html"]
             current_url = self.current_example["url"]
@@ -192,12 +236,17 @@ class Visualization:
             }
 
             def replace_relative_paths(html_string):
+                # [FUNCTION DOC] HELPER: replace each relative image src found in extracted images by its
+                # absolute version in the string.
                 if replacement_dict:
                     for k, v in replacement_dict.items():
                         html_string = html_string.replace(k, v)
                 return html_string
 
             def display_rendered_webpages():
+                # [FUNCTION DOC] HELPER: checkboxes choose which renderings to show (raw, simplified,
+                # pre-extraction node list, and whether to
+                # merge text nodes); the selected ones are shown in equal columns.
                 st.header("Rendered webpage")
                 st.markdown(f"Webpage url: {current_url}")
 
@@ -224,6 +273,9 @@ class Visualization:
                 ]
 
                 def display_specific_rendered_webpage(page_to_display, col):
+                    # [FUNCTION DOC] HELPER: render one page type ("raw_html_rendering",
+                    # "simplified_html_rendering",
+                    # "pre_extraction_visualization") inside the given Streamlit column.
                     with col:
                         if page_to_display == "raw_html_rendering":
                             st.subheader("Raw html rendering")
@@ -237,6 +289,11 @@ class Visualization:
                             st.subheader("Web document rendering (pre-extraction visualization)")
 
                             def list_nodes_to_visu():
+                                # [FUNCTION DOC] HELPER: display the pre-extraction node list. Unmerged:
+                                # markdown with a heading at each change of (re-ranked)
+                                # tree level showing the node path, then the text or an image link per node;
+                                # merged: plain text / image
+                                # markdown per node.
                                 if not merge_text_nodes:
                                     list_nodes = current_list_nodes_not_merge_texts
                                     reduce_levels = {
@@ -277,6 +334,11 @@ class Visualization:
                         display_specific_rendered_webpage(page_to_display, col)
 
             def display_extraction():
+                # [FUNCTION DOC] HELPER: for each extracted image show it next to an HTML panel of its
+                # attributes (src, formats, sizes,
+                # filename, alt-text, extracted text, CLIP scores to 4 decimals, in-simplified-tree flag); or
+                # "No extracted
+                # content". Raises on formatting if a CLIP score is None/NaN-incompatible.
                 st.header("Extracted content")
                 if not extracted_images:
                     st.write("No extracted content")
@@ -345,11 +407,13 @@ class Visualization:
                         st.write("-----")
 
             def display_dom_tree():
+                # [FUNCTION DOC] HELPER: show the simplified DOM tree visualization.
                 st.header("Simplified DOM tree")
                 simplified_rendered_dom = self.get_dom_viz_html(simplified_current_html)
                 st.components.v1.html(simplified_rendered_dom, height=600, scrolling=True)
 
             def display_html_code():
+                # [FUNCTION DOC] HELPER: show the simplified HTML source wrapped in <xmp>.
                 st.header("Simplified HTML code")
                 st.components.v1.html("<xmp>" + simplified_current_html + "</xmp>", height=450, scrolling=True)
 

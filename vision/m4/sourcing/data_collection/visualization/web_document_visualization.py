@@ -1,3 +1,6 @@
+# [MODULE DOC] Streamlit app to browse an interleaved web-document dataset saved on disk (columns texts,
+# images, metadata
+# JSON). As a script: wide layout, dataset at ./large_files/web_docs_final.
 import json
 import random
 
@@ -6,19 +9,27 @@ from datasets import load_from_disk
 
 
 class Visualization:
+    # [CLASS DOC] Stateful page: holds the dataset path, the (subsampled) dataset and the current document.
     def __init__(self, path_web_documents_dataset):
+        # [FUNCTION DOC] Store the dataset path. No I/O.
         self.path_web_documents_dataset = path_web_documents_dataset
 
     def visualization(self):
+        # [FUNCTION DOC] Render the page: title, dataset load + size choice, document choice, document
+        # display.
         self.set_title()
         self.load_dataset()
         self.choose_document()
         self.display_document()
 
     def set_title(self):
+        # [FUNCTION DOC] Show the page title.
         st.title("Visualization of web documents")
 
     def load_dataset(self):
+        # [FUNCTION DOC] Load the dataset from disk and keep only its first 100/300/1000/3000 rows (user
+        # choice).
+        # KNOWN ISSUE: selecting more rows than the dataset holds raises an IndexError.
         st.header("Select the size of the dataset")
 
         self.dataset = load_from_disk(self.path_web_documents_dataset)
@@ -32,6 +43,7 @@ class Visualization:
         self.dataset = self.dataset.select(range(int(size_dataset)))
 
     def choose_document(self):
+        # [FUNCTION DOC] Random-document button plus index input; stores the selected row in self.current_doc.
         st.header("Choose a document")
         if st.button("Select a random document"):
             dct_idx = random.randint(a=0, b=self.dataset.num_rows - 1)
@@ -48,6 +60,9 @@ class Visualization:
         self.current_doc = self.dataset[idx]
 
     def display_document(self):
+        # [FUNCTION DOC] Display the current document node by node: text nodes as <pre> blocks with newlines
+        # turned into <br>, image
+        # nodes as an <img> tag pointing at the metadata `src` url (max width 1000px).
         st.header("Document")
         texts = self.current_doc["texts"]
         images = self.current_doc["images"]

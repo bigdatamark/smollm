@@ -1,3 +1,11 @@
+# [MODULE DOC] Image deduplication pipeline for an interleaved web-document dataset (HF `datasets` on disk).
+# Each document has parallel lists `texts`, `images`, and a JSON string `metadata` (one entry per node,
+# images carry a `src` url). Steps (each a method, intended to be run in order, optionally in separate runs
+# with `reload_files=True` reloading the intermediate artifacts from disk):
+# 1. map image url -> positions (doc id, node index), 2. build the train image dataset, 3. exact dedup by url,
+# 4. build the eval image dataset, 5. near-duplicate removal of train images close to eval images (perceptual
+# hash + Hamming distance via ImageDeduplicator), 6. apply removals. Configures root logging at INFO on
+# import.
 import json
 import logging
 from random import randrange
@@ -17,6 +25,9 @@ logger.setLevel(logging.INFO)
 
 
 class WebDocumentImageDeduplication:
+    # [CLASS DOC] Stateful driver for the deduplication steps. Holds paths, `num_proc`, the url->positions
+    # map and the
+    # `to_be_deduplicated` mapping (doc id int -> list of node indices to remove), plus loaded datasets.
     def __init__(
         self,
         path_web_document_dataset_train,
@@ -31,6 +42,11 @@ class WebDocumentImageDeduplication:
         type_dedup,
         path_save_dir_web_document_dataset_train_deduplicated,
     ):
+        # [FUNCTION DOC] Store all configuration paths/parameters on self and init `to_be_deduplicated` to an
+        # empty dict.
+        # type_dedup: 'remove_all_doc' (drop whole doc if it has any duplicate image) or 'remove_image' (drop
+        # only
+        # the duplicate image nodes). Raises ValueError for any other value. No I/O.
         self.path_web_document_dataset_train = path_web_document_dataset_train
         self.path_web_document_dataset_valid = path_web_document_dataset_valid
         self.num_proc = num_proc
@@ -55,6 +71,12 @@ class WebDocumentImageDeduplication:
         )
 
     def create_map_image_url_to_pos(self):
+        # [FUNCTION DOC] Load the train dataset (adding an `id` column = row index), then build
+        # `self.map_image_url_to_pos`:
+        # url -> list of (doc id, node index) for every non-null image node, via a parallel `map` and
+        # flattening.
+        # Writes the mapping as JSON to `path_save_file_map_image_url_to_pos` (tuples become lists). Logs
+        # progress.
         # An image is represented by its url. We aim to create a map between the urls and
         # the positions (index of the web document and index of the image within this web
         # document) where they appear in the web document dataset.
@@ -73,6 +95,10 @@ class WebDocumentImageDeduplication:
         logger.info("Finished loading the web document dataset.")
 
         def get_image_url_pos(example):
+            # [FUNCTION DOC] HELPER: per-example map function; returns the example with `image_url_pos` =
+            # list of [src, str(doc id),
+            # str(node index)] for each node whose image is truthy (strings keep a uniform type for
+            # `datasets`).
             id_doc = example["id"]
             images = example["images"]
             metadata = json.loads(example["metadata"])
@@ -101,6 +127,10 @@ class WebDocumentImageDeduplication:
         logger.info("Finished creating the map between image urls and positions in the web document dataset.")
 
     def build_images_web_document_dataset_train(self, reload_files=False):
+        # [FUNCTION DOC] Filter the extraction-time image dataset (columns `url`, `image` raw bytes) to the
+        # urls present in the
+        # url->positions map, convert bytes into an Image feature ({path: None, bytes}), save to
+        # `path_save_dir_images_web_document_dataset_train`. reload_files: reload the map JSON first.
         # We start with the image dataset built during the construction of the web
         # document dataset. We remove the images discarded during the filtering
         if reload_files:
@@ -113,11 +143,15 @@ class WebDocumentImageDeduplication:
         logger.info("Finished loading the previous image dataset.")
 
         def func_filter_images_web_document_dataset_extraction(example):
+            # [FUNCTION DOC] HELPER: filter predicate; True iff the example's url is in
+            # `map_image_url_to_pos`.
             if example["url"] not in self.map_image_url_to_pos:
                 return False
             return True
 
         def bytes_to_pil_image(example):
+            # [FUNCTION DOC] HELPER: wrap the raw `image` bytes into the {"path": None, "bytes": ...} dict
+            # expected by Image feature.
             example["image"] = {"path": None, "bytes": example["image"]}
             return example
 
@@ -134,6 +168,11 @@ class WebDocumentImageDeduplication:
         logger.info("Finished making and saving the image dataset.")
 
     def exact_image_deduplication(self, reload_files=False):
+        # [FUNCTION DOC] Exact (same-url) deduplication: for each url occurring at several positions, keep
+        # one random position
+        # and add every other (doc id, node index) to `to_be_deduplicated`. Saves `to_be_deduplicated` as
+        # JSON.
+        # reload_files: reload the url->positions map from JSON first. Uses the unseeded `random` module.
         if reload_files:
             logger.info("Starting reloading files.")
             self.load_map_image_url_to_pos()
@@ -155,6 +194,10 @@ class WebDocumentImageDeduplication:
         logger.info("Finished performing the exact deduplication.")
 
     def build_images_evaluation_tasks_dataset(self):
+        # [FUNCTION DOC] Load the validation web-document dataset with undecoded images, collect every
+        # non-null image into a new
+        # single-column (`image`) Dataset, and save it to `path_save_dir_images_evaluation_tasks_dataset`.
+        # Despite the comment, only the validation split images are included (no external evaluation tasks).
         # We make a dataset containing all the images present in the validation / test sets
         # of the web document dataset, as well as the images present in the evaluation tasks
         logger.info("Starting building the image dataset of the evaluation tasks.")
@@ -172,6 +215,14 @@ class WebDocumentImageDeduplication:
         logger.info("Finished building the image dataset of the evaluation tasks.")
 
     def overlap_train_eval_deduplication(self, reload_files=False, reload_to_be_deduplicated=False):
+        # [FUNCTION DOC] Remove train images that are near-duplicates of evaluation images. Perceptual-hashes
+        # both image datasets,
+        # finds train rows whose hash is within `hamming_distance_threshold` of any eval hash (brute force),
+        # and adds
+        # all positions of the matched urls to `to_be_deduplicated`, then saves it as JSON.
+        # reload_files: reload map + both image datasets; reload_to_be_deduplicated: merge with a previously
+        # saved
+        # `to_be_deduplicated` (e.g. from exact dedup). Requires datasets built/loaded beforehand.
         if reload_files:
             logger.info("Starting reloading files.")
             self.load_map_image_url_to_pos()
@@ -216,6 +267,11 @@ class WebDocumentImageDeduplication:
         logger.info("Finished deduplicating the overlap between the train and the evaluation.")
 
     def remove_duplicates(self, reload_files=False):
+        # [FUNCTION DOC] Apply `to_be_deduplicated` to the train dataset and save to
+        # `path_save_dir_web_document_dataset_train_deduplicated`. 'remove_all_doc': filter out docs whose id
+        # is a key;
+        # 'remove_image': drop the listed node indices from `texts`, `images` and `metadata` of those docs.
+        # reload_files: reload `to_be_deduplicated` and the train dataset (with ids) first.
         if reload_files:
             logger.info("Starting reloading files.")
             self.load_to_be_deduplicated()
@@ -227,6 +283,7 @@ class WebDocumentImageDeduplication:
         if self.type_dedup == "remove_all_doc":
 
             def func_filter_remove_duplicates(example):
+                # [FUNCTION DOC] HELPER: filter predicate; False if the doc id has anything to remove.
                 if example["id"] in self.to_be_deduplicated:
                     return False
                 return True
@@ -238,6 +295,8 @@ class WebDocumentImageDeduplication:
         elif self.type_dedup == "remove_image":
 
             def func_map_remove_duplicates(example):
+                # [FUNCTION DOC] HELPER: map function removing the listed node indices from
+                # texts/images/metadata (JSON re-serialized).
                 if example["id"] in self.to_be_deduplicated:
                     pos_remove = set(self.to_be_deduplicated[example["id"]])
                     example["texts"] = [el for idx, el in enumerate(example["texts"]) if idx not in pos_remove]
@@ -258,23 +317,30 @@ class WebDocumentImageDeduplication:
         logger.info("Finished removing the duplicates from the web document dataset.")
 
     def load_web_document_dataset_train(self):
+        # [FUNCTION DOC] HELPER: load the train dataset from disk and add an `id` column with the row index.
         self.web_document_dataset_train = load_from_disk(self.path_web_document_dataset_train)
         self.web_document_dataset_train = self.web_document_dataset_train.add_column(
             name="id", column=range(len(self.web_document_dataset_train))
         )
 
     def load_map_image_url_to_pos(self):
+        # [FUNCTION DOC] HELPER: load `map_image_url_to_pos` from its JSON file (positions become 2-element
+        # lists).
         with open(self.path_save_file_map_image_url_to_pos) as f:
             self.map_image_url_to_pos = json.load(f)
 
     def load_images_web_document_dataset_train(self):
+        # [FUNCTION DOC] HELPER: load the saved train image dataset from disk.
         self.images_web_document_dataset_train = load_from_disk(self.path_save_dir_images_web_document_dataset_train)
 
     def load_to_be_deduplicated(self):
+        # [FUNCTION DOC] HELPER: load `to_be_deduplicated` from JSON, converting the string keys back to int
+        # doc ids.
         with open(self.path_save_file_to_be_deduplicated) as f:
             self.to_be_deduplicated = json.load(f)
         # json saves the keys as strings even if they are ints
         self.to_be_deduplicated = {int(k): v for k, v in self.to_be_deduplicated.items()}
 
     def load_images_evaluation_tasks_dataset(self):
+        # [FUNCTION DOC] HELPER: load the saved evaluation image dataset from disk.
         self.images_evaluation_tasks_dataset = load_from_disk(self.path_save_dir_images_evaluation_tasks_dataset)

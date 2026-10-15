@@ -1,3 +1,6 @@
+# [MODULE DOC] Helpers to simplify HTML media nodes (selectolax nodes) into metadata dicts. TAG_TO_SEP maps
+# structural
+# tag names to the separator ("", "\n" or "\n\n") inserted after their text when linearizing a DOM.
 import os
 import re
 from urllib.parse import urlparse
@@ -39,6 +42,12 @@ TAG_TO_SEP = {
 
 
 def get_media_src(node):
+    # [FUNCTION DOC] Return the source url string of an img/video/audio node, or None. img: first non-empty
+    # attribute among a
+    # fixed priority list (src, data-src, ..., srcset, ..., src2) that contains no comma or space.
+    # video/audio:
+    # `src` attribute, else `src` of the first descendant `source` tag. Other tags (e.g. iframe) -> None.
+    # Any src containing a comma or space -> None.
     node_attributes = node.attributes
     node_tag = node.tag
     src = None
@@ -99,6 +108,12 @@ def get_media_src(node):
 
 
 def format_image_size(size):
+    # [FUNCTION DOC] Parse an HTML width/height attribute string. Strips quote and angle-bracket chars, then:
+    # int string -> int;
+    # contains "px" -> int after removing p, x, ';'; contains "%" -> the stripped string; contains "." -> int
+    # of
+    # the float (truncated); "full-width"/"auto" -> "100%". Otherwise raises ValueError (also raised by the
+    # px/float branches if the remainder is not parseable, e.g. "12.5px").
     size = re.sub('[”"<>]', "", size)
     try:
         return int(size)
@@ -116,6 +131,12 @@ def format_image_size(size):
 
 
 def format_filename(filename):
+    # [FUNCTION DOC] Turn an image url/path into a human-readable caption-like string, or "" if not useful.
+    # Takes the basename
+    # before the first ".", returns "" if it looks like a query string (`?key=`), replaces _ and - by spaces,
+    # url-encoded %2/%20 sequences by spaces, removes NxN dimension tokens, replaces digits by spaces,
+    # collapses
+    # spaces, replaces newline, "+", "%B", "%" by spaces, strips; results of length <= 1 become "".
     # TODO: refine this function. fairly imprefect.
     # Potential improvements: `Untitled`, `untitled`, `blank`, check whether each word is in a dictionary
     _, simp_filename = os.path.split(filename)
@@ -143,6 +164,10 @@ def format_filename(filename):
 
 
 def format_relative_to_absolute_path(page_url, relative_path):
+    # [FUNCTION DOC] Build an absolute url from a page url and a relative src. "//host/..." -> "http:"
+    # prefix. Otherwise removes
+    # every "./" / "../"-like segment, ensures a leading "/", and prefixes "https://" + the page url's netloc
+    # (so "../" is not resolved against the page path and the page scheme is ignored).
     if relative_path.startswith("//"):
         abs_path = "http:" + relative_path
     else:
@@ -156,6 +181,9 @@ def format_relative_to_absolute_path(page_url, relative_path):
 
 
 def is_url_valid(url):
+    # [FUNCTION DOC] Return True iff the url matches a Django-style regex: http(s)/ftp(s) scheme, dotted
+    # domain name with a
+    # 2-6 letter (or longer alnum) TLD, optional path/query. IP addresses, localhost and ports are rejected.
     regex = re.compile(
         r"^(?:http|ftp)s?://"  # http:// or https://
         r"(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?))"  # domain...
@@ -166,6 +194,13 @@ def is_url_valid(url):
 
 
 def simplify_media_node(node, page_url):
+    # [FUNCTION DOC] Convert a media node into a dict or None. Gets the src (None if missing), makes it
+    # absolute if it does not
+    # start with "http", returns None if the url is invalid. img -> {document_url, unformatted_src, src,
+    # formatted_filename (if non-empty), alt_text (if non-empty), rendered_width/height (parsed via
+    # format_image_size, skipped if unparseable)}; video -> {document_url, src, width, height (raw, if
+    # present)};
+    # audio -> {document_url, src}.
     src = get_media_src(node)
 
     if not src:

@@ -1,3 +1,10 @@
+# [MODULE DOC] Fork of the `datasets` file download/cache utilities (cached_path / get_from_cache / http_get
+# / http_head),
+# modified for image downloading: the caller supplies `compute_cache_path(cache_dir, filename) -> str` to
+# choose
+# where each cached file goes, the user agent is not rewritten, retries have no wait, and the GET is not
+# streamed (whole body written at once, no progress bar). Relies on private `datasets.utils.file_utils`
+# helpers.
 """
 Code from datasets in order to help with the downloading
 """
@@ -44,6 +51,13 @@ def cached_path(
     download_config=None,
     **download_kwargs,
 ) -> str:
+    # [FUNCTION DOC] Resolve `url_or_filename` (str or Path) to a local path. Remote url -> get_from_cache
+    # with options from
+    # `download_config` (a DownloadConfig; built from **download_kwargs if None) and its cache_dir (default
+    # datasets DOWNLOADED_DATASETS_PATH); existing local path -> returned as is. Optionally extracts archives
+    # (ExtractManager) when download_config.extract_compressed_file. Raises FileNotFoundError for a missing
+    # local
+    # file, ValueError for an unparseable string, plus errors from get_from_cache.
     """
     Given something that might be a URL (or might be a local path),
     determine which. If it's a URL, download the file and cache it, and
@@ -112,6 +126,9 @@ def cached_path(
 def http_head(
     url, proxies=None, headers=None, cookies=None, allow_redirects=True, timeout=10, max_retries=0
 ) -> requests.Response:
+    # [FUNCTION DOC] HEAD request via datasets' _request_with_retry (deep-copied headers, redirects allowed,
+    # `timeout` seconds,
+    # `max_retries` with no wait between). Returns the requests.Response. Headers are passed unchanged.
     headers = copy.deepcopy(headers) or {}
     # headers["user-agent"] = get_datasets_user_agent(user_agent=headers.get("user-agent"))
     response = _request_with_retry(
@@ -132,6 +149,11 @@ def http_head(
 def http_get(
     url, temp_file, proxies=None, resume_size=0, headers=None, cookies=None, timeout=100, max_retries=0, desc=None
 ):
+    # [FUNCTION DOC] GET `url` (non-streaming, optional Range header from `resume_size`) and write the full
+    # body to the open
+    # binary `temp_file`. Returns early without writing on HTTP 416. `desc` is unused.
+    # KNOWN ISSUE: the status code is not checked, so error pages (e.g. 404/500 bodies) are written as file
+    # content.
     headers = copy.deepcopy(headers) or {}
     # headers["user-agent"] = get_datasets_user_agent(user_agent=headers.get("user-agent"))
     if resume_size > 0:
@@ -185,6 +207,19 @@ def get_from_cache(
     ignore_url_params=False,
     download_desc=None,
 ) -> str:
+    # [FUNCTION DOC] Return the local cache path for `url`, downloading if needed. Cache file name =
+    # datasets' hash of the url
+    # (query stripped if ignore_url_params) plus ETag; its location = compute_cache_path(cache_dir, name),
+    # default
+    # cache_dir HF_DATASETS_CACHE (created). Returns the etag-less cached path directly if it exists and
+    # neither
+    # force_download nor use_etag. Otherwise HEADs the url (handles Google Drive confirm tokens and known
+    # hosts
+    # that reject HEAD), falls back to an existing cached file when offline/unreachable, or raises
+    # FileNotFoundError (local_files_only, 404) / ConnectionError (401 on HF without token, unreachable).
+    # Downloads
+    # under a file lock to a temp file (or resumable `.incomplete` file), moves it into place and writes a
+    # `<path>.json` metadata file {url, etag}. Supports ftp:// via ftp_head/ftp_get.
     """
     Given a URL, look for the corresponding file in the local cache.
     If it's not there, download it. Then return the path to the cached file.
@@ -315,6 +350,8 @@ def get_from_cache(
 
             @contextmanager
             def _resumable_file_manager():
+                # [FUNCTION DOC] HELPER: context manager opening the `.incomplete` file in append-binary mode
+                # for resumable downloads.
                 with open(incomplete_path, "a+b") as f:
                     yield f
 

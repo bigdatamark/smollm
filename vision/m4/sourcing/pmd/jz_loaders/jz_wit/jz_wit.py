@@ -1,4 +1,11 @@
 # coding=utf-8
+# [MODULE DOC] `datasets` builder script for WIT (Wikipedia-based Image Text) on the Jean Zay cluster,
+# English rows only.
+# Reads the 10 WIT train TSV shards and an image index TSV ($DSDIR/WIT/train_images.tsv with url, downloaded,
+# path) and outputs the PMD schema (image, text, source="google/wit", meta JSON with the WIT row fields).
+# Images are opened/verified in a multiprocessing pool per chunk of CHUNK_SIZE rows. Sets datasets logging to
+# INFO.
+# KNOWN ISSUE: `_URLs` reads os.environ['DSDIR'] at import time, so importing outside JZ raises KeyError.
 # Copyright 2022 The HuggingFace Datasets Authors and the current dataset script contributor.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -57,12 +64,16 @@ _URLs = [f"{os.environ['DSDIR']}/WIT/wit_v1.train.all-{i:05}-of-00010.tsv" for i
 
 
 class JZWIT(datasets.ArrowBasedBuilder):
+    # [CLASS DOC] ArrowBasedBuilder with the default config, all CPUs (num_proc) and chunks of 1000 rows;
+    # train split only.
     """Builder for WIT."""
 
     num_proc = cpu_count()
     CHUNK_SIZE = 1_000
 
     def _info(self):
+        # [FUNCTION DOC] Return DatasetInfo with the PMD `_FEATURES` schema, description, homepage, license
+        # and citation.
         return datasets.DatasetInfo(
             description=_DESCRIPTION,
             features=_FEATURES,
@@ -72,6 +83,8 @@ class JZWIT(datasets.ArrowBasedBuilder):
         )
 
     def _split_generators(self, dl_manager):
+        # [FUNCTION DOC] Return a single TRAIN split generator with files=_URLs and paths=<JZ dataset
+        # dir>/WIT/train_images.tsv.
         # files = dl_manager.download_and_extract(_URLs)
         return [
             datasets.SplitGenerator(
@@ -81,6 +94,22 @@ class JZWIT(datasets.ArrowBasedBuilder):
         ]
 
     def _generate_examples(self, files, paths):
+        # [FUNCTION DOC] HELPER: build url -> (downloaded flag, absolute local path) from the image index
+        # TSV, then stream every WIT
+        # shard and yield chunks (lists of up to CHUNK_SIZE dicts {image_path or None, text, source, meta})
+        # for
+        # language "en" rows. Caption choice: reference description if >= 2 words; else the English part of
+        # the
+        # attribution description (text after "English:"; if another language follows, its last word --
+        # assumed to be
+        # the next language name -- is dropped) if >= 3 words; else alt text if >= 3 words; else row skipped.
+        # Non-ASCII
+        # characters are removed and empty captions skipped. KeyError if an image url is missing from the
+        # index.
+        # KNOWN ISSUE: `bool(instance["downloaded"])` is True for any non-empty string (including
+        # "False"/"0").
+        # KNOWN ISSUE: CSV fields are never None (empty string instead), so the `is not None` checks are
+        # always true.
         image_paths = {}
         with open(paths, encoding="utf-8") as f:
             for instance in csv.DictReader(f, delimiter="\t"):
@@ -179,6 +208,9 @@ class JZWIT(datasets.ArrowBasedBuilder):
             yield buffer
 
     def _generate_tables(self, files, paths):
+        # [FUNCTION DOC] Yield (index, pyarrow Table) for each chunk, built in parallel with a Pool(num_proc)
+        # `imap` (order kept)
+        # over _create_table, then log warnings with the totals of missing / unopenable / unverifiable images.
         rows_iterator = self._generate_examples(files, paths)
 
         counter_images_not_found = 0
@@ -200,6 +232,15 @@ class JZWIT(datasets.ArrowBasedBuilder):
         logger.warning(f"Skipped {counter_images_not_verified} images (not verified).")
 
     def _create_table(self, examples):
+        # [FUNCTION DOC] HELPER: for each example open the image with PIL if the path exists and verify it;
+        # failures set the image to
+        # None and increment the not-found / opening-error / not-verified counters. Replaces image_path by
+        # image
+        # (closed after verify) and returns (not_found, opening_error, not_verified, Arrow table encoded with
+        # _FEATURES).
+        # KNOWN ISSUE: when opening fails the image is None and verify() then also fails, so the image is
+        # counted in
+        # both the opening-error and not-verified counters.
         counter_images_not_found = 0
         count_images_opening_error = 0
         counter_images_not_verified = 0
@@ -247,6 +288,8 @@ class JZWIT(datasets.ArrowBasedBuilder):
         )
 
     def _recast(self, examples):
+        # [FUNCTION DOC] HELPER: convert a list of example dicts into a column mapping {image, text, source,
+        # meta}.
         return {
             "image": [ex["image"] for ex in examples],
             "text": [ex["text"] for ex in examples],
