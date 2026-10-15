@@ -1,3 +1,14 @@
+# [MODULE DOC] Step 1 of the image-to-website-code pipeline: generates website layout ideas with
+# Mistral-7B-Instruct-v0.1
+# on CUDA (bfloat16). argv[1] = NAME_FILE (output basename). Encodes PROMPT (asks for a list of 10 ideas) with
+# the
+# chat template, repeats it BATCH_SIZE (10) times, and for NUM_ITER (100) iterations samples up to 1000 new
+# tokens per row. Each decoded output is cleaned (drop "</s>", collapse blank lines), split into lines, keeps
+# lines starting with a digit; kept only if exactly 10 such lines numbered "1." .. "10." in order (prefix
+# removed);
+# any parsing exception skips the output. Appends ideas to ALL_IDEAS and writes them newline-separated to
+# /fsx/hugo/ideas_mistral/ideas/NAME_FILE.txt.
+# KNOWN ISSUE: an empty line makes el[0] raise IndexError, which discards the whole output silently.
 import sys
 
 import torch

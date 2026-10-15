@@ -1,3 +1,8 @@
+# [MODULE DOC] Web-docs step 7.3: removes whole documents containing any NSFW image from one shard (argv[1] =
+# IDX_JOB) of
+# web_document_dataset_filtered_imgurldedup, using the URL list from step 7.1. Recreates
+# /scratch/storage_hugo_IDX_JOB/, copies the NSFW URL JSON and syncs the shard (3 attempts), filters with
+# cpu_count processes, saves and syncs to ..._imgurldedup_nsfwfiltered/IDX_JOB, logs counts, deletes temp dir.
 import json
 import logging
 import os
@@ -42,18 +47,24 @@ PATH_SAVE_S3_WEB_DOCS_NSFW_FILTERED = os.path.join(
 
 
 class NSFWFiltering:
+    # [CLASS DOC] Picklable Dataset.filter predicate dropping documents that reference an NSFW image URL.
     def __init__(self, path_nsfw_image_urls):
+        # [FUNCTION DOC] Stores the path and loads the JSON list of NSFW URLs into a set.
         self.path_nsfw_image_urls = path_nsfw_image_urls
         with open(path_nsfw_image_urls) as f:
             self.nsfw_image_urls = set(json.load(f))
 
     def __call__(self, example):
+        # [FUNCTION DOC] Collects the "src" of every non-null entry of example["metadata"] (JSON list) and
+        # returns False if any is in
+        # the NSFW set, True otherwise.
         image_urls_in_example = [el["src"] for el in json.loads(example["metadata"]) if el]
         if any([url in self.nsfw_image_urls for url in image_urls_in_example]):
             return False
         return True
 
     def __reduce__(self):
+        # [FUNCTION DOC] Pickles as (class, (path,)) so workers reload the set from disk.
         return self.__class__, (self.path_nsfw_image_urls,)
 
 

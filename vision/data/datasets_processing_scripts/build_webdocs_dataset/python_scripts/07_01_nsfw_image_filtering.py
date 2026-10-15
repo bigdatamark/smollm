@@ -1,3 +1,14 @@
+# [MODULE DOC] Web-docs step 7.1: finds NSFW image URLs of one shard (argv[1] = IDX_JOB) with the NSFW
+# MobileNetV2 Keras
+# classifier (224x224, TensorFlow + tensorflow_hub). Forces the "spawn" start method for multiprocess (map
+# hangs
+# otherwise). As __main__: recreates /scratch/storage_hugo_IDX_JOB/; copies the shard's image-URL Counter
+# (6.1)
+# and the global too-duplicated URL pickle (6.2); writes the JSON list of URLs to consider (shard URLs minus
+# too-duplicated ones); syncs the two image datasets (image_dataset, image_dataset_2, columns "url" and raw
+# "image" bytes); keeps only rows with considered URLs; then keeps only rows the classifier flags as NSFW
+# (batched, 1000 per batch, NUM_PROC=24); writes the flagged URLs as JSON to
+# s3://m4-datasets/webdocs/nsfw_image_urls/IDX_JOB/nsfw_image_urls.json and deletes the temp dir.
 import json
 import logging
 import os
@@ -70,21 +81,29 @@ PATH_SAVE_S3_NSFW_IMAGES_URLS = os.path.join(
 
 
 class ImageDatasetURLFiltering:
+    # [CLASS DOC] Picklable Dataset.filter predicate keeping rows whose "url" is in a JSON list of URLs to
+    # keep.
     def __init__(self, path_image_urls_to_keep):
+        # [FUNCTION DOC] Stores the path and loads the JSON list into a set.
         self.path_image_urls_to_keep = path_image_urls_to_keep
         with open(path_image_urls_to_keep) as f:
             self.image_urls_to_keep = set(json.load(f))
 
     def __call__(self, example):
+        # [FUNCTION DOC] Returns True iff example["url"] is in the keep set.
         if example["url"] not in self.image_urls_to_keep:
             return False
         return True
 
     def __reduce__(self):
+        # [FUNCTION DOC] Pickles as (class, (path,)) so workers reload the set from disk.
         return self.__class__, (self.path_image_urls_to_keep,)
 
 
 class ImageDatasetNSFWFiltering:
+    # [CLASS DOC] Picklable batched filter predicate that keeps the NSFW images (used to collect their URLs),
+    # wrapping the Keras
+    # NSFW classifier (uses __slots__).
     __slots__ = (
         "path_nsfw_classifier",
         "nsfw_classifier",
@@ -94,12 +113,20 @@ class ImageDatasetNSFWFiltering:
         self,
         path_nsfw_classifier,
     ):
+        # [FUNCTION DOC] Stores the model path and loads the Keras model (KerasLayer custom object, not
+        # compiled).
         self.path_nsfw_classifier = path_nsfw_classifier
         self.nsfw_classifier = tf.keras.models.load_model(
             path_nsfw_classifier, custom_objects={"KerasLayer": hub.KerasLayer}, compile=False
         )
 
     def __call__(self, batch):
+        # [FUNCTION DOC] Input: batch mapping with "image" (list of raw bytes). Returns one boolean per image:
+        # True (keep = NSFW) if
+        # hentai > 0.9 or porn > 0.85 or sexy > 1.0 (NSFW_THRESHOLDS).
+        # KNOWN ISSUE: the "sexy" threshold of 1.0 can never be exceeded by a probability, so that class is
+        # effectively
+        # disabled; the variable name bool_keep_examples means "is NSFW" here.
         images_bytes = batch["image"]
         nsfw_scores = self.compute_nsfw_scores(images_bytes=images_bytes, nsfw_classifier=self.nsfw_classifier)
         bool_keep_examples = [
@@ -115,6 +142,9 @@ class ImageDatasetNSFWFiltering:
         return bool_keep_examples
 
     def process_image(self, image_bytes):
+        # [FUNCTION DOC] HELPER: decodes bytes with PIL, converts to RGB, resizes to IMAGE_DIM x IMAGE_DIM,
+        # returns a float array
+        # scaled to [0, 1]; on any error returns an all-black image array instead.
         try:
             image = Image.open(BytesIO(image_bytes))
             if image.mode != "RGB":
@@ -128,6 +158,9 @@ class ImageDatasetNSFWFiltering:
             return keras.preprocessing.image.img_to_array(Image.new("RGB", (IMAGE_DIM, IMAGE_DIM))) / 255
 
     def compute_nsfw_scores(self, images_bytes, nsfw_classifier):
+        # [FUNCTION DOC] HELPER: preprocesses all images into one array, runs nsfw_classifier.predict, and
+        # returns a list of mappings
+        # with float scores "hentai" (output 1), "porn" (output 3) and "sexy" (output 4).
         images = np.asarray([self.process_image(image_bytes) for image_bytes in images_bytes])
         predictions = nsfw_classifier.predict(images)
         predictions = [
@@ -136,6 +169,7 @@ class ImageDatasetNSFWFiltering:
         return predictions
 
     def __reduce__(self):
+        # [FUNCTION DOC] Pickles as (class, (model path,)) so workers reload the model.
         return (self.__class__, (self.path_nsfw_classifier,))
 
 

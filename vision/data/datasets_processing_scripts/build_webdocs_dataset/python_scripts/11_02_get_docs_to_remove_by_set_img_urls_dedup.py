@@ -1,3 +1,14 @@
+# [MODULE DOC] Web-docs step 11.2: decides which documents to drop by deduplicating on the set of image URLs.
+# Syncs the 200
+# set_img_urls.json files (from 11.1) to /scratch/storage_hugo/, counts identical image-set keys over all
+# documents and prints stats; for each key shared by several documents, sorts its (url, warc_filename) pairs
+# by
+# warc_filename and marks all but the last (most recent crawl) for removal; writes a JSON mapping page url ->
+# warc_filename to remove, uploads it to s3://m4-datasets/webdocs/url_to_warcfilename_to_remove.json and
+# deletes
+# the temp dir.
+# KNOWN ISSUE: the mapping is keyed by page URL only, so if one URL has several documents to remove only one
+# warc_filename survives; the log after the computation says "Starting" instead of "Finished".
 """
 srun --pty --cpus-per-task=96 bash -i
 conda activate /fsx/m4/conda/shared-m4-2023-03-10

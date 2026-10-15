@@ -1,3 +1,10 @@
+# [MODULE DOC] Web-docs step 10: final cleaning of one shard (argv[1] = IDX_JOB) of ..._linededup. Recreates
+# /scratch/storage_hugo_IDX_JOB/, syncs input (3 attempts), maps func_map_final_cleaning_node_level and
+# filters
+# with func_filter_final_cleaning_doc_level (cpu_count procs), saves and syncs to ..._linededup_finalcleaning/
+# IDX_JOB, then computes a Counter of image URLs (metadata "src") over the result, pickles it and copies it to
+# img_urls_in_final_web_docs/IDX_JOB/img_urls.pickle, logs number of documents and of images, deletes temp
+# dir.
 import json
 import logging
 import os
@@ -45,6 +52,15 @@ PATH_SAVE_S3_IMG_URLS_IN_FINAL_WEB_DOCS = (
 
 
 def func_map_final_cleaning_node_level(example):
+    # [FUNCTION DOC] Map function normalizing the interleaved node lists of a document (texts, images and JSON
+    # metadata, aligned,
+    # asserted equal length): drops empty-string text nodes, merges consecutive text nodes with "\n\n", keeps
+    # image
+    # nodes (with their metadata), and drops nodes where text, image and metadata are all None. Asserts text
+    # nodes
+    # have no image/metadata and image nodes have metadata; raises ValueError for metadata without text or
+    # image.
+    # Writes back texts, images and re-serialized metadata and returns the example.
     texts = example["texts"]
     images = example["images"]
     metadata = json.loads(example["metadata"])
@@ -85,6 +101,9 @@ def func_map_final_cleaning_node_level(example):
 
 
 def func_filter_final_cleaning_doc_level(example):
+    # [FUNCTION DOC] Filter predicate: keeps a document only if it has at least one non-empty text node and at
+    # least one image node
+    # (a node whose text is falsy is counted as an image node).
     texts_example = example["texts"]
     texts = [txt for txt in texts_example if txt]
     images = [txt for txt in texts_example if not txt]

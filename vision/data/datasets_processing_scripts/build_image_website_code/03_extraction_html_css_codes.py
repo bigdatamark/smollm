@@ -1,3 +1,11 @@
+# [MODULE DOC] Step 3 of the image-to-website-code pipeline: extracts a single self-contained HTML page from
+# each raw model
+# generation. argv[1] = NUM_FILE; reads a JSON list of generations from
+# /fsx/hugo/deepseek_html_css_scale/gen/NUM_FILE.json, applies process_html_css, drops failures (None) and
+# writes
+# the JSON list of pages to /fsx/hugo/process_html_css/gen/NUM_FILE.json, then prints a message.
+# KNOWN ISSUE: input folder (deepseek_html_css_scale) differs from the folder step 2 writes
+# (deepseek_html_css).
 import json
 import sys
 
@@ -8,6 +16,16 @@ PATH_SAVE_PROCESSED_FILE = f"/fsx/hugo/process_html_css/gen/{NUM_FILE}.json"
 
 
 def process_html_css(html_css_file):
+    # [FUNCTION DOC] Input: one generation string expected to contain exactly two fenced code blocks (4
+    # occurrences of three
+    # backticks): HTML first, CSS second; otherwise returns None. The CSS block is trimmed of leading lines
+    # before the
+    # first line containing "{" (None if no "{"); the HTML is cut to the <body>...</body> region inclusive
+    # (None if
+    # either tag is missing). Returns "<html>\n<style>\n" + css + "</style>\n" + body + "\n</html>".
+    # Note the leading text after each opening fence (e.g. the language tag "html") is kept in the HTML slice
+    # but
+    # discarded by the body cut.
     substring_start_code = "```"
     positions_code = []
     start_pos = html_css_file.find(substring_start_code)

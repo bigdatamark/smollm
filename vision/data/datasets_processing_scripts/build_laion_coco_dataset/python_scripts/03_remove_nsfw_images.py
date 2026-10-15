@@ -1,3 +1,12 @@
+# [MODULE DOC] LAION-COCO step 3: removes NSFW images from one shard (input
+# laion_coco_dataset_optoutrmv/IDX_JOB, output
+# laion_coco_dataset_optoutrmv_nsfwfiltered/IDX_JOB), using NUM_PROC=10.
+# Common pattern: IDX_JOB = argv[1] (string shard id); temp dir /scratch/storage_hugo_IDX_JOB/ is wiped and
+# recreated via shell, input is synced from S3 (aws/s5cmd, retried MAX_NUM_RETRIES_SYNC times, failures
+# ignored),
+# the filtered dataset is saved locally then synced back to S3, row counts before/after are logged, and the
+# temp dir
+# is deleted. PIL limits are disabled (MAX_IMAGE_PIXELS=None, LOAD_TRUNCATED_IMAGES) at import.
 import json
 import logging
 import os
@@ -40,6 +49,9 @@ PATH_SAVE_S3_DS_LAION_COCO_NSFW_FILTERED = (
 
 
 def filter_nsfw(example):
+    # [FUNCTION DOC] Dataset.filter predicate: parses example["meta"] JSON and returns False when its "NSFW"
+    # field is "UNSURE" or
+    # "NSFW", True otherwise (KeyError if the field is absent).
     nsfw = json.loads(example["meta"])["NSFW"]
     if (nsfw == "UNSURE") or (nsfw == "NSFW"):
         return False

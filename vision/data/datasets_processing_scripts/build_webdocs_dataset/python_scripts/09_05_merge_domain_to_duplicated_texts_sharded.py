@@ -1,3 +1,11 @@
+# [MODULE DOC] Web-docs step 9.5: merges the 200 per-job domain -> {paragraph -> count} mappings (from 9.4,
+# synced from S3)
+# into one mapping (domains are disjoint across jobs; later ones would win), saves it to
+# /scratch/line_dedup_domain_to_duplicated_texts.json and uploads it; then builds a reduced version keeping
+# only
+# paragraphs with count > 2 that do not contain "END_OF_DOCUMENT_TOKEN_TO_BE_REPLACED", dropping empty
+# domains,
+# and saves/uploads it as new_line_dedup_domain_to_duplicated_texts.json (the input of 9.6). Logs each step.
 """
 srun --pty --cpus-per-task=96 bash -i
 conda activate /fsx/m4/conda/shared-m4-2023-03-10

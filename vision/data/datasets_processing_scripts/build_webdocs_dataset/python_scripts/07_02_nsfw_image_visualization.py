@@ -1,3 +1,12 @@
+# [MODULE DOC] Streamlit app (as __main__) to help pick NSFW thresholds. Loads
+# ./large_files/image_dataset_25k_with_nsfw_scores
+# (rows with raw "image" bytes and "nsfw_scores" mapping with hentai/porn/sexy), lets the user choose how many
+# images to consider (default 1000) and a number of histogram bins, plots histograms of the three scores
+# (rounded
+# to 2 decimals), then shows an HTML table of 50x50 thumbnails and scores sorted in descending order of a
+# chosen
+# score.
+# KNOWN ISSUE: a bins value of 0 (allowed by the input) makes matplotlib raise.
 import base64
 from io import BytesIO
 
@@ -66,6 +75,9 @@ if __name__ == "__main__":
     stats["sexy_score"] = [stats["sexy_score"][idx] for idx in idx_sort]
 
     def transform_img(img):
+        # [FUNCTION DOC] HELPER: decodes image bytes with PIL, shrinks to a 50x50 thumbnail, re-encodes as PNG
+        # and returns an HTML <img>
+        # tag with a base64 data URI.
         img = Image.open(BytesIO(img))
         img.thumbnail((50, 50))
         with BytesIO() as buffer:

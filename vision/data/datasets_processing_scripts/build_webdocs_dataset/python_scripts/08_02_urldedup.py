@@ -1,3 +1,7 @@
+# [MODULE DOC] Web-docs step 8.2: URL deduplication of one shard (argv[1] = IDX_JOB) of
+# web_document_dataset_filtered_imgurldedup_nsfwfiltered using dup_urls.json from step 8.1, also dropping
+# documents without any image. Recreates /scratch/storage_hugo_IDX_JOB/, copies inputs from S3, filters with
+# NUM_PROC=10, saves and syncs to ..._urldedup/IDX_JOB (3 attempts), logs counts, deletes the temp dir.
 import json
 import logging
 import os
@@ -43,12 +47,20 @@ PATH_SAVE_S3_WEB_DOCS_URL_DEDUP = os.path.join(
 
 
 class URLDeduplication:
+    # [CLASS DOC] Picklable Dataset.filter predicate implementing URL dedup and the "has at least one image"
+    # rule.
     def __init__(self, path_dup_urls):
+        # [FUNCTION DOC] Stores the path and loads the JSON mapping URL -> warc_filename to keep.
         self.path_dup_urls = path_dup_urls
         with open(path_dup_urls) as f:
             self.dup_urls = json.load(f)
 
     def __call__(self, example):
+        # [FUNCTION DOC] Parses example["general_metadata"]; returns False if its url is in the mapping and
+        # its warc_filename differs
+        # from the kept one; returns False if example["metadata"] has no non-null entry (no image); True
+        # otherwise.
+        # Several documents sharing both URL and warc_filename are all kept.
         general_metadata = json.loads(example["general_metadata"])
         url, warc_filename = general_metadata["url"], general_metadata["warc_filename"]
         if url in self.dup_urls:
@@ -61,6 +73,7 @@ class URLDeduplication:
         return True
 
     def __reduce__(self):
+        # [FUNCTION DOC] Pickles as (class, (path,)) so workers reload the mapping from disk.
         return self.__class__, (self.path_dup_urls,)
 
 

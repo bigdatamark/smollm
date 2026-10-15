@@ -1,3 +1,12 @@
+# [MODULE DOC] Web-docs step 2 (original rules): same flow as the "bis" variant but with hard-coded
+# simplification options
+# (all DOMTreeSimplificator and PreExtractionSimplificator flags True, no CSS rules), m4's
+# WebDocumentExtractor,
+# temp dir /scratch/storage_hugo/ (shared, recreated), image URLs file from --path_save_file_image_urls copied
+# to
+# s3://m4-datasets/webdocs/image_urls/<idx_job>/image_urls.txt, and the resulting web-document dataset (named
+# html_dataset) saved and synced to path_save_dir_html_dataset/idx_job. Logs html success rate; deletes temp
+# dir.
 import argparse
 import logging
 import os
@@ -23,6 +32,9 @@ logger.setLevel(logging.INFO)
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses idx_job (int, positional), --path_warc_dataset,
+    # --path_save_file_image_urls (local file),
+    # --path_save_dir_html_dataset and --num_proc (default cpu_count). Returns Namespace.
     parser = argparse.ArgumentParser(
         description="Extract html from warc files, simplify them, get the urls of the images."
     )

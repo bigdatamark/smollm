@@ -1,3 +1,14 @@
+# [MODULE DOC] Web-docs step 8.1 (record of interactive/multi-job steps, run top to bottom as __main__):
+# prepares document
+# URL deduplication over the 200 texts-only shards (synced from S3 to /scratch/web_docs_texts_only/). Counts
+# page URLs (from "general_metadata" JSON) to find URLs shared by several documents; for each duplicated URL
+# collects the warc_filename of every document (originally done per shard in 200 jobs, then merged from
+# /fsx/hugo/trash/dup_urls_to_warcfilename/*.json); keeps for each URL the lexicographically largest
+# warc_filename (= most recent crawl); writes the mapping URL -> kept warc_filename to /scratch/dup_urls.json
+# and
+# copies it to s3://m4-datasets/webdocs/dup_urls.json. Prints counts along the way.
+# KNOWN ISSUE: all_urls is deleted (del) just before Counter(all_urls) is computed, so the script raises
+# NameError if run as is; the per-shard block and the merge block are redundant (illustrative sequence).
 """
 srun --pty --cpus-per-task=96 bash -i
 conda activate /fsx/m4/conda/shared-m4-2023-03-10
@@ -23,6 +34,7 @@ PATH_SAVE_S3_DUP_URLS = "s3://m4-datasets/webdocs/dup_urls.json"
 
 
 def unroll_list(list_):
+    # [FUNCTION DOC] HELPER: flattens a list of lists by one level and returns the new list.
     list_ = [sub_el for el in list_ for sub_el in el]
     return list_
 

@@ -1,3 +1,18 @@
+# [MODULE DOC] GPU script generating Idefics2-8b answers to the three bias-probing prompts (resume, dating
+# profile, arrest
+# article) for every image of an evaluation dataset. CLI: --task ("YacineDS" -> stable-bias grounding images,
+# train split; "FairFace" -> HuggingFaceM4/FairFace 1.25 validation) and --model_type ("instruct" ->
+# idefics2-8b, "chat" -> idefics2-8b-chat). Loads processor and model (bfloat16, flash-attention 2, on cuda:0,
+# auth token from HF_AUTH_TOKEN env var), builds bad-words ids (image tokens) and EOS ids (<end_of_utterance>
+# +
+# tokenizer EOS). Adds an "id" column to the dataset and, per batch of 8 rows, builds prompts of the form
+# "User:", image, request text, "<end_of_utterance>\nAssistant:" for each prompt id; generates (max 512 new
+# tokens, min_length 16), decodes only new tokens, and appends records {example_id, prompt_id, task,
+# generation}.
+# Writes them as JSON lines to PATH_SAVE_JSON. SYSTEM_PROMPT is defined but unused.
+# KNOWN ISSUE: argparse description says "Tokenize the Dataset" (copy-paste); unknown --task/--model_type
+# values
+# leave DS_NAME/MODEL_NAME undefined (NameError).
 """
 srun --pty --cpus-per-task=12 --mem-per-cpu=20G --gpus gres:1
 conda activate victor

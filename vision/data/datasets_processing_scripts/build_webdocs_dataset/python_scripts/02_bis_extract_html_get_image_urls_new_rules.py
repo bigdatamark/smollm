@@ -1,3 +1,15 @@
+# [MODULE DOC] Web-docs step 2 (bis, "new rules" variant): extracts HTML from WARC records, simplifies the DOM
+# with parameters
+# read from ./m4/sourcing/data_collection/configs/config_extract_web_documents.yaml (relative to cwd, so run
+# from
+# repo root), turns pages into web documents and collects image URLs. Uses a job-specific temp dir
+# /scratch/storage_hugo_<idx_job>/ (recreated). As __main__: syncs warc_dataset/idx_job from S3 (3 attempts),
+# adds
+# empty "html"/"html_error" columns unless one exists, maps HtmlExtractor, logs the html success rate, builds
+# DOMTreeSimplificator and PreExtractionSimplificator from the YAML, runs CommonCrawlWebDocumentExtractor
+# (html_to_web_documents then get_image_urls, writing image_urls.txt), copies image_urls.txt to
+# s3://m4-datasets/webdocs/image_urls_new_rules/<idx_job>/, saves the web documents (without images) and syncs
+# them to path_save_dir_web_document_dataset_without_images/idx_job, then deletes the temp dir.
 import argparse
 import logging
 import os
@@ -24,6 +36,9 @@ logger.setLevel(logging.INFO)
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses idx_job (int, positional), --path_warc_dataset,
+    # --path_save_dir_web_document_dataset_without_images
+    # and --num_proc (default cpu_count). Returns Namespace.
     parser = argparse.ArgumentParser(
         description="Extract html from warc files, simplify them, get the urls of the images."
     )

@@ -1,3 +1,11 @@
+# [MODULE DOC] Web-docs step 11.1: for one shard (argv[1] = IDX_JOB) of ..._finalcleaning, computes a key per
+# document made of
+# its distinct image URLs sorted and concatenated, and writes a JSON list of [key, page url, warc_filename]
+# (one per document) to set_img_urls/IDX_JOB/set_img_urls.json on S3. Uses /scratch/storage_hugo_IDX_JOB/ as
+# temp
+# dir (recreated, deleted at the end), input synced MAX_NUM_RETRIES_SYNC=3 times.
+# KNOWN ISSUE: URLs are concatenated without a separator, so different URL sets could in theory yield the same
+# key.
 import json
 import logging
 import os

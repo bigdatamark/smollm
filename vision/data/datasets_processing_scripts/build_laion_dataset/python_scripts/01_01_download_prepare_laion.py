@@ -1,3 +1,15 @@
+# [MODULE DOC] LAION step 1.1: downloads a slice of raw LAION-2B-en webdataset tar files and converts them to
+# an HF dataset.
+# argv[1] = IDX_JOB (0..NUM_JOB_TOT-1=199); the tar indices 50,000..231,348 are split into 200 contiguous
+# chunks
+# and this job takes chunk IDX_JOB. As __main__: recreates /scratch/storage_hugo_IDX_JOB/, copies each tar
+# (zero-padded 6-digit name) from the LAION S3 bucket with the "hugo-sandbox" AWS profile, writes a loading
+# script
+# made of the line DL_DATASET_PATH = "<local tar dir>" prepended to the template script
+# (01_02_template_loading_script_laion.py, read from PATH_TEMPLATE_LOADING_SCRIPT_LAION), builds the "train"
+# split
+# with load_dataset, saves it (cpu_count processes), syncs it 3 times to
+# s3://m4-datasets/LAION_data/laion_raw_hf_dataset/IDX_JOB and deletes the temp dir. Logs progress.
 import logging
 import os
 import sys

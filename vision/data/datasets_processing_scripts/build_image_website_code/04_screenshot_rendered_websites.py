@@ -1,3 +1,17 @@
+# [MODULE DOC] Step 4 of the image-to-website-code pipeline: renders the HTML pages with headless Chromium
+# (playwright) and
+# builds HF datasets of (screenshot, code) pairs. Input JSON files COMMON_PATH_JSON_HTML_CODES with indices
+# 0..NUM_JSON_FILES-1, each a list of HTML strings; screenshots are written temporarily to
+# COMMON_PATH_SCREENSHOT;
+# one dataset per JSON file is saved to COMMON_PATH_SAVE_DATASETS_IMAGE_TO_WEBSITE_CODE. As __main__,
+# processes
+# indices in chunks of 250 with a pool of NUM_PROCESSES workers (sleeping 10s before each chunk), printing
+# each
+# finished index; any exception in a chunk silently abandons the rest of that chunk.
+# KNOWN ISSUE: the last chunk includes indices >= NUM_JSON_FILES (10057 is not a multiple of 250), whose
+# missing
+# files raise and abort the remainder of that chunk; failures are swallowed, so unprocessed files go
+# unnoticed.
 import json
 import multiprocessing
 import os
@@ -17,6 +31,14 @@ COMMON_PATH_SAVE_DATASETS_IMAGE_TO_WEBSITE_CODE = "/fsx/hugo/image_website_code/
 
 
 def process_one_json_html_code(idx_json):
+    # [FUNCTION DOC] Worker for one JSON index idx_json: loads the list of HTML codes, opens one browser
+    # context (fixed desktop
+    # Chrome user agent), and for each code opens a page, sets the content, waits for network idle, takes a
+    # full-page
+    # PNG screenshot to disk and opens it with PIL. Saves Dataset.from_dict({"image", "code"}) to disk,
+    # deletes the
+    # screenshots with a shell rm on the "idx_json_*" glob, and returns idx_json.
+    # KNOWN ISSUE: pages are never closed (only the context at the end), so memory grows with the list length.
     path_one_json_html_codes = COMMON_PATH_JSON_HTML_CODES.format(NUM=str(idx_json))
     with open(path_one_json_html_codes, "r") as f:
         list_html_codes = json.load(f)

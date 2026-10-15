@@ -1,3 +1,17 @@
+# [MODULE DOC] Web-docs step 13: final processing of one shard (argv[1] = IDX_JOB) of
+# ..._setimgurlsdedup_optoutrmv.
+# Node level (func_map_final_processing_node_level): removes repeated images within a document, removes spammy
+# paragraphs (ratio of SPAM_WORDS among words >= SPAM_WORD_RATIO_CUTOFF=0.12), normalizes nodes, collapses
+# runs of
+# the END_OF_DOCUMENT_TOKEN_TO_BE_REPLACED paragraph and drops a trailing one. Doc level: drops documents
+# whose
+# texts are only that token, or lacking text or images. As __main__: recreates /scratch/storage_hugo_IDX_JOB/,
+# syncs input (3 attempts), applies both steps (NUM_PROC=20), saves/syncs to ..._finalprocessing/IDX_JOB, then
+# a
+# variant where "images" is replaced by the image URLs (string sequence) saved/synced to
+# ..._finalprocessing_replaceimgbyurl/IDX_JOB, pickles a Counter of image URLs to
+# img_urls_in_final_web_docs_3/,
+# logs document and image counts, and deletes the temp dir.
 import json
 import logging
 import os
@@ -98,6 +112,9 @@ PATH_SAVE_S3_IMG_URLS_IN_FINAL_WEB_DOCS = (
 
 
 def remove_duplicated_images(texts, images, metadata):
+    # [FUNCTION DOC] HELPER: given aligned lists texts/images/metadata (metadata entries are dicts with "src"
+    # for images or None),
+    # removes every image node whose "src" already appeared earlier in the document. Returns the three lists.
     indices_to_remove = set()
 
     set_image_urls = set()
@@ -117,6 +134,9 @@ def remove_duplicated_images(texts, images, metadata):
 
 
 def compute_spam_word_ratio(txt):
+    # [FUNCTION DOC] HELPER: splits txt into lowercased words stripped of SPECIAL_CHARACTERS (m4
+    # FilteringFunctions.get_words_from_text)
+    # and returns the fraction of words in SPAM_WORDS (0 for no words).
     words = FilteringFunctions.get_words_from_text(
         text=txt, lower_case=True, strip_words=True, strip_characters=SPECIAL_CHARACTERS
     )
@@ -127,6 +147,9 @@ def compute_spam_word_ratio(txt):
 
 
 def remove_spam_paragraphs(texts, images, metadata):
+    # [FUNCTION DOC] HELPER: for each non-None text node, splits on "\n\n" and keeps only paragraphs with spam
+    # ratio below the cutoff,
+    # re-joining them (node can become ""). images/metadata returned unchanged.
     new_texts = []
     for text in texts:
         if text is None:
@@ -142,6 +165,10 @@ def remove_spam_paragraphs(texts, images, metadata):
 
 
 def merge_consecutive_END_OF_DOCUMENT_TOKEN_TO_BE_REPLACED(texts, images, metadata):
+    # [FUNCTION DOC] HELPER: within each text node, removes paragraphs equal (after strip) to
+    # END_OF_DOCUMENT_TOKEN_TO_BE_REPLACED
+    # that directly follow another such paragraph, keeping one per run. Returns updated texts and unchanged
+    # others.
     new_texts = []
     for text in texts:
         if text is None:
@@ -166,6 +193,9 @@ def merge_consecutive_END_OF_DOCUMENT_TOKEN_TO_BE_REPLACED(texts, images, metada
 
 
 def remove_end_END_OF_DOCUMENT_TOKEN_TO_BE_REPLACED(texts, images, metadata):
+    # [FUNCTION DOC] HELPER: if the last node is a non-empty text whose last paragraph is exactly
+    # END_OF_DOCUMENT_TOKEN_TO_BE_REPLACED
+    # (no strip), removes that paragraph (mutates texts in place). Returns the three lists.
     if len(texts) > 0:
         last_text = texts[-1]
         if last_text:
@@ -178,6 +208,11 @@ def remove_end_END_OF_DOCUMENT_TOKEN_TO_BE_REPLACED(texts, images, metadata):
 
 
 def final_cleaning_node_level(texts, images, metadata):
+    # [FUNCTION DOC] HELPER: same normalization as step 10's node-level cleaning: drops "" text nodes, merges
+    # consecutive text nodes
+    # with "\n\n", keeps image nodes, drops all-None nodes; asserts consistency and raises ValueError for
+    # metadata
+    # without text or image. Returns new texts, images, metadata lists.
     new_texts = []
     new_images = []
     new_metadata = []
@@ -210,6 +245,10 @@ def final_cleaning_node_level(texts, images, metadata):
 
 
 def func_map_final_processing_node_level(example):
+    # [FUNCTION DOC] Map function: parses metadata JSON, asserts aligned lengths, applies
+    # remove_duplicated_images,
+    # remove_spam_paragraphs, final_cleaning_node_level, merge_consecutive_..., remove_end_..., and
+    # final_cleaning_node_level again, then writes back texts, images and JSON metadata. Returns the example.
     texts = example["texts"]
     images = example["images"]
     metadata = json.loads(example["metadata"])
@@ -234,12 +273,18 @@ def func_map_final_processing_node_level(example):
 
 
 def remove_texts_only_END_OF_DOCUMENT_TOKEN_TO_BE_REPLACED(example):
+    # [FUNCTION DOC] HELPER: returns False if every non-empty text node equals (after strip)
+    # END_OF_DOCUMENT_TOKEN_TO_BE_REPLACED
+    # (also False when there is no text at all, since all() of empty is True), True otherwise.
     texts_example = example["texts"]
     texts = [txt for txt in texts_example if txt]
     return not all([txt.strip() == "END_OF_DOCUMENT_TOKEN_TO_BE_REPLACED" for txt in texts])
 
 
 def final_cleaning_doc_level(example):
+    # [FUNCTION DOC] HELPER: returns True iff the document has at least one non-empty text node and at least
+    # one node with falsy
+    # text (counted as an image node).
     texts_example = example["texts"]
     texts = [txt for txt in texts_example if txt]
     images = [txt for txt in texts_example if not txt]
@@ -249,6 +294,8 @@ def final_cleaning_doc_level(example):
 
 
 def func_filter_final_processing_doc_level(example):
+    # [FUNCTION DOC] Filter predicate combining remove_texts_only_END_OF_DOCUMENT_TOKEN_TO_BE_REPLACED and
+    # final_cleaning_doc_level.
     if not remove_texts_only_END_OF_DOCUMENT_TOKEN_TO_BE_REPLACED(example):
         return False
     if not final_cleaning_doc_level(example):
@@ -257,6 +304,8 @@ def func_filter_final_processing_doc_level(example):
 
 
 def func_map_replace_images_by_urls(example):
+    # [FUNCTION DOC] Map function setting example["images"] to the list of image "src" URLs from metadata
+    # (None for text nodes).
     metadata = json.loads(example["metadata"])
     image_urls = [meta["src"] if meta else None for meta in metadata]
     example["images"] = image_urls

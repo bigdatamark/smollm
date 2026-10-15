@@ -1,3 +1,13 @@
+# [MODULE DOC] Builds one shard of the LAION-COCO dataset from a raw LAION HF-dataset shard. argv[1] =
+# ID_SHARD (string).
+# As __main__: s5cmd-syncs s3://m4-datasets/LAION_data/laion_raw_hf_dataset/ID_SHARD into
+# /scratch/storage_hugo/, keeps only rows whose URL is in the pickled LAION-COCO URL->caption mapping
+# (PATH_LAION_COCO_IMAGEURLS_TO_CAPTIONS), replaces captions with the LAION-COCO ones, saves (40 procs), syncs
+# to
+# s3://m4-datasets/LAION_data/laion_coco_dataset/ID_SHARD/ and deletes the temp dir. Logs each step; PIL size
+# and truncation checks disabled.
+# KNOWN ISSUE: the temp dir /scratch/storage_hugo/ is not shard-specific, so concurrent jobs on one node would
+# clobber each other (the final rm -rf deletes all of them).
 import json
 import logging
 import os
@@ -38,33 +48,44 @@ PATH_SAVE_S3_LAION_COCO_SHARD = f"s3://m4-datasets/LAION_data/laion_coco_dataset
 
 
 class LAIONCOCOFiltering:
+    # [CLASS DOC] Picklable Dataset.filter predicate keeping only LAION rows whose image URL is in LAION-COCO.
     def __init__(self, path_laion_coco_imageurls_to_captions):
+        # [FUNCTION DOC] Stores the path and unpickles the mapping image URL -> LAION-COCO caption from it.
         self.path_laion_coco_imageurls_to_captions = path_laion_coco_imageurls_to_captions
         with open(path_laion_coco_imageurls_to_captions, "rb") as f:
             self.laion_coco_imageurls_to_captions = pickle.load(f)
 
     def __call__(self, example):
+        # [FUNCTION DOC] Parses example["meta"] (JSON string) and returns True iff its "url" is a key of the
+        # mapping.
         image_url = json.loads(example["meta"])["url"]
         if image_url not in self.laion_coco_imageurls_to_captions:
             return False
         return True
 
     def __reduce__(self):
+        # [FUNCTION DOC] Pickles as (class, (path,)) so workers reload the mapping from disk.
         return self.__class__, (self.path_laion_coco_imageurls_to_captions,)
 
 
 class LAIONCOCOReplacement:
+    # [CLASS DOC] Picklable Dataset.map function replacing LAION alt-texts with LAION-COCO synthetic captions
+    # (uses __slots__).
     __slots__ = (
         "path_laion_coco_imageurls_to_captions",
         "laion_coco_imageurls_to_captions",
     )
 
     def __init__(self, path_laion_coco_imageurls_to_captions):
+        # [FUNCTION DOC] Stores the path and unpickles the mapping image URL -> LAION-COCO caption from it.
         self.path_laion_coco_imageurls_to_captions = path_laion_coco_imageurls_to_captions
         with open(path_laion_coco_imageurls_to_captions, "rb") as f:
             self.laion_coco_imageurls_to_captions = pickle.load(f)
 
     def __call__(self, example):
+        # [FUNCTION DOC] Sets example["source"] = "laion_coco" and example["text"] = caption for the URL in
+        # example["meta"]; returns the
+        # example. Raises KeyError for URLs not in the mapping (rows are expected to be pre-filtered).
         example["source"] = "laion_coco"
         image_url = json.loads(example["meta"])["url"]
         laion_coco_caption = self.laion_coco_imageurls_to_captions[image_url]
@@ -72,6 +93,7 @@ class LAIONCOCOReplacement:
         return example
 
     def __reduce__(self):
+        # [FUNCTION DOC] Pickles as (class, (path,)) so workers reload the mapping from disk.
         return self.__class__, (self.path_laion_coco_imageurls_to_captions,)
 
 

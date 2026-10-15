@@ -1,3 +1,8 @@
+# [MODULE DOC] LAION-COCO step 2.1: finds image URLs that opted out of AI training via the Spawning API.
+# Requires env var SPAWNING_TOKEN (KeyError otherwise). As __main__: syncs the URL dataset (column "url") from
+# S3 to /scratch, filters it in batches of BATCH_SIZE (100k) keeping only rows whose URL is opted OUT, saves
+# the
+# resulting dataset locally and syncs it to PATH_SAVE_S3_DS_OPT_OUT_IMAGE_URLS_LAION_COCO. Network-heavy.
 import asyncio
 import os
 import time
@@ -29,6 +34,19 @@ TIMEOUT = 60
 
 
 async def check_spawning(image_urls: List[str], session: aiohttp.ClientSession, semaphore, limiter) -> dict:
+    # [FUNCTION DOC] HELPER: async POST of newline-joined image_urls to the Spawning v2 query endpoint,
+    # guarded by an asyncio
+    # semaphore and an AsyncLimiter. Returns {"urls": []} for an empty list; pads a single URL with "" (API
+    # needs >1).
+    # Retries on any exception following RETRY_TIMES (sleep 1s x5, 10s x5, 10min x10, 1h x10), each request
+    # with
+    # TIMEOUT=60s, and requires a "urls" key in the JSON reply. After all retries, writes the URLs to
+    # erroring_urls.txt (cwd) and raises RuntimeError with the last response body. Returns the parsed JSON
+    # mapping.
+    # KNOWN ISSUE: uses blocking time.sleep inside a coroutine, stalling all other concurrent requests during
+    # backoff.
+    # KNOWN ISSUE: the "" padding yields 2 results for a 1-URL batch, making the filter's boolean list length
+    # wrong.
     url = "https://opts-api.spawningaiapi.com/api/v2/query/urls"
     if not image_urls:
         return {"urls": []}
@@ -57,6 +75,9 @@ async def check_spawning(image_urls: List[str], session: aiohttp.ClientSession, 
 
 
 async def opt_in_out_task(image_urls: List[str], session, semaphore, limiter) -> tuple:
+    # [FUNCTION DOC] HELPER: awaits check_spawning for one batch and returns the list of "optOut" booleans,
+    # one per queried URL
+    # (annotated as tuple but returns a list).
     spawning_response = await check_spawning(image_urls, session, semaphore, limiter)
     urls_responses = spawning_response["urls"]
     urls_opt_out = [urls_response["optOut"] for urls_response in urls_responses]
@@ -64,6 +85,11 @@ async def opt_in_out_task(image_urls: List[str], session, semaphore, limiter) ->
 
 
 async def parallel_opt_in_out_task(urls: list) -> tuple:
+    # [FUNCTION DOC] HELPER: splits urls into chunks of API_BATCH_SIZE (1000), runs opt_in_out_task
+    # concurrently on one shared
+    # aiohttp session (auth headers), semaphore of 10 and 20 requests/second limiter, waits for all and
+    # returns the
+    # flattened list of opt-out booleans in input order. Re-raises a task's exception when collecting results.
     tasks = []
     semaphore = asyncio.Semaphore(value=10)
     limiter = AsyncLimiter(20, time_period=1)
@@ -81,6 +107,10 @@ async def parallel_opt_in_out_task(urls: list) -> tuple:
 
 
 def opt_in_out(batch: dict) -> None:
+    # [FUNCTION DOC] Batched Dataset.filter predicate: given the list of URLs of a batch, runs
+    # parallel_opt_in_out_task in a fresh
+    # event loop and returns the list of opt-out booleans (True = keep row = opted out). Annotated -> None,
+    # wrongly.
     opt_out_bool = asyncio.run(parallel_opt_in_out_task(batch))
     return opt_out_bool
 

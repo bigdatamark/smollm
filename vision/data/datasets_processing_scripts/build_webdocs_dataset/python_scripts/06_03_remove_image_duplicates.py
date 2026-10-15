@@ -1,3 +1,9 @@
+# [MODULE DOC] Web-docs step 6.3: removes images whose URL is "too duplicated" across the corpus from one
+# filtered
+# web-document shard. As __main__: recreates /scratch/storage_hugo_<idx_job>/, syncs the shard and copies the
+# pickled URLs-to-remove file (from 6.2) from S3 (3 attempts each), maps ImageURLDeduplication (num_proc),
+# saves and syncs to <path_save_web_document_dataset_filtered_imgurldedup>/<idx_job>, deletes the temp dir.
+# PIL size/truncation checks disabled.
 import argparse
 import json
 import logging
@@ -22,6 +28,9 @@ logger.setLevel(logging.INFO)
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses idx_job (int, positional), --path_web_document_dataset_filtered,
+    # --path_tot_image_urls_in_web_document_dataset_filtered_too_duplicated (S3 pickle),
+    # --path_save_web_document_dataset_filtered_imgurldedup (S3 dir) and --num_proc (default 48).
     parser = argparse.ArgumentParser(description="Remove the images that are too duplicated.")
     parser.add_argument(
         "idx_job",
@@ -57,12 +66,21 @@ def get_args():
 
 
 class ImageURLDeduplication:
+    # [CLASS DOC] Picklable Dataset.map function removing image nodes with banned URLs from a web document.
     def __init__(self, path_image_urls_to_remove):
+        # [FUNCTION DOC] Stores the path and loads the pickled collection of URLs to remove into a set (a
+        # Counter's keys if a Counter).
         self.path_image_urls_to_remove = path_image_urls_to_remove
         with open(path_image_urls_to_remove, "rb") as f:
             self.image_urls_to_remove = set(pickle.load(f))
 
     def __call__(self, web_document):
+        # [FUNCTION DOC] Parses web_document["metadata"] (JSON list); finds node indices whose metadata is not
+        # null and whose "src" is
+        # in the remove set; if any, drops those positions from the aligned "texts", "images" and metadata
+        # lists
+        # (metadata re-serialized to JSON). Returns the (possibly modified) document; documents are never
+        # dropped.
         metadata = json.loads(web_document["metadata"])
 
         indices_to_remove = set(
@@ -87,6 +105,7 @@ class ImageURLDeduplication:
         return web_document
 
     def __reduce__(self):
+        # [FUNCTION DOC] Pickles as (class, (path,)) so workers reload the set from disk.
         return self.__class__, (self.path_image_urls_to_remove,)
 
 

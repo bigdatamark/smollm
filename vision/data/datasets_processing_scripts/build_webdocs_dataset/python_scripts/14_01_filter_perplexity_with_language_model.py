@@ -1,3 +1,17 @@
+# [MODULE DOC] Web-docs step 14.1 (experimental): perplexity filtering of one final-processed shard with a
+# small causal LM
+# (tiiuae/falcon-rw-1b, bfloat16, CUDA if available). As __main__ (argv[1] = IDX_JOB, multiprocess start
+# method
+# "spawn"): only if the output S3 prefix ..._finalprocessing_pplfilter/IDX_JOB/ does not exist ("aws s3 ls"
+# exit
+# status 1, i.e. os.system value 256), s5cmd-syncs the shard to /scratch/storage_leo/loaded_dataset/IDX_JOB/,
+# tokenizes (batches of 20, 10 procs, 512 tokens with random crop), computes per-document perplexity (batches
+# of
+# 20, 1 proc), keeps documents with ppl < 42, removes helper columns, prints the filtered proportion, saves to
+# /scratch/storage_leo/saved_dataset/IDX_JOB/, syncs to S3 and removes both local dirs.
+# KNOWN ISSUE: the debug line selecting only the first 100 documents is active, so the uploaded output
+# contains at
+# most 100 documents per shard.
 import os
 import random
 import sys
@@ -11,6 +25,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 def get_model_tokenizer(model_id, device):
+    # [FUNCTION DOC] HELPER: loads the causal LM (bfloat16) onto device and its tokenizer, sets pad_token =
+    # eos_token, returns both.
     model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.bfloat16).to(device)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.pad_token = tokenizer.eos_token
@@ -18,6 +34,12 @@ def get_model_tokenizer(model_id, device):
 
 
 def mapper_tokenize_dataset(sample, tokenizer, max_tokenized_len):
+    # [FUNCTION DOC] Batched map function: joins each document's non-None texts with "\n\n" (stored in
+    # "concat_texts"), tokenizes
+    # without special tokens, padding to max_tokenized_len, no truncation; sequences longer than
+    # max_tokenized_len are
+    # cropped to a random window of that length (global random, unseeded). Adds "input_ids" and
+    # "attention_mask".
     sample_concat_texts = []
     for texts in sample["texts"]:
         concat_texts = "\n\n".join([text for text in texts if text is not None])
@@ -49,6 +71,12 @@ def mapper_tokenize_dataset(sample, tokenizer, max_tokenized_len):
 
 
 def mapper_ppl_dataset(input_ids, attention_mask, model, device, loss_fct):
+    # [FUNCTION DOC] Batched map function on torch tensors input_ids/attention_mask: runs the model without
+    # gradients, computes
+    # per-token cross-entropy (loss_fct with reduction "none") on shifted logits/labels, masks padding, and
+    # returns
+    # {"input_ids", "attention_mask", "ppl"} where ppl = exp(mean masked token loss) per sequence (float,
+    # CPU).
     input_ids = input_ids.to(device)
     attention_mask = attention_mask.to(device)
     labels = input_ids

@@ -1,3 +1,15 @@
+# [MODULE DOC] Launcher for step 3 across machines: argv[1] = machine index; shard indices 0..199 split into
+# 21 chunks. For
+# each shard of this machine's chunk: appends progress lines to /scratch/log.txt, empties /var/log/syslog with
+# sudo
+# (it fills up during downloads), runs the downloader with "--download_only 1" in its own process group and
+# kills
+# the whole group with SIGTERM after a 2-hour timeout, then runs it again with "--U 1" to build the image
+# dataset
+# from whatever was downloaded.
+# KNOWN ISSUE: the invoked script m4/sourcing/data_collection/callers/dl_images_create_dataset.py does not
+# exist
+# in this repo (the equivalent is 03_dl_images_create_dataset.py).
 import os
 import signal
 import subprocess

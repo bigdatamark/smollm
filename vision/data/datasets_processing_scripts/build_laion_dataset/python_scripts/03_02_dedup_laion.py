@@ -1,3 +1,8 @@
+# [MODULE DOC] LAION step 3.2: removes duplicates from one filtered LAION shard
+# (laion_dataset_filtered/IDX_JOB, argv[1]) using
+# the pickled set of duplicate MD5s (set_dup_md5.pkl from S3, built by 03_01). Recreates the temp dir
+# /scratch/storage_hugo_IDX_JOB/, syncs input (3 attempts), filters with NUM_PROC=10, saves, syncs to
+# laion_dataset_filtered_dedup/IDX_JOB, logs counts before/after and deletes the temp dir.
 import json
 import logging
 import os
@@ -40,18 +45,23 @@ PATH_SAVE_S3_LAION_DATASET_FILTERED_DEDUP = os.path.join(
 
 
 class LAIONDeduplication:
+    # [CLASS DOC] Picklable Dataset.filter predicate holding the set of duplicate MD5s.
     def __init__(self, path_set_dup_md5):
+        # [FUNCTION DOC] Stores path_set_dup_md5 and unpickles the set from it.
         self.path_set_dup_md5 = path_set_dup_md5
         with open(path_set_dup_md5, "rb") as f:
             self.set_dup_md5 = pickle.load(f)
 
     def __call__(self, example):
+        # [FUNCTION DOC] Parses example["meta"] JSON and returns False if its "md5" is in the duplicate set,
+        # True otherwise.
         md5 = json.loads(example["meta"])["md5"]
         if md5 in self.set_dup_md5:
             return False
         return True
 
     def __reduce__(self):
+        # [FUNCTION DOC] Pickles as (class, (path,)) so worker processes reload the set from disk.
         return self.__class__, (self.path_set_dup_md5,)
 
 

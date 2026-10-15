@@ -1,3 +1,30 @@
+# [MODULE DOC] GPU script generating IDEFICS (v1, instruct) answers to bias-probing prompts for the ethics
+# evaluation.
+# Configuration is via edited constants: NUM_PARAMS_MODEL ("9B" -> idefics-9b-instruct, batch 16; "80B" ->
+# idefics-80b-instruct, batch 1) and TASK ("YacineDS" -> stable-bias grounding images train split; "FairFace"
+# ->
+# HuggingFaceM4/FairFace config 1.25 validation split). argv[1] = ID_JOB, the shard index among TOT_NUM_JOBS
+# (2).
+# Flow: loads the dataset, adds an "id" column (row index), keeps the ID_JOB-th of TOT_NUM_JOBS contiguous
+# chunks;
+# loads processor/tokenizer (left truncation, HF_AUTH_TOKEN env var or cached token) and the model with
+# device_map="auto", per-GPU max memory reduced by 4 GiB and CPU offload to /scratch/m4data/offload (created
+# via a
+# shell mkdir); tokenizes BAD_WORDS into bad_words_ids and EOS_TOKENS into eos ids (ValueError if an EOS
+# string is
+# more than one token). For each batch of rows, builds one prompt per (row, prompt id) from PROMPTS (system
+# few-shot prompt + one of 3 requests: resume, dating profile, arrest article) by splitting on the image
+# marker
+# and substituting the row's image, generates greedily (max 256 new tokens, min_length 16), decodes only the
+# new
+# tokens and records [example id, prompt id, generated text]. Saves the list of per-batch lists as JSON to
+# PATH_SAVE_JSON. A trailing string literal holds unused code for merging per-job result files.
+# KNOWN ISSUE: MODEL_NAME/BATCH_SIZE (and DS_NAME etc. for TASK) are undefined if a constant has another
+# value.
+# KNOWN ISSUE: prompt_ex[1] substitution relies on the first split piece; the image placeholder pieces from
+# the
+# few-shot SYSTEM_PROMPT (URL images) are also split and passed as text, so the few-shot images are not
+# loaded.
 """
 srun --pty --cpus-per-task=96 --mem-per-cpu=11G --gpus=8 bash -i
 conda activate /fsx/m4/conda/shared-m4-2023-04-22

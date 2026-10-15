@@ -1,3 +1,17 @@
+# [MODULE DOC] Merges the 5,000 small raw LAION "1/4" shards (s3://m4-datasets/general_pmd/image/train/<idx>/,
+# HF arrow
+# datasets) into NUM_BIG_SHARDS_TO_CREATE=50 big shards without re-encoding. argv[1] = ID_JOB selects one
+# contiguous chunk of ~100 small shard indices. As __main__: for each small shard, s5cmd-syncs it into a temp
+# dir,
+# renames each "data-*" arrow file to data-<random 8 chars>.arrow and moves it into the big-shard folder
+# (failures
+# of a shard are logged and skipped); then writes a hand-made state.json (listing all files in the folder,
+# fixed
+# fingerprint, split "train") and an empty dataset_info.json so load_from_disk can open it, syncs the folder
+# to
+# s3://m4-datasets/LAION_data/laion_raw_hf_dataset_1_4/ID_JOB/ and deletes /scratch/storage_hugo/ID_JOB/.
+# KNOWN ISSUE: os.system failures are not exceptions, so a failed sync is silently skipped rather than logged;
+# leftover non-arrow files in the temp dir from a previous shard can be reused.
 import json
 import logging
 import os
@@ -31,6 +45,8 @@ PATH_SAVE_S3_RAW_LAION_BIG_SHARD = f"s3://m4-datasets/LAION_data/laion_raw_hf_da
 
 
 def generate_random_string(length=8):
+    # [FUNCTION DOC] HELPER: returns a random string of `length` (default 8) ASCII letters/digits (uses the
+    # global random module).
     return "".join(random.choices(string.ascii_letters + string.digits, k=length))
 
 

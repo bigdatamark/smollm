@@ -1,3 +1,13 @@
+# [MODULE DOC] Step 2 of the image-to-website-code pipeline: turns ideas into HTML+CSS with deepseek-
+# coder-33b-instruct
+# (bfloat16, flash-attention 2, single GPU). argv[1] = NAME_FILE; reads ideas (one per line) from
+# /fsx/hugo/ideas_mistral/ideas/NAME_FILE.txt. For batches of 10 ideas, formats PROMPT, applies the chat
+# template,
+# left-pads to the longest prompt with PAD_TOKEN_ID (32014), samples up to 2048 new tokens (eos id 32021 =
+# <|EOT|>), decodes only new tokens without special tokens and strips "<|EOT|>". Saves all generations as a
+# JSON
+# list to /fsx/hugo/deepseek_html_css/gen/NAME_FILE.json and prints a success message.
+# KNOWN ISSUE: no attention mask is passed to generate, so left padding tokens are attended to.
 import json
 import sys
 

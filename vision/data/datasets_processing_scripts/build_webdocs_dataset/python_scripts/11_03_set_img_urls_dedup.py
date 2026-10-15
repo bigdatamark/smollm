@@ -1,3 +1,9 @@
+# [MODULE DOC] Web-docs step 11.3: applies the image-set deduplication (mapping from 11.2) to one shard
+# (argv[1] = IDX_JOB) of
+# ..._finalcleaning with NUM_PROC=10, saves/syncs to ..._finalcleaning_setimgurlsdedup/IDX_JOB, then pickles a
+# Counter of image URLs of the remaining documents and copies it to img_urls_in_final_web_docs_2/IDX_JOB/;
+# logs
+# counts before/after and deletes the temp dir /scratch/storage_hugo_IDX_JOB/.
 import json
 import logging
 import os
@@ -46,12 +52,17 @@ PATH_SAVE_S3_IMG_URLS_IN_FINAL_WEB_DOCS = (
 
 
 class SetImgURLsDeduplication:
+    # [CLASS DOC] Picklable Dataset.filter predicate removing documents listed in the url -> warc_filename ban
+    # mapping.
     def __init__(self, path_ban_url_warc_filename):
+        # [FUNCTION DOC] Stores the path and loads the JSON mapping page url -> warc_filename to remove.
         self.path_ban_url_warc_filename = path_ban_url_warc_filename
         with open(path_ban_url_warc_filename) as f:
             self.ban_url_warc_filename = json.load(f)
 
     def __call__(self, example):
+        # [FUNCTION DOC] Parses example["general_metadata"]; returns False iff its url is banned with exactly
+        # this warc_filename.
         general_metadata = json.loads(example["general_metadata"])
         url, warc_filename = general_metadata["url"], general_metadata["warc_filename"]
         if url in self.ban_url_warc_filename:
@@ -60,6 +71,7 @@ class SetImgURLsDeduplication:
         return True
 
     def __reduce__(self):
+        # [FUNCTION DOC] Pickles as (class, (path,)) so workers reload the mapping from disk.
         return self.__class__, (self.path_ban_url_warc_filename,)
 
 

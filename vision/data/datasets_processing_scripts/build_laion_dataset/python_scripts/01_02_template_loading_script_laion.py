@@ -1,3 +1,7 @@
+# [MODULE DOC] Template HF datasets loading script for LAION-2B-en webdataset tars. Not runnable alone: it
+# expects a
+# module-level DL_DATASET_PATH (folder of .tar files) to be prepended by 01_01_download_prepare_laion.py.
+# Produces a single TRAIN split with features image (bytes), text, source ("laion_2b_en"), meta (JSON string).
 # Copyright 2020 The HuggingFace Datasets Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -48,9 +52,12 @@ _LICENSE = "CC BY-NC-SA (Attribution-NonCommercial-ShareAlike)"
 
 
 class LAION2BENDataset(datasets.GeneratorBasedBuilder):
+    # [CLASS DOC] GeneratorBasedBuilder (version 1.0.0) reading every *.tar in DL_DATASET_PATH.
     VERSION = datasets.Version("1.0.0")
 
     def _info(self):
+        # [FUNCTION DOC] Returns DatasetInfo with the features above plus description, homepage, license and
+        # citation constants.
         features = datasets.Features(
             {
                 "image": datasets.Image(),
@@ -68,6 +75,8 @@ class LAION2BENDataset(datasets.GeneratorBasedBuilder):
         )
 
     def _split_generators(self, _):
+        # [FUNCTION DOC] Returns a single TRAIN SplitGenerator with no kwargs (the download manager argument
+        # is ignored).
         return [
             datasets.SplitGenerator(
                 name=datasets.Split.TRAIN,
@@ -76,6 +85,15 @@ class LAION2BENDataset(datasets.GeneratorBasedBuilder):
         ]
 
     def _generate_examples(self):
+        # [FUNCTION DOC] For each tar: reads all members, collecting by base name the .jpg bytes, the .txt
+        # caption (UTF-8), and the
+        # .json metadata re-serialized as a string only if its "status" is "success". Yields (running integer
+        # key,
+        # example) for every image that has both a caption and successful metadata. Any exception on a tar
+        # prints
+        # "Corrupted tar, skip <path>" and moves on (examples already yielded from that tar are kept).
+        # KNOWN ISSUE: base names use str.replace of the extension, which would also alter names containing it
+        # mid-string.
         idx = -1
         tar_paths = glob.glob(os.path.join(DL_DATASET_PATH, "*.tar"))  # noqa: F821
         for tar_path in tar_paths:

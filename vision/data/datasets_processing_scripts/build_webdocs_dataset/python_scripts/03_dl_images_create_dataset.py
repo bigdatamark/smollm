@@ -1,3 +1,17 @@
+# [MODULE DOC] Web-docs step 3: downloads the images listed in a shard's image_urls.txt and builds an HF image
+# dataset plus a
+# URL -> index map, via m4's WebDocumentExtractor (download_images uses img2dataset-style sharded
+# downloading).
+# Temp root /scratch/storage_hugo/ (shared). As __main__: if --U is 0, wipes the temp root and copies
+# <path_image_urls>/<idx_job>/image_urls.txt from S3 (2 attempts) then downloads the images; if
+# --download_only
+# is 0, creates the image dataset and map, logs the download success rate (dataset rows / number of URL
+# lines),
+# copies the map JSON to <path_save_file_map_url_idx>/<idx_job>/map_url_idx.json and syncs the image dataset
+# to
+# <path_save_dir_dataset_images>/<idx_job> (3 attempts each), then deletes the temp root. Designed to be run
+# in
+# two passes (download only, then --U 1) by 03_parallel_dl_images_create_dataset.py.
 import argparse
 import logging
 import os
@@ -16,6 +30,15 @@ logger.setLevel(logging.INFO)
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses idx_job (int, positional) and options: --U (1 = download already done,
+    # skip wipe/copy/download),
+    # --download_only (1 = stop after downloading), --path_image_urls (S3 dir),
+    # --path_save_dir_downloaded_images,
+    # --thread_count (128), --number_sample_per_shard (10,000), --image_size (256), --resize_mode ("no",
+    # "border" or
+    # "keep_ratio"), --num_proc (cpu_count), --path_save_dir_tmp_datasets_images,
+    # --path_save_dir_dataset_images
+    # (S3 dir), --path_save_file_map_url_idx (S3 dir). Returns Namespace.
     parser = argparse.ArgumentParser(description="Download images and create a dataset containing them.")
     parser.add_argument(
         "idx_job",

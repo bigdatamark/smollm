@@ -1,3 +1,7 @@
+# [MODULE DOC] Web-docs step 9.1: makes a lightweight texts-only copy of one shard (argv[1] = IDX_JOB) of
+# ..._urldedup, keeping only the "texts" and "general_metadata" columns, for the line-deduplication steps.
+# Recreates /scratch/storage_hugo_IDX_JOB/, syncs input (3 attempts), saves (cpu_count procs), syncs to
+# ..._urldedup_texts_only/IDX_JOB (3 attempts) and deletes the temp dir.
 import logging
 import os
 import sys

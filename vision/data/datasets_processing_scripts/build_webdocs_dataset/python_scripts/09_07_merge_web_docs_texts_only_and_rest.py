@@ -1,3 +1,10 @@
+# [MODULE DOC] Web-docs step 9.7: puts the line-deduplicated texts back into the full documents of one shard
+# (argv[1] =
+# IDX_JOB). Recreates /scratch/storage_hugo_IDX_JOB/, syncs the deduplicated texts-only shard and the full
+# ..._urldedup shard (3 attempts each), replaces the full dataset's "texts" column with the deduplicated one
+# (relies on identical row order and count), saves (cpu_count procs) and syncs to
+# ..._urldedup_linededup/IDX_JOB,
+# then deletes the temp dir.
 import logging
 import os
 import sys

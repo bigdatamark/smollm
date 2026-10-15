@@ -1,3 +1,9 @@
+# [MODULE DOC] Web-docs step 9.2: builds a global index domain -> {shard index (string) -> list of row
+# positions} over the 200
+# texts-only shards (domain = netloc of the page URL in "general_metadata"). As __main__: recreates
+# /scratch/storage_hugo/, syncs all shards from S3 (3 attempts), computes the index, writes it as JSON and
+# copies
+# it to s3://m4-datasets/webdocs/line_dedup_domain_to_positions.json, then deletes the temp dir.
 import json
 import logging
 import os
@@ -32,6 +38,9 @@ PATH_SAVE_S3_LINE_DEDUP_DOMAIN_TO_POSITIONS = "s3://m4-datasets/webdocs/line_ded
 
 
 def get_domain_to_positions():
+    # [FUNCTION DOC] Loads each shard 0..NUM_SHARDS-1 from PATH_WEB_DOCS_LOCAL, parses the URL domain of each
+    # row, and returns the
+    # nested mapping domain -> {str(shard) -> ascending row indices}.
     domain_to_positions = {}
 
     for idx_shard in tqdm(range(NUM_SHARDS)):

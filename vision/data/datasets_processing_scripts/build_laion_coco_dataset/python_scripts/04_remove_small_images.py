@@ -1,3 +1,12 @@
+# [MODULE DOC] LAION-COCO step 4: removes images whose width or height is below THRESHOLD_MIN_SIDE (150 px)
+# from one shard
+# (input ..._nsfwfiltered/IDX_JOB, output ..._nsfwfiltered_smallimgrmv/IDX_JOB), using NUM_PROC=10.
+# Common pattern: IDX_JOB = argv[1] (string shard id); temp dir /scratch/storage_hugo_IDX_JOB/ is wiped and
+# recreated via shell, input is synced from S3 (aws/s5cmd, retried MAX_NUM_RETRIES_SYNC times, failures
+# ignored),
+# the filtered dataset is saved locally then synced back to S3, row counts before/after are logged, and the
+# temp dir
+# is deleted. PIL limits are disabled (MAX_IMAGE_PIXELS=None, LOAD_TRUNCATED_IMAGES) at import.
 import logging
 import os
 import sys
@@ -40,6 +49,8 @@ PATH_SAVE_S3_DS_LAION_COCO_SMALL_IMAGES_FILTERED = (
 
 
 def filter_small_images(example):
+    # [FUNCTION DOC] Dataset.filter predicate: returns False if example["image"] (PIL image) has a side <
+    # THRESHOLD_MIN_SIDE.
     img_width, img_height = example["image"].size
     if (img_width < THRESHOLD_MIN_SIDE) or (img_height < THRESHOLD_MIN_SIDE):
         return False

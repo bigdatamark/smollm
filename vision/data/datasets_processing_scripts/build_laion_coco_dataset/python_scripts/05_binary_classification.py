@@ -1,3 +1,16 @@
+# [MODULE DOC] LAION-COCO step 5: removes "bad" image-caption pairs with a trained SigLIP-based binary
+# classifier (see
+# train_bin_classif.py) on one shard (input ..._smallimgrmv/IDX_JOB, output
+# ..._smallimgrmv_binclassifrmv/IDX_JOB).
+# Common pattern: IDX_JOB = argv[1] (string shard id); temp dir /scratch/storage_hugo_IDX_JOB/ is wiped and
+# recreated via shell, input is synced from S3 (aws/s5cmd, retried MAX_NUM_RETRIES_SYNC times, failures
+# ignored),
+# the filtered dataset is saved locally then synced back to S3, row counts before/after are logged, and the
+# temp dir
+# is deleted. PIL limits are disabled (MAX_IMAGE_PIXELS=None, LOAD_TRUNCATED_IMAGES) at import.
+# Classifier weights: PATH_BINARY_CLASSIFIER; runs on CUDA in bfloat16, batches of 512, NUM_PROC=1 (GPU),
+# saving with NUM_PROC_SAVING=12.
+# KNOWN ISSUE: THRESHOLD_BINARY_CLASSIFICATION is defined but unused; 0.5 is hard-coded in the filter.
 import logging
 import os
 import sys
@@ -12,7 +25,13 @@ from m4.training.utils import _convert_to_rgb
 
 
 class MyCustomBinaryClassification(nn.Module):
+    # [CLASS DOC] Binary classifier on top of SigLIP (google/siglip-so400m-patch14-384, downloaded from the
+    # Hub): concatenates
+    # image and text embeddings and applies an MLP (Linear 2h->h, ReLU, Dropout 0.1, Linear h->1, Sigmoid).
+    # Same architecture as in train_bin_classif.py, so saved state dicts are compatible.
     def __init__(self, freeze_siglip=True):
+        # [FUNCTION DOC] Loads SigLIP; if freeze_siglip (default True) disables its gradients. Input size = 2
+        # x text hidden size.
         super().__init__()
         self.siglip = AutoModel.from_pretrained("google/siglip-so400m-patch14-384")
         if freeze_siglip:
@@ -26,6 +45,10 @@ class MyCustomBinaryClassification(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, input_ids, attention_mask, pixel_values):
+        # [FUNCTION DOC] Inputs: input_ids, attention_mask (text tokens) and pixel_values. Runs SigLIP (under
+        # no_grad and eval mode if
+        # frozen), concatenates image_embeds and text_embeds, and returns per-example probabilities of shape
+        # (batch,).
         if self.freeze_siglip:
             with torch.no_grad():
                 self.siglip.eval()
@@ -80,6 +103,8 @@ PATH_SAVE_S3_DS_LAION_COCO_BINARY_CLASSIFICATION_FILTERED = f"s3://m4-datasets-u
 
 
 class BinaryClassifierFiltering:
+    # [CLASS DOC] Picklable batched Dataset.filter predicate wrapping the classifier and the SigLIP processor
+    # (uses __slots__).
     __slots__ = (
         "path_binary_classifier",
         "binary_classifier",
@@ -92,6 +117,10 @@ class BinaryClassifierFiltering:
         path_binary_classifier,
         path_processor_binary_classifier,
     ):
+        # [FUNCTION DOC] Builds MyCustomBinaryClassification, loads the state dict from
+        # path_binary_classifier, moves it to
+        # DEVICE_BINARY_CLASSIFIER, eval mode, casts to bfloat16, and loads the processor from
+        # path_processor_binary_classifier.
         self.path_binary_classifier = path_binary_classifier
         self.binary_classifier = MyCustomBinaryClassification()
         self.binary_classifier.load_state_dict(torch.load(path_binary_classifier))
@@ -102,6 +131,11 @@ class BinaryClassifierFiltering:
         self.processor_binary_classifier = AutoProcessor.from_pretrained(path_processor_binary_classifier)
 
     def __call__(self, batch):
+        # [FUNCTION DOC] Input batch mapping with "text" (captions) and "image" (PIL images). Preprocesses,
+        # moves to the device (pixel
+        # values in bfloat16), runs the classifier without gradients and returns a list of booleans: keep
+        # where the
+        # predicted probability of "bad" is < 0.5.
         texts = batch["text"]
         images = batch["image"]
         inputs = self.process_inputs_binary_classification(texts=texts, images=images)
@@ -113,6 +147,10 @@ class BinaryClassifierFiltering:
         return bool_keep_examples
 
     def process_inputs_binary_classification(self, texts, images):
+        # [FUNCTION DOC] HELPER: tokenizes texts (padding, truncation, attention mask, PyTorch tensors) and
+        # adds pixel_values from the
+        # processor applied to RGB-converted images (m4.training.utils._convert_to_rgb). Returns the
+        # BatchEncoding.
         inputs = self.processor_binary_classifier.tokenizer(
             texts,
             return_tensors="pt",
@@ -124,6 +162,8 @@ class BinaryClassifierFiltering:
         return inputs
 
     def __reduce__(self):
+        # [FUNCTION DOC] Pickles as (class, (classifier path, processor path)) so workers rebuild the model
+        # instead of pickling it.
         return (
             self.__class__,
             (

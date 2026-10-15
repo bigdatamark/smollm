@@ -1,3 +1,9 @@
+# [MODULE DOC] Web-docs step 12.2: removes opted-out images (list from 12.1 converted to JSON) from one shard
+# (argv[1] =
+# IDX_JOB) of ..._setimgurlsdedup. Recreates /scratch/storage_hugo_IDX_JOB/, copies the list and syncs the
+# shard,
+# maps OptOutFiltering (cpu_count procs), saves and syncs to ..._setimgurlsdedup_optoutrmv/IDX_JOB, deletes
+# temp.
 import json
 import logging
 import os
@@ -42,12 +48,20 @@ PATH_SAVE_S3_WEB_DOCS_OPT_OUT_FILTERED = f"s3://m4-datasets/webdocs/web_document
 
 
 class OptOutFiltering:
+    # [CLASS DOC] Picklable Dataset.map function deleting opted-out image nodes from a document (documents are
+    # kept).
     def __init__(self, path_opt_out_image_urls):
+        # [FUNCTION DOC] Stores the path and loads the JSON list of opted-out URLs into a set.
         self.path_opt_out_image_urls = path_opt_out_image_urls
         with open(path_opt_out_image_urls) as f:
             self.opt_out_image_urls = set(json.load(f))
 
     def __call__(self, example):
+        # [FUNCTION DOC] Finds node indices whose metadata is non-null with "src" in the opt-out set and, if
+        # any, removes those positions
+        # from the aligned "texts", "images" and metadata (re-serialized JSON). Returns the example.
+        # KNOWN ISSUE: may leave documents without images or with adjacent text nodes; no re-merge or doc
+        # filter here.
         metadata = json.loads(example["metadata"])
         indices_to_remove = [
             ind for ind, meta in enumerate(metadata) if (meta is not None) and (meta["src"] in self.opt_out_image_urls)
@@ -59,6 +73,7 @@ class OptOutFiltering:
         return example
 
     def __reduce__(self):
+        # [FUNCTION DOC] Pickles as (class, (path,)) so workers reload the set from disk.
         return self.__class__, (self.path_opt_out_image_urls,)
 
 

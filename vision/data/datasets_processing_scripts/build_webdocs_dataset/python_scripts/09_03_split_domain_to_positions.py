@@ -1,3 +1,13 @@
+# [MODULE DOC] Web-docs step 9.3: splits the domain -> positions index (from 9.2) into NUM_SHARDS=200 parts by
+# domain so
+# line-dedup jobs can each process a set of domains. Copies the index from S3, shuffles the domain list with
+# seed
+# 42, cuts it into chunks of len//200 + 1 domains, writes each part to
+# /scratch/line_dedup_domain_to_positions_<i>.json
+# and uploads it to line_dedup_domain_to_positions_sharded/<i>/line_dedup_domain_to_positions.json.
+# KNOWN ISSUE: with chunk size len//200 + 1 there can be fewer than 200 chunks (e.g. small domain counts),
+# making
+# keys_per_shard[idx_shard] raise IndexError for the last indices.
 import json
 import os
 import random

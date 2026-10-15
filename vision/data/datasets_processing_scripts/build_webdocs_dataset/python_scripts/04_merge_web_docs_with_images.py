@@ -1,3 +1,12 @@
+# [MODULE DOC] Web-docs step 4: merges a shard of web documents (whose "images" column holds image URLs or
+# None, aligned with
+# "texts") with the downloaded images. As __main__: recreates /scratch/storage_hugo_<idx_job>/, syncs from S3
+# (3 attempts each) the documents without images and two image datasets (image_dataset and image_dataset_2,
+# each
+# with "url" and raw "image" bytes columns) for idx_job, concatenates the image datasets, builds a URL -> row
+# index mapping (later duplicates win), replaces URLs by images with urls_to_images (URLs containing a word of
+# URL_BAN_WORDS such as logo/icon/porn are dropped), saves (num_proc) and syncs to
+# path_save_dir_web_document_dataset/idx_job, then deletes the temp dir. PIL size/truncation checks disabled.
 import argparse
 import logging
 import os
@@ -25,6 +34,9 @@ logger.setLevel(logging.INFO)
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses idx_job (int, positional), --path_web_document_dataset_without_images,
+    # --path_image_dataset_1,
+    # --path_image_dataset_2, --path_save_dir_web_document_dataset (S3 dirs) and --num_proc (cpu_count).
     parser = argparse.ArgumentParser(
         description="Merge the web document dataset without images with the dataset of images."
     )
@@ -68,7 +80,15 @@ def get_args():
 
 
 def urls_to_images(web_document_dataset_without_images, image_dataset, map_url_idx, url_ban_words, num_proc):
+    # [FUNCTION DOC] Maps over web_document_dataset_without_images (num_proc processes, no cache reuse)
+    # casting "images" to a
+    # sequence of datasets.Image: each non-empty URL becomes {"path": None, "bytes": image bytes} looked up in
+    # image_dataset through map_url_idx, or None if the URL is unknown or contains any of url_ban_words;
+    # empty/None
+    # entries stay None. Logs start/end and returns the new dataset.
     def retrieve_image(url):
+        # [FUNCTION DOC] HELPER: returns the image dict for one URL, or None if missing from map_url_idx or
+        # banned (substring match).
         if url not in map_url_idx:
             return None
         if any([url_ban_word in url for url_ban_word in url_ban_words]):
@@ -83,6 +103,8 @@ def urls_to_images(web_document_dataset_without_images, image_dataset, map_url_i
         return image
 
     def func_urls_to_images_urls_in_images_col(example):
+        # [FUNCTION DOC] HELPER: map function replacing example["images"] URLs with retrieve_image results
+        # (falsy URLs -> None).
         # Uncomment if one process seems silently killed without throwing any error in the `map` function.
         # It's rare, but approximately 1/100M pages contain many huge pictures that break things.
         # num_images = len([1 for url in example["images"] if url in map_url_idx])

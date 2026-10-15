@@ -1,3 +1,11 @@
+# [MODULE DOC] LAION step 3.1 (illustrative record of steps run in separate jobs, executes top-level code):
+# builds the set of
+# MD5s of duplicate LAION images. Downloads laion/laion2b-en-vit-h-14-embeddings (very large), keeps only the
+# "md5" column, loads the SNIP-dedup boolean array is_dup_mlp_1024_128_gelu_snn_2layer_notext.npy, and marks
+# as
+# duplicates all flagged indices plus every index beyond the array length. Pickles the set of their md5 values
+# to
+# /fsx/hugo/prepare_dedup_laion/set_dup_md5.pkl.
 # The followings steps were done in different jobs, this is to give an idea of what was done
 
 

@@ -1,3 +1,13 @@
+# [MODULE DOC] Web-docs step 6.2: merges the 200 per-shard image URL Counters (from 6.1, synced from S3 to
+# /scratch/image_urls_in_webdocs) into a global Counter, pickles it to
+# /scratch/tot_image_urls_in_web_document_dataset_filtered.pickle and uploads it to S3, then computes the list
+# of
+# URLs appearing more than THRESHOLD_TOO_DUPLICATED (10) times and uploads a "..._too_duplicated.pickle" file
+# intended to contain that list.
+# KNOWN ISSUE: the "too_duplicated" pickle is written with tot_counter (all URLs) instead of the computed
+# too-duplicated list, so consumers (06_03, 07_01) that load it as the set of URLs to remove would remove
+# every
+# image URL unless the file was fixed by hand.
 # srun --pty --ntasks=1 --cpus-per-task=96 bash -i
 # conda activate /fsx/m4/conda/shared-m4-2023-03-10
 

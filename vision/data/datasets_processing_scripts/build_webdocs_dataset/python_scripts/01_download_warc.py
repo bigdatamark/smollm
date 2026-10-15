@@ -1,3 +1,14 @@
+# [MODULE DOC] Web-docs step 1: downloads Common Crawl WARC records for one shard of CC pointers. CLI: see
+# get_args.
+# As __main__: recreates /scratch/storage_hugo/, syncs the pointer dataset (path_metadata_dataset/idx_job)
+# from
+# S3 (3 attempts), adds empty "warc" (bytes) and "warc_error" (string) columns unless at least one already
+# exists
+# (so a previous partial run can be resumed), maps m4's WarcDownloader over rows (num_proc processes, network
+# I/O) with the extended features, saves the result and syncs it to path_save_dir_warc_dataset/idx_job, logs
+# the
+# success rate (rows with empty warc_error) and deletes the temp dir.
+# KNOWN ISSUE: temp dir /scratch/storage_hugo/ is not job-specific; division by zero if the shard is empty.
 import argparse
 import logging
 import os
@@ -18,6 +29,10 @@ logger.setLevel(logging.INFO)
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses CLI args: idx_job (int, positional, 0..199), --path_metadata_dataset (S3
+    # dir of CC pointer
+    # shards), --path_save_dir_warc_dataset (S3 output dir), --num_proc (default 4 x cpu_count). Returns
+    # Namespace.
     parser = argparse.ArgumentParser(description="Download warc files from Common Crawl pointers.")
     parser.add_argument(
         "idx_job",

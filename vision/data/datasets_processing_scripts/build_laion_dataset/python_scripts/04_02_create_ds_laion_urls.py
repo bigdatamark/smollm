@@ -1,3 +1,8 @@
+# [MODULE DOC] LAION step 4.2: concatenates the per-shard URL lists (from 04_01) of NUM_SHARDS=200 shards,
+# skipping shards 184
+# and 189 (hard-coded, presumably failed), into one HF dataset with a single "url" column. Syncs the URL files
+# from S3 to /scratch/laion_urls, saves the dataset to /scratch/ds_laion_urls (48 procs) and syncs it to
+# s3://m4-datasets/LAION_data/ds_urls_laion_dataset_filtered_dedup/.
 """
 srun --pty --cpus-per-task=48 --mem-per-cpu=11G bash -i
 conda activate /fsx/m4/conda/shared-m4-2023-03-10

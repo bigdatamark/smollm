@@ -1,3 +1,14 @@
+# [MODULE DOC] Script that builds the decontamination list for SFT data: for each benchmark dataset in
+# NAME_DS_TO_HASH
+# (MMBench, MathVista, MMMU variants on the Hub) it tries to load each of the splits
+# testmini/test/validation/dev
+# (silently skipping splits that fail to load), concatenates the loaded splits, takes the "image" column
+# (single
+# image) or flattens the "images" column (list of images), raising ValueError if neither exists, and computes
+# the MD5 hex digest of each image's raw pixel bytes. All digests (with duplicates) are dumped as a JSON list
+# to
+# PATH_SAVE_LIST_HASHES. Downloads from the Hub; shows tqdm progress bars.
+# KNOWN ISSUE: if none of the candidate splits load, concatenate_datasets receives an empty list and raises.
 """
 srun --pty --cpus-per-task=96 --mem-per-cpu=20G --partition=hopper-prod bash -i
 conda activate shared-m4

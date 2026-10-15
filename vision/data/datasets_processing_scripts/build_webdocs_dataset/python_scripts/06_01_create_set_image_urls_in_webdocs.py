@@ -1,3 +1,13 @@
+# [MODULE DOC] Web-docs step 6.1: counts image URLs in one filtered web-document shard. As __main__: recreates
+# /scratch/storage_hugo_<idx_job>/, syncs the shard from S3 (3 attempts), keeps only the "metadata" column
+# (JSON
+# list aligned with the document nodes, with a dict containing "src" for image nodes and null for text),
+# extracts
+# every image "src", builds a Counter URL -> number of occurrences, pickles it (highest protocol) and copies
+# it to
+# <path_save_image_urls_in_web_document_dataset_filtered>/<idx_job>/image_urls_in_web_document_dataset_filtere
+# d.pickle,
+# then deletes the temp dir.
 import argparse
 import json
 import logging
@@ -19,6 +29,10 @@ logger.setLevel(logging.INFO)
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses idx_job (int, positional), --path_web_document_dataset_filtered (S3 input
+    # dir),
+    # --path_save_image_urls_in_web_document_dataset_filtered (S3 output dir) and --num_proc (cpu_count,
+    # unused).
     parser = argparse.ArgumentParser(description="Create the set of image urls in the web document dataset.")
     parser.add_argument(
         "idx_job",

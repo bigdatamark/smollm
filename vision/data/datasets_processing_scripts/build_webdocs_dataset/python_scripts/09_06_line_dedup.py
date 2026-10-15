@@ -1,3 +1,10 @@
+# [MODULE DOC] Web-docs step 9.6: line (paragraph) deduplication of one texts-only shard (argv[1] = IDX_JOB).
+# Recreates
+# /scratch/storage_hugo_IDX_JOB/, copies the reduced domain -> duplicated paragraphs JSON (from 9.5) and syncs
+# the shard (3 attempts); restricts the mapping to domains present in the shard and writes it to a smaller
+# JSON
+# (to keep worker memory low); maps LineDeduplication (NUM_PROC=20), saves and syncs to
+# ..._urldedup_linededup_texts_only/IDX_JOB, deletes the temp dir.
 import json
 import logging
 import os
@@ -39,12 +46,20 @@ PATH_SAVE_S3_WEB_DOCS_LINE_DEDUP = f"s3://m4-datasets/webdocs/web_document_datas
 
 
 class LineDeduplication:
+    # [CLASS DOC] Picklable Dataset.map function removing domain-level duplicated paragraphs from a document's
+    # texts.
     def __init__(self, path_domain_to_duplicated_texts):
+        # [FUNCTION DOC] Stores the path and loads the JSON mapping domain -> {paragraph -> count}.
         self.path_domain_to_duplicated_texts = path_domain_to_duplicated_texts
         with open(path_domain_to_duplicated_texts) as f:
             self.domain_to_duplicated_texts = json.load(f)
 
     def __call__(self, example):
+        # [FUNCTION DOC] Gets the domain (netloc) from example["general_metadata"]["url"]; if the domain is in
+        # the mapping, each
+        # non-None text node is split on "\n\n", paragraphs present in that domain's mapping are dropped and
+        # the rest are
+        # re-joined with "\n\n" (a node can become ""). Returns the example (unchanged for unknown domains).
         domain = urlparse(json.loads(example["general_metadata"])["url"]).netloc
         if domain not in self.domain_to_duplicated_texts:
             return example
@@ -61,6 +76,7 @@ class LineDeduplication:
         return example
 
     def __reduce__(self):
+        # [FUNCTION DOC] Pickles as (class, (path,)) so workers reload the mapping from disk.
         return self.__class__, (self.path_domain_to_duplicated_texts,)
 
 

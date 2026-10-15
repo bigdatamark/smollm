@@ -1,3 +1,11 @@
+# [MODULE DOC] LAION step 2: filters one raw LAION shard (laion_raw_hf_dataset/IDX_JOB, argv[1]) with
+# m4's LaionPairFiltering, configured from the YAML file config_filter_laion_pairs.yaml (path relative to the
+# cwd,
+# so must be run from the repo root): image size/aspect-ratio cutoffs, caption word count, word repetition
+# ratio,
+# special character ratio (SPECIAL_CHARACTERS) and common-word ratio (common_words.json copied from S3).
+# Recreates /scratch/storage_hugo_IDX_JOB/, syncs input from S3 (3 attempts), filters and saves with cpu_count
+# processes, syncs to laion_dataset_filtered/IDX_JOB, logs pair counts before/after and deletes the temp dir.
 import logging
 import os
 import sys

@@ -1,3 +1,10 @@
+# [MODULE DOC] Launcher running the step-2 extraction for the shards not yet processed: argv[1] = machine
+# index (0..20);
+# the shard indices 0..199 not in the hard-coded IDX_DONE set are split into NUM_MACHINES=21 chunks and this
+# machine sequentially runs "python3 m4/sourcing/data_collection/callers/extract_html_get_image_urls.py <idx>"
+# for each index of its chunk (shell, cwd-relative, exit codes ignored).
+# KNOWN ISSUE: the invoked script path m4/sourcing/data_collection/callers/extract_html_get_image_urls.py does
+# not exist in this repo (the equivalent is 02_extract_html_get_image_urls.py).
 import os
 import sys
 

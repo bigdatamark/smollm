@@ -1,3 +1,14 @@
+# [MODULE DOC] Web-docs step 5: quality filtering of one shard of web documents. As __main__: recreates
+# /scratch/storage_hugo_<idx_job>/, syncs the shard from S3 (3 attempts), loads filtering parameters from the
+# YAML config, then (1) maps WebDocumentFilteringNodeLevel over documents (removes individual images failing
+# format/size/aspect-ratio checks and text paragraphs failing word count, character/word repetition, special
+# character, stopword, flagged word, punctuation, common word, FastText lang-id and KenLM perplexity checks),
+# (2) filters documents with WebDocumentFilteringDocLevel (same families of checks at document level plus
+# number
+# of images). Both use m4 constants (SPECIAL_CHARACTERS, STOPWORDS, FLAGGED_WORDS, ...) and model files given
+# by
+# CLI paths. Saves the result, syncs to path_save_web_document_dataset_filtered/idx_job, logs document counts
+# before/after and deletes the temp dir.
 import argparse
 import logging
 import os
@@ -34,6 +45,11 @@ logger.setLevel(logging.INFO)
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: parses idx_job (int, positional), --path_web_document_dataset and
+    # --path_save_web_document_dataset_filtered (S3 dirs), --num_proc (cpu_count),
+    # --path_config_filter_web_documents
+    # (YAML, cwd-relative default), --path_common_words (JSON), --path_lang_id_model (FastText lid.176.bin),
+    # --path_sentencepiece_model and --path_kenlm_model (perplexity). Returns Namespace.
     parser = argparse.ArgumentParser(description="Filtering of WebDocs.")
     parser.add_argument(
         "idx_job",

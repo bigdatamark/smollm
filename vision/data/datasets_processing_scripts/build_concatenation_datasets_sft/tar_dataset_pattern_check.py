@@ -1,3 +1,11 @@
+# [MODULE DOC] Ad-hoc check script over the concatenated "chatty" SFT tar shards: builds an SFT webdataset
+# (via
+# m4.training.dataset_utils.get_webdataset, DatasetTypes.SFT, batch_size 10, no shuffling) over the 1785
+# shards
+# /fsx/leo/fine_tuning_datasets/concat_chatty_tar/shard_{0..1784}.tar, iterates over every batch and every
+# turn,
+# collects all occurrences in assistant answers of the regex "one of ?, !, : immediately followed by a period"
+# (a typical formatting artifact), and prints the total number of matches. FEATURES is defined but unused.
 import re
 
 import datasets

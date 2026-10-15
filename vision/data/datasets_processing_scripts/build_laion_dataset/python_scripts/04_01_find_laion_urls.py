@@ -1,3 +1,10 @@
+# [MODULE DOC] LAION step 4.1: extracts the image URLs of one filtered+deduplicated LAION shard (argv[1] =
+# IDX_JOB).
+# As __main__: recreates /scratch/storage_hugo_IDX_JOB/, syncs laion_dataset_filtered_dedup/IDX_JOB from S3
+# (3 attempts), reads the "url" field of each row's JSON "meta", writes the list as laion_urls.json, copies it
+# to
+# s3://.../urls_laion_dataset_filtered_dedup/IDX_JOB/laion_urls.json and deletes the temp dir.
+# KNOWN ISSUE: the log after the upload says "Starting saving" instead of "Finished saving".
 import json
 import logging
 import os

@@ -1,3 +1,9 @@
+# [MODULE DOC] LAION step 4.4: removes opted-out images from one shard (argv[1] = IDX_JOB) of
+# laion_dataset_filtered_dedup.
+# Recreates /scratch/storage_hugo_IDX_JOB/, copies the JSON list of opt-out URLs
+# (list_opt_out_laion_urls.json,
+# derived from 04_03), syncs the shard (3 attempts), filters with NUM_PROC=22, saves, syncs to
+# laion_dataset_filtered_dedup_optoutrmv/IDX_JOB/, logs counts before/after and deletes the temp dir.
 import json
 import logging
 import os
@@ -43,18 +49,22 @@ PATH_SAVE_S3_DS_LAION_OPT_OUT_FILTERED = (
 
 
 class OptOutFiltering:
+    # [CLASS DOC] Picklable Dataset.filter predicate holding the set of opted-out URLs.
     def __init__(self, path_opt_out_image_urls):
+        # [FUNCTION DOC] Stores path_opt_out_image_urls and loads the JSON list at that path into a set.
         self.path_opt_out_image_urls = path_opt_out_image_urls
         with open(path_opt_out_image_urls) as f:
             self.opt_out_image_urls = set(json.load(f))
 
     def __call__(self, example):
+        # [FUNCTION DOC] Parses example["meta"] JSON; returns False if its "url" is opted out, True otherwise.
         url = json.loads(example["meta"])["url"]
         if url in self.opt_out_image_urls:
             return False
         return True
 
     def __reduce__(self):
+        # [FUNCTION DOC] Pickles as (class, (path,)) so workers reload the set from disk.
         return self.__class__, (self.path_opt_out_image_urls,)
 
 

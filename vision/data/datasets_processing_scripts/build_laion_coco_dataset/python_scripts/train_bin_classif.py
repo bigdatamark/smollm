@@ -1,3 +1,14 @@
+# [MODULE DOC] Experiment script training the SigLIP-based binary "bad pair" classifier used by
+# 05_binary_classification.py.
+# Loads the SigLIP processor at import. Labels: 1 for indices in the hand-annotated NEGATIVE_LABELS list, 0
+# otherwise, over a 10,000-row LAION-COCO sample loaded from disk; train = rows 0-899, test = rows 900-999.
+# For each learning rate in lr_values ([1e-4]) and 5 independent trials ("folds", no actual k-fold split; the
+# StratifiedKFold object is unused): builds a frozen-SigLIP classifier on cuda:0, trains 15 epochs with
+# BCELoss
+# and AdamW (weight decay 0.1, batch 8, printing loss every 20 steps), and after each epoch evaluates on the
+# test
+# set (threshold 0.5), printing precision/recall/F1 and confusion matrix, then saves the state dict and the
+# confusion matrix (.npy) under /fsx/m4/victor/bin_classif_models/ with metrics in the filename.
 import numpy as np
 import torch
 import torch.nn as nn
@@ -17,7 +28,12 @@ processor = AutoProcessor.from_pretrained("google/siglip-so400m-patch14-384")
 
 
 class MyCustomBinaryClassification(nn.Module):
+    # [CLASS DOC] Binary classifier on top of SigLIP (google/siglip-so400m-patch14-384): concatenation of
+    # image and text
+    # embeddings fed to an MLP (Linear 2h->h, ReLU, Dropout 0.1, Linear h->1, Sigmoid).
     def __init__(self, freeze_siglip=True):
+        # [FUNCTION DOC] Loads SigLIP; if freeze_siglip (default True) disables its gradients. Input size = 2
+        # x text hidden size.
         super().__init__()
         self.siglip = AutoModel.from_pretrained("google/siglip-so400m-patch14-384")
         # self.siglip = AutoModel.from_pretrained("/fsx/m4/victor/siglip-so400m-patch14-384-ocred/")
@@ -32,6 +48,9 @@ class MyCustomBinaryClassification(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, input_ids, attention_mask, pixel_values):
+        # [FUNCTION DOC] Runs SigLIP on input_ids/attention_mask/pixel_values (no_grad + eval if frozen),
+        # concatenates image_embeds and
+        # text_embeds and returns probabilities of shape (batch,).
         if self.freeze_siglip:
             with torch.no_grad():
                 self.siglip.eval()
@@ -354,6 +373,9 @@ print("Dataset len", len(train_data))
 
 
 def _convert_to_rgb(image):
+    # [FUNCTION DOC] HELPER: returns the image unchanged if already RGB; otherwise alpha-composites it (as
+    # RGBA) over a white
+    # background and returns the RGB result.
     if image.mode == "RGB":
         return image
     image_rgba = image.convert("RGBA")
@@ -365,6 +387,11 @@ def _convert_to_rgb(image):
 
 # Function to tokenize and prepare data
 def tokenize_batch(batch):
+    # [FUNCTION DOC] HELPER: DataLoader collate function. Input: list of rows with "text", "image", "labels".
+    # Tokenizes texts with
+    # padding and attention mask, adds pixel_values for RGB-converted images, moves everything to DEVICE, and
+    # returns
+    # (inputs mapping, float label tensor on DEVICE).
     inputs = processor.tokenizer(
         [b["text"] for b in batch], return_tensors="pt", return_attention_mask=True, padding=True
     )
@@ -390,6 +417,11 @@ for lr in lr_values:
         model = MyCustomBinaryClassification(True).to(DEVICE)
 
         def lorify(model):
+            # [FUNCTION DOC] HELPER (unused; call is commented out): wraps the model with a PEFT LoRA adapter
+            # (r=16, alpha=16, dropout 0.1)
+            # on SigLIP attention projections and MLP layers, re-enables gradients on layer norms and the
+            # classifier head
+            # fc1/fc2, and returns the wrapped model.
             lora_config = LoraConfig(
                 lora_alpha=16,
                 lora_dropout=0.1,

@@ -1,3 +1,8 @@
+# [MODULE DOC] Web-docs step 9.4: for the domains assigned to job argv[1] (IDX_JOB, from 9.3), finds
+# paragraphs repeated
+# within a domain. Recreates /scratch/storage_hugo_IDX_JOB/, syncs ALL 200 texts-only shards (3 attempts) and
+# copies this job's domain -> positions part, computes the mapping, writes it to JSON and copies it to
+# line_dedup_domain_to_duplicated_texts_sharded/IDX_JOB/, then deletes the temp dir.
 import json
 import logging
 import os
@@ -40,6 +45,12 @@ PATH_SAVE_S3_LINE_DEDUP_DOMAIN_TO_DUPLICATED_TEXTS = f"s3://m4-datasets/webdocs/
 
 
 def get_domain_to_duplicated_texts(domain_to_positions):
+    # [FUNCTION DOC] Input: mapping domain -> {str(shard) -> positions}. Inverts it per shard, loads each
+    # shard in memory, and for
+    # every document of each domain splits each non-empty text node on blank lines ("\n\n") into paragraphs
+    # and counts
+    # occurrences per domain. Returns domain -> {paragraph -> count} restricted to counts > 1 (domains with no
+    # duplicate keep an empty mapping).
     shard_to_domain_to_positions = {
         str(idx_shard): {
             domain: domain_to_positions[domain][str(idx_shard)]

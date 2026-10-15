@@ -1,3 +1,12 @@
+# [MODULE DOC] Script (one SLURM array job per sub-dataset) that publishes one config of "the_cauldron" to the
+# Hub.
+# Usage: argv[1] = integer job index selecting NAME_DS from the hard-coded ALL_NAMES_DS list (50 names).
+# At import time: loads the JSON list of MD5 hashes of benchmark test images (PATH_LIST_HASHES_TEST_IMAGES,
+# produced by create_set_hashes_test_images.py) into a global set; loads the merged-per-image dataset from
+# COMMON_FOLDER_DS/NAME_DS with load_from_disk; truncates it to the first MAX_NUM_EXAMPLES (200k) rows;
+# filters out every example containing a test image (decontamination) using NUM_PROC processes; prints how
+# many examples were removed; pushes to the Hub repo NAME_DS_HUB with config_name=NAME_DS (network side
+# effect).
 import hashlib
 import json
 import os
@@ -77,6 +86,11 @@ with open(PATH_LIST_HASHES_TEST_IMAGES, "r") as f:
 
 
 def filter_hash_test_images(example):
+    # [FUNCTION DOC] Dataset.filter predicate. Input: one example mapping with key "images" (list of PIL
+    # images).
+    # Computes the MD5 hex digest of each image's raw pixel bytes (tobytes) and returns False if any digest is
+    # in
+    # the global hashes_test_images set, True otherwise.
     images = example["images"]
     hashes_example_images = [hashlib.md5(img.tobytes()).hexdigest() for img in images]
     if any([hash_ in hashes_test_images for hash_ in hashes_example_images]):

@@ -1,3 +1,12 @@
+# [MODULE DOC] LAION-COCO step 2.2: removes opted-out images from one shard of the LAION-COCO dataset.
+# Common pattern: IDX_JOB = argv[1] (string shard id); temp dir /scratch/storage_hugo_IDX_JOB/ is wiped and
+# recreated via shell, input is synced from S3 (aws/s5cmd, retried MAX_NUM_RETRIES_SYNC times, failures
+# ignored),
+# the filtered dataset is saved locally then synced back to S3, row counts before/after are logged, and the
+# temp dir
+# is deleted. PIL limits are disabled (MAX_IMAGE_PIXELS=None, LOAD_TRUNCATED_IMAGES) at import.
+# Inputs: the JSON list of opt-out URLs (PATH_OPT_OUT_URLS_S3, built from step 2.1) and the shard
+# laion_coco_dataset/IDX_JOB; output: laion_coco_dataset_optoutrmv/IDX_JOB/. Filtering uses NUM_PROC=22.
 import json
 import logging
 import os
@@ -43,18 +52,25 @@ PATH_SAVE_S3_DS_LAION_COCO_OPT_OUT_FILTERED = (
 
 
 class OptOutFiltering:
+    # [CLASS DOC] Picklable Dataset.filter predicate holding the set of opted-out URLs.
     def __init__(self, path_opt_out_image_urls):
+        # [FUNCTION DOC] Stores path_opt_out_image_urls and loads the JSON list at that path into a set
+        # (opt_out_image_urls).
         self.path_opt_out_image_urls = path_opt_out_image_urls
         with open(path_opt_out_image_urls) as f:
             self.opt_out_image_urls = set(json.load(f))
 
     def __call__(self, example):
+        # [FUNCTION DOC] Parses example["meta"] (JSON string) and returns False if its "url" is in the opt-out
+        # set, True otherwise.
         url = json.loads(example["meta"])["url"]
         if url in self.opt_out_image_urls:
             return False
         return True
 
     def __reduce__(self):
+        # [FUNCTION DOC] Pickles as (class, (path,)) so worker processes reload the set from disk instead of
+        # pickling it.
         return self.__class__, (self.path_opt_out_image_urls,)
 
 
