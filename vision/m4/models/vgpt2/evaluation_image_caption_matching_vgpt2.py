@@ -1,3 +1,7 @@
+# [MODULE DOC] Image-caption matching evaluation (e.g. Winoground) for VGPT2 models: every (caption, image)
+# combination of an example is scored by the model's log-likelihood of the caption given the
+# image, and the scores are passed to MetricsImageCaptionMatching (text/image/group scores).
+# Zero-shot only.
 import os
 from itertools import chain
 from typing import Dict, List, Optional
@@ -18,6 +22,10 @@ from m4.training.utils import (
 
 
 class Vgpt2ImageCaptionMatching(BaseTaskImageCaptionMatching):
+    # [CLASS DOC] Base caption-matching task. Subclasses set image_column_names, caption_column_names,
+    # prompt_templates_dict (example fields: bos_token, eos_token, image_token,
+    # token_around_image, caption), length_normalize and metric. Combination order per example is
+    # caption-major: [(c0,i0), (c0,i1), (c1,i0), ...].
     model_class: str = "VGPT2LMHeadModel"
     predictor_class: Predictor = Predictor.in_contexter
     target_keys: List[str] = ["example_ids", "caption_ids", "image_ids"]
@@ -29,6 +37,11 @@ class Vgpt2ImageCaptionMatching(BaseTaskImageCaptionMatching):
     tokenizer_max_seq_len = 1024
 
     def __init__(self, **kwargs) -> None:
+        # [FUNCTION DOC] Parse kwargs (tokenizer_name, evaluation_version, optional tokenizer_use_fast,
+        # image_size, vision_encoder_type, image_seq_len), build the eval image transform and
+        # left-padded/truncated tokenizer (HF_TOKEN env), set image_token / token_around_image
+        # (ValueError for unknown evaluation version) and precompute
+        # captions_images_order_per_ex, the expected (caption_idx, image_idx) order.
         super().__init__(**kwargs)
         self.tokenizer_name = kwargs.pop("tokenizer_name")
         evaluation_version = kwargs.pop("evaluation_version")
@@ -59,10 +72,16 @@ class Vgpt2ImageCaptionMatching(BaseTaskImageCaptionMatching):
         ]
 
     def get_info_from_dataset(self, dataset):
+        # [FUNCTION DOC] No-op hook.
         pass
 
     def get_data_collator(self, **kwargs):
+        # [FUNCTION DOC] Return a DataLoader collate function bound to the given kwargs (support dataset,
+        # num_shots, shot_selection_mode, prompt_template_id, ...) that are forwarded to
+        # prepare_dataset.
         def data_collator(batch):
+            # [FUNCTION DOC] HELPER: Convert a list of example dicts into a dict of column lists (keys from
+            # the first example) and return prepare_dataset(columns, **kwargs) for the batch.
             exs = {key: [ex[key] for ex in batch] for key in batch[0].keys()}
             batch = self.prepare_dataset(exs, **kwargs)
             return batch
@@ -70,6 +89,9 @@ class Vgpt2ImageCaptionMatching(BaseTaskImageCaptionMatching):
         return data_collator
 
     def _split_array(self, array, nb_combinations):
+        # [FUNCTION DOC] HELPER: Split a list into consecutive chunks of len(array) // nb_combinations
+        # elements (the callers pass the number of examples, so this yields one chunk per
+        # example). Returns a list of lists.
         total_elements = len(array)
         elements_per_combination = total_elements // nb_combinations
 
@@ -80,6 +102,12 @@ class Vgpt2ImageCaptionMatching(BaseTaskImageCaptionMatching):
         return splitted_array
 
     def prepare_dataset(self, exs: Dict, **kwargs) -> Dict:
+        # [FUNCTION DOC] Build the batch for kwargs["prompt_template_id"]: for each example and each (caption,
+        # image) pair create prefix + caption prompt, tokenize (left pad/truncate, no special
+        # tokens) and transform the matching image (shape (1, 3, H, W)). Asserts that prompt
+        # and image orders agree with captions_images_order_per_ex. Returns per-example nested
+        # lists: example_ids, caption_ids, image_ids, input_ids, attention_mask, pixel_values
+        # (one chunk per example).
         """
         Prepare batch of examples.
 
@@ -167,6 +195,10 @@ class Vgpt2ImageCaptionMatching(BaseTaskImageCaptionMatching):
         }
 
     def _create_example_prompt(self, prompt_template_id, caption):
+        # [FUNCTION DOC] HELPER: Format the template "example" with bos/eos tokens, image_token repeated
+        # image_seq_len times, token_around_image and caption. Returns the prompt.
+        # KNOWN ISSUE: reads self.bool_instruct_templates (and prompt_templates_dict_instruct), which this
+        # class hierarchy never defines -> AttributeError unless a subclass adds them.
         if self.bool_instruct_templates:
             prompt_templates_dict = self.prompt_templates_dict_instruct
         else:
@@ -185,6 +217,12 @@ class Vgpt2ImageCaptionMatching(BaseTaskImageCaptionMatching):
         return prompt
 
     def _create_prefix_prompt(self, prompt_template_id):
+        # [FUNCTION DOC] HELPER: Build the prompt prefix for prompt_template_id from
+        # prompt_templates_dict_instruct when bool_instruct_templates else
+        # prompt_templates_dict. Returns "" when the template's prefix is None, otherwise the
+        # prefix formatted with the tokenizer's bos_token/eos_token. Raises KeyError for an
+        # unknown template id.
+        # KNOWN ISSUE: same missing bool_instruct_templates attribute as _create_example_prompt.
         if self.bool_instruct_templates:
             prompt_templates_dict = self.prompt_templates_dict_instruct
         else:
@@ -200,6 +238,12 @@ class Vgpt2ImageCaptionMatching(BaseTaskImageCaptionMatching):
         return prompt
 
     def predict(self, **kwargs):
+        # [FUNCTION DOC] Flatten the per-example lists, stack input_ids/attention_mask, pad all images into a
+        # (N, max_images, 3, H, W) tensor with a mask that is True over each image's area, run
+        # the model under no_grad and return its outputs with input_ids and attention_mask
+        # attached.
+        # KNOWN ISSUE: passes pixel_attention_mask, which VGPT2LMHeadModel.forward (the declared model_class)
+        # does not accept; only works with models such as VLlama3 that take that argument.
         model = kwargs["model"]
         input_ids = torch.stack(list(chain.from_iterable(kwargs["input_ids"]))).to(model.device)
         attention_mask = torch.stack(list(chain.from_iterable(kwargs["attention_mask"]))).to(model.device)
@@ -230,6 +274,12 @@ class Vgpt2ImageCaptionMatching(BaseTaskImageCaptionMatching):
         return outputs
 
     def format_model_outputs_to_predictions(self, outputs) -> torch.Tensor:
+        # [FUNCTION DOC] Turn logits into one log-likelihood score per sequence: shift logits/labels by one,
+        # compute per-token negative cross-entropy (reduction none), mask with the shifted
+        # attention mask (so padding is ignored but the whole prompt, including shots, is
+        # scored), sum per row and divide by the number of valid tokens when length_normalize.
+        # Then regroup the flat score list into one list of nb_captions * nb_images scores per
+        # example. Returns a list of lists of floats.
         batch_size = outputs.logits.shape[0]
         # Shift so that tokens < n predict n
         shift_logits = outputs.logits[..., :-1, :].contiguous()
@@ -251,6 +301,8 @@ class Vgpt2ImageCaptionMatching(BaseTaskImageCaptionMatching):
         return splitted_scores_per_example
 
     def add_batch_metric(self, metric, **kwargs):
+        # [FUNCTION DOC] Score the batch and call metric.add_batch(splitted_scores_per_example=...,
+        # example_ids, caption_ids, image_ids). Returns metric.
         outputs = self.predict(**kwargs)
         splitted_scores_per_example = self.format_model_outputs_to_predictions(outputs)
         additional_args = {key: kwargs[key] for key in self.target_keys}
@@ -262,6 +314,13 @@ class Vgpt2ImageCaptionMatching(BaseTaskImageCaptionMatching):
 
 
 class WinogroundVgpt2ImageCaptionMatchingAccWithKLAndEntropy(Vgpt2ImageCaptionMatching):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ImageCaptionMatching; declares only class attributes (no
+    # new behavior). Dataset: 'facebook/winoground'. Metric 'ImageCaptionMatchingMetrics'
+    # computing: TEXT_SCORE, IMAGE_SCORE, GROUP_SCORE. Splits: default_query_split_name='test',
+    # default_support_split_name='test', test_support_split_name='test'. Columns:
+    # image_column_names=['image_0', 'image_1'], id_column_name='id',
+    # caption_column_names=['caption_0', 'caption_1']. length_normalize=True.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "facebook/winoground"
     metric_name: str = "ImageCaptionMatchingMetrics"
     metric_kwargs = {

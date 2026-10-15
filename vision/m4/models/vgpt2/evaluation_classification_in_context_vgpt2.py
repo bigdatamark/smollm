@@ -1,3 +1,11 @@
+# [MODULE DOC] In-context (few-shot) classification evaluation tasks for VGPT2-style vision-language models.
+# Classification is done by scoring: every query is paired with each candidate label, each (shots
+# + query + label) sequence is scored by the model's log-likelihood and the metric picks/compares
+# the best label. Defines the base Vgpt2ClassificationInContext and many dataset subclasses
+# (Food101, CIFAR, Stanford Cars, DTD, SST2, SUN397, Oxford Pets, Caltech101, ImageNet-1k,
+# Hateful Memes, CLEVR, SNLI-VE, FairFace, NLVR2, ScienceQA, IIIT5K, ...) that only set class
+# attributes (dataset, metric, columns, prompt templates, label name mappings). Also the base for
+# VQA-classification and VLlama3 classification tasks.
 import os
 import random
 import re
@@ -24,6 +32,16 @@ from m4.training.utils import (
 
 
 class Vgpt2ClassificationInContext(BaseTaskClassification):
+    # [CLASS DOC] Base scoring-based classification task. Class attributes: target_keys forwarded to the
+    # metric (tested_labels, example_ids, true_labels, relevance_scores), buckets_keys (dataset
+    # columns whose values define result slices, empty = no buckets),
+    # mapping_class_names_to_prompt_names (class name -> text shown in the prompt, or a dict of
+    # such mappings keyed by an id when mapping_class_prompt_name_id_to_prompt_template_id maps id
+    # -> list of template ids), prompt_templates_dict / prompt_templates_dict_instruct with
+    # bool_instruct_templates, tokenizer_max_seq_len. Subclasses set dataset_name, metric, splits,
+    # label_column_name (a ClassLabel feature), image_column_names, optional context_column_names,
+    # tested_ex_excluded_context_columns, tested_labels_column_name, relevance_scores_column_name,
+    # length_normalize.
     model_class: str = "VGPT2LMHeadModel"
     predictor_class: Predictor = Predictor.in_contexter
     target_keys: List[str] = ["tested_labels", "example_ids", "true_labels", "relevance_scores"]
@@ -37,6 +55,16 @@ class Vgpt2ClassificationInContext(BaseTaskClassification):
     tokenizer_max_seq_len = 1024
 
     def __init__(self, **kwargs) -> None:
+        # [FUNCTION DOC] Instantiate the task: parse required evaluation kwargs and build tokenizer and image
+        # transform. Required kwargs: tokenizer_name (HF hub id/path), evaluation_version
+        # (EvaluationVersion v1/v2), vision_encoder_max_image_size (int), vision_encoder_type,
+        # image_seq_len (int, image tokens per image), scale_up_images (bool),
+        # image_size_after_scaling (int); optional tokenizer_use_fast (default False). Side
+        # effects: downloads/loads an AutoTokenizer (truncation_side="left", auth token from
+        # env HF_TOKEN or True), sets padding_side="left"; builds an eval image transform via
+        # build_image_transform; stores image_token (IMAGE_TOKEN) and token_around_image
+        # (FAKE_TOKEN_AROUND_IMAGE_V1 for v1, V2 for v2). Raises ValueError for an unknown
+        # evaluation_version; KeyError if a required kwarg is missing.
         super().__init__(**kwargs)
         self.tokenizer_name = kwargs.pop("tokenizer_name")
         evaluation_version = kwargs.pop("evaluation_version")
@@ -66,6 +94,12 @@ class Vgpt2ClassificationInContext(BaseTaskClassification):
             raise ValueError(f"Invalid evaluation version: {evaluation_version}")
 
     def simpler_get_splitted_images_and_corresponding_text(self, image):
+        # [FUNCTION DOC] HELPER: Split one PIL image into sub-images and get the matching prompt text.
+        # Delegates to get_splitted_images_and_corresponding_text with the instance's
+        # vision_encoder_max_image_size, max_image_size=image_size_after_scaling,
+        # image_seq_len, no pre-split scale-up, and scale_up_factor=100 when scale_up_images
+        # (forces resizing up to the max size) else 1. Returns (list of sub-images, text string
+        # containing the image/fake tokens to put in place of <image>).
         splitted_images_array, text_splitted_images = get_splitted_images_and_corresponding_text(
             image=image,
             vision_encoder_max_image_size=self.vision_encoder_max_image_size,
@@ -79,13 +113,21 @@ class Vgpt2ClassificationInContext(BaseTaskClassification):
         return splitted_images_array, text_splitted_images
 
     def get_info_from_dataset(self, dataset):
+        # [FUNCTION DOC] Read label metadata from the dataset's label_column_name ClassLabel feature and store
+        # class_names, class_str2int, class_int2str and class_ids (int ids of all class names)
+        # on the instance.
         self.class_names = dataset.features[self.label_column_name].names
         self.class_str2int = dataset.features[self.label_column_name].str2int
         self.class_int2str = dataset.features[self.label_column_name].int2str
         self.class_ids = [self.class_str2int(class_name) for class_name in self.class_names]
 
     def get_data_collator(self, **kwargs):
+        # [FUNCTION DOC] Return a DataLoader collate function bound to the given kwargs (support dataset,
+        # num_shots, shot_selection_mode, prompt_template_id, ...) that are forwarded to
+        # prepare_dataset.
         def data_collator(batch):
+            # [FUNCTION DOC] HELPER: Convert a list of example dicts into a dict of column lists (keys from
+            # the first example) and return prepare_dataset(columns, **kwargs) for the batch.
             exs = {key: [ex[key] for ex in batch] for key in batch[0].keys()}
             batch = self.prepare_dataset(exs, **kwargs)
             return batch
@@ -93,6 +135,26 @@ class Vgpt2ClassificationInContext(BaseTaskClassification):
         return data_collator
 
     def prepare_dataset(self, exs: Dict, **kwargs) -> Dict:
+        # [FUNCTION DOC] Build a scoring batch: each query X is expanded into one sequence per tested label.
+        # kwargs: support_dataset, support_dataset_vision_encoder_embeddings (optional),
+        # num_shots, shot_selection_mode, prompt_template_id. Class names are mapped to prompt
+        # names (_get_class_name_value); prompted names are deduplicated and sorted, with
+        # prompt-name <-> class-id dicts. Images come either from several image columns or, if
+        # the first image column holds lists, from that single column (then <image>
+        # placeholders are expected in the dataset text); having both raises ValueError. Tested
+        # labels: all prompted class names for every query, or (tested_labels_column_name) the
+        # per-example candidate list. relevance_scores from relevance_scores_column_name or
+        # zeros. Shots: random (or num_shots==0) else nearest support embeddings. Shot prompts
+        # use the support example's true label; texts are prefix + shots + query-with-label,
+        # stripped and tokenized (left pad/truncate). Ordering is label-major: [x1,A; x2,A;
+        # ...; x1,B; ...]; images (shots + query, split and padded per example to (n, 3, H, W)
+        # with boolean masks) are repeated in the same order. true_labels are mapped through
+        # the prompt names to ids (or -1 when all labels are None). Returns dict: example_ids,
+        # true_labels, tested_labels, relevance_scores, input_ids, attention_mask,
+        # pixel_values, pixel_attention_masks, buckets (strings "key=value/..." or None).
+        # KNOWN ISSUE: buckets are repeated len(prompted_class_names) times instead of
+        # nb_tested_labels_per_ex, so the length is wrong when tested_labels_column_name is used together with
+        # buckets_keys.
         """
         Prepare batch of examples.
         Each example (X, y) where y is among (y1, y2, ..., yN) - the labels options -
@@ -156,6 +218,11 @@ class Vgpt2ClassificationInContext(BaseTaskClassification):
             relevance_scores = [0.0] * nb_exs * nb_tested_labels_per_ex
 
         def retrieve_idx_closest_examples(ref_embedding, embeddings_to_compare, num_examples):
+            # [FUNCTION DOC] HELPER: Similarity-based shot retrieval. Computes dot products between
+            # ref_embedding (1-D array) and each row of embeddings_to_compare (2-D array),
+            # selects the num_examples largest with an argpartition (linear time), then orders
+            # those by increasing similarity (most similar last, i.e. closest to the query in
+            # the prompt). Returns a list of int row indices into the support dataset.
             "Returns the indices of the `num_examples` closest embeddings in ascending order"
             sim = np.dot(embeddings_to_compare, ref_embedding)
             # We can achieve linear complexity because we don't need to sort all the numbers,
@@ -329,6 +396,8 @@ class Vgpt2ClassificationInContext(BaseTaskClassification):
         if self.buckets_keys:
 
             def bucket_infos_to_str(bucket_infos):
+                # [FUNCTION DOC] HELPER: Join one example's bucket column values with buckets_keys into
+                # "key1=v1/key2=v2".
                 name = []
                 for info, info_type in zip(bucket_infos, self.buckets_keys):
                     name.append(f"{info_type}={info}")
@@ -354,6 +423,12 @@ class Vgpt2ClassificationInContext(BaseTaskClassification):
         }
 
     def _get_class_name_value(self, prompt_template_id, class_name):
+        # [FUNCTION DOC] HELPER: Map a dataset class name to the string used in prompts. If
+        # mapping_class_prompt_name_id_to_prompt_template_id is set, find the mapping id whose
+        # template-id list contains prompt_template_id and use
+        # mapping_class_names_to_prompt_names[id][class_name] (ValueError if none matches);
+        # else use mapping_class_names_to_prompt_names[class_name] if a mapping exists; else
+        # return class_name.
         if self.mapping_class_prompt_name_id_to_prompt_template_id is not None:
             mapping_class_names_to_prompt_names = None
             for (
@@ -385,6 +460,13 @@ class Vgpt2ClassificationInContext(BaseTaskClassification):
         contexts=None,
         excluded_context_columns=[],
     ):
+        # [FUNCTION DOC] HELPER: Format one example prompt. Uses the selected template's "example" with
+        # bos_token, eos_token, class_name and each (column, value) in contexts as named
+        # fields, except columns listed in excluded_context_columns whose "{column}"
+        # placeholders are removed from the template first. Then checks that the number of
+        # <image> placeholders equals len(images) (ValueError otherwise) and replaces them in
+        # order with each image's split-image text. Returns the prompt string.
+        # multiple_images_in_single_column is accepted but unused.
         if self.bool_instruct_templates:
             prompt_templates_dict = self.prompt_templates_dict_instruct
         else:
@@ -420,6 +502,11 @@ class Vgpt2ClassificationInContext(BaseTaskClassification):
         return prompt
 
     def _create_prefix_prompt(self, prompt_template_id):
+        # [FUNCTION DOC] HELPER: Build the prompt prefix for prompt_template_id from
+        # prompt_templates_dict_instruct when bool_instruct_templates else
+        # prompt_templates_dict. Returns "" when the template's prefix is None, otherwise the
+        # prefix formatted with the tokenizer's bos_token/eos_token. Raises KeyError for an
+        # unknown template id.
         if self.bool_instruct_templates:
             prompt_templates_dict = self.prompt_templates_dict_instruct
         else:
@@ -435,6 +522,13 @@ class Vgpt2ClassificationInContext(BaseTaskClassification):
         return prompt
 
     def predict(self, **kwargs):
+        # [FUNCTION DOC] Run a scoring forward pass. kwargs: model, input_ids, attention_mask, pixel_values,
+        # pixel_attention_masks (same layout as produced by prepare_dataset). Pads images into
+        # a 5-D zero tensor plus boolean mask on the model device, calls the model under
+        # no_grad and returns its output object with the stacked input_ids and attention_mask
+        # attached as attributes (needed for scoring).
+        # KNOWN ISSUE: passes pixel_attention_mask, which VGPT2LMHeadModel.forward (the declared model_class)
+        # does not accept; only works with models such as VLlama3 that take that argument.
         model = kwargs["model"]
         input_ids = torch.stack(kwargs["input_ids"]).to(model.device)
         attention_mask = torch.stack(kwargs["attention_mask"]).to(model.device)
@@ -468,6 +562,11 @@ class Vgpt2ClassificationInContext(BaseTaskClassification):
         return outputs
 
     def format_model_outputs_to_predictions(self, outputs: ModelOutput) -> torch.Tensor:
+        # [FUNCTION DOC] Turn logits into one log-likelihood score per sequence: shift logits/labels by one,
+        # compute per-token negative cross-entropy (reduction none), mask with the shifted
+        # attention mask (so padding is ignored but the whole prompt, including shots, is
+        # scored), sum per row and divide by the number of valid tokens when length_normalize.
+        # Returns a CPU 1-D tensor of scores.
         batch_size = outputs.logits.shape[0]
         # Shift so that tokens < n predict n
         shift_logits = outputs.logits[..., :-1, :].contiguous()
@@ -486,6 +585,10 @@ class Vgpt2ClassificationInContext(BaseTaskClassification):
         return score_per_example.cpu()
 
     def add_batch_metric(self, metric, **kwargs):
+        # [FUNCTION DOC] Score the batch (predict + format_model_outputs_to_predictions, cast to float64) and
+        # call metric.add_batch(predictions=..., target_keys values, buckets) where buckets
+        # come from kwargs when buckets_keys is set, else a list of "" of the batch length.
+        # Returns metric.
         outputs = self.predict(**kwargs)
         predictions = self.format_model_outputs_to_predictions(outputs)
         predictions = predictions.to(torch.float64)
@@ -501,6 +604,12 @@ class Vgpt2ClassificationInContext(BaseTaskClassification):
 
 
 class Food101Vgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'food101'. Metric 'UnfoldedClassificationMetrics' computing:
+    # ACCURACY, KL_DISTRIBUTION, KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits:
+    # default_query_split_name='validation', default_support_split_name='train'. Columns:
+    # label_column_name='label', image_column_names=['image']. length_normalize=False.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "food101"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -528,10 +637,19 @@ class Food101Vgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2Classification
 class Food101SampleVgpt2ClassificationInContextAccWithKLAndEntropy(
     Food101Vgpt2ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as Food101Vgpt2ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/food101-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/food101-Sample"
 
 
 class Cifar10Vgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'cifar10'. Metric 'UnfoldedClassificationMetrics' computing:
+    # ACCURACY, KL_DISTRIBUTION, KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits:
+    # default_query_split_name='test', default_support_split_name='train'. Columns:
+    # label_column_name='label', image_column_names=['img']. length_normalize=False.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "cifar10"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -559,16 +677,27 @@ class Cifar10Vgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2Classification
 class Cifar10SampleVgpt2ClassificationInContextAccWithKLAndEntropy(
     Cifar10Vgpt2ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as Cifar10Vgpt2ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/cifar10-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/cifar10-Sample"
 
 
 class Cifar10DummyVgpt2ClassificationInContextAccWithKLAndEntropy(
     Cifar10Vgpt2ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as Cifar10Vgpt2ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/cifar10-Dummy'.
     dataset_name: str = "HuggingFaceM4/cifar10-Dummy"
 
 
 class Cifar100Vgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'cifar100'. Metric 'UnfoldedClassificationMetrics' computing:
+    # ACCURACY, KL_DISTRIBUTION, KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits:
+    # default_query_split_name='test', default_support_split_name='train'. Columns:
+    # label_column_name='fine_label', image_column_names=['img']. length_normalize=False.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "cifar100"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -596,10 +725,20 @@ class Cifar100Vgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2Classificatio
 class Cifar100SampleVgpt2ClassificationInContextAccWithKLAndEntropy(
     Cifar100Vgpt2ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as Cifar100Vgpt2ClassificationInContextAccWithKLAndEntropy, but
+    # loads dataset 'HuggingFaceM4/cifar100-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/cifar100-Sample"
 
 
 class StanfordCarsVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/Stanford-Cars'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['image']. length_normalize=False. prompt_templates_dict overrides
+    # templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/Stanford-Cars"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -627,10 +766,20 @@ class StanfordCarsVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2Classific
 class StanfordCarsSampleVgpt2ClassificationInContextAccWithKLAndEntropy(
     StanfordCarsVgpt2ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as StanfordCarsVgpt2ClassificationInContextAccWithKLAndEntropy, but
+    # loads dataset 'HuggingFaceM4/Stanford-Cars-Sample' - a small sample used for quick
+    # evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/Stanford-Cars-Sample"
 
 
 class DTDVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/DTD_Describable-Textures-Dataset' (config
+    # 'partition_1'). Metric 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION,
+    # KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['image']. length_normalize=False. prompt_templates_dict overrides
+    # templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/DTD_Describable-Textures-Dataset"
     dataset_config = "partition_1"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -657,10 +806,20 @@ class DTDVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInCo
 
 
 class DTDSampleVgpt2ClassificationInContextAccWithKLAndEntropy(DTDVgpt2ClassificationInContextAccWithKLAndEntropy):
+    # [CLASS DOC] Same task configuration as DTDVgpt2ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/DTD_Describable-Textures-Dataset-partition_1-Sample' - a small sample
+    # used for quick evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/DTD_Describable-Textures-Dataset-partition_1-Sample"
 
 
 class RenderedSST2Vgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/RenderedSST2'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['image']. length_normalize=False. prompt_templates_dict overrides
+    # templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/RenderedSST2"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -688,10 +847,20 @@ class RenderedSST2Vgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2Classific
 class RenderedSST2SampleVgpt2ClassificationInContextAccWithKLAndEntropy(
     RenderedSST2Vgpt2ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as RenderedSST2Vgpt2ClassificationInContextAccWithKLAndEntropy, but
+    # loads dataset 'HuggingFaceM4/RenderedSST2-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/RenderedSST2-Sample"
 
 
 class SUN397Vgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/sun397' (config 'standard-part1-120k'). Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['image']. length_normalize=False. prompt_templates_dict overrides
+    # templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/sun397"
     dataset_config = "standard-part1-120k"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -720,11 +889,21 @@ class SUN397Vgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationI
 class SUN397SampleVgpt2ClassificationInContextAccWithKLAndEntropy(
     SUN397Vgpt2ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as SUN397Vgpt2ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/sun397-standard-part1-120k-Sample' (dataset_config=None) - a small
+    # sample used for quick evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/sun397-standard-part1-120k-Sample"
     dataset_config = None
 
 
 class OxfordPetsVgpt2ClassificationInContextMeanPerClassAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/Oxford-IIIT-Pet'. Metric
+    # 'UnfoldedClassificationMetrics' computing: MEAN_PER_CLASS_ACCURACY, KL_DISTRIBUTION,
+    # KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['image']. length_normalize=False. prompt_templates_dict overrides
+    # templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/Oxford-IIIT-Pet"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -752,11 +931,22 @@ class OxfordPetsVgpt2ClassificationInContextMeanPerClassAccWithKLAndEntropy(Vgpt
 class OxfordPetsSampleVgpt2ClassificationInContextMeanPerClassAccWithKLAndEntropy(
     OxfordPetsVgpt2ClassificationInContextMeanPerClassAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # OxfordPetsVgpt2ClassificationInContextMeanPerClassAccWithKLAndEntropy, but loads dataset
+    # 'HuggingFaceM4/Oxford-IIIT-Pet-Sample' (dataset_config=None) - a small sample used for quick
+    # evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/Oxford-IIIT-Pet-Sample"
     dataset_config = None
 
 
 class Caltech101Vgpt2ClassificationInContextMeanPerClassAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/Caltech-101' (config 'with_background_category').
+    # Metric 'UnfoldedClassificationMetrics' computing: MEAN_PER_CLASS_ACCURACY, KL_DISTRIBUTION,
+    # KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['image']. length_normalize=False. prompt_templates_dict overrides
+    # templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/Caltech-101"
     dataset_config = "with_background_category"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -785,11 +975,23 @@ class Caltech101Vgpt2ClassificationInContextMeanPerClassAccWithKLAndEntropy(Vgpt
 class Caltech101SampleVgpt2ClassificationInContextMeanPerClassAccWithKLAndEntropy(
     Caltech101Vgpt2ClassificationInContextMeanPerClassAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # Caltech101Vgpt2ClassificationInContextMeanPerClassAccWithKLAndEntropy, but loads dataset
+    # 'HuggingFaceM4/Caltech-101-with_background_category-Sample' (dataset_config=None) - a small
+    # sample used for quick evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/Caltech-101-with_background_category-Sample"
     dataset_config = None
 
 
 class ImageNet1kVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'imagenet-1k'. Metric 'UnfoldedClassificationMetrics' computing:
+    # ACCURACY, KL_DISTRIBUTION, KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits:
+    # default_query_split_name='validation', default_support_split_name='train'. Columns:
+    # label_column_name='label', image_column_names=['image']. length_normalize=False.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
+    # mapping_class_names_to_prompt_names remaps dataset class names to the strings inserted in
+    # prompts.
     dataset_name: str = "imagenet-1k"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -1831,10 +2033,24 @@ class ImageNet1kVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2Classificat
 class ImageNet1kSampleVgpt2ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kVgpt2ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as ImageNet1kVgpt2ClassificationInContextAccWithKLAndEntropy, but
+    # loads dataset 'HuggingFaceM4/imagenet-1k-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/imagenet-1k-Sample"
 
 
 class HatefulMemesVgpt2ClassificationInContextAccWithKLAndEntropyROCAUC(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/Hateful-Memes' (config 'seen'). Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN, ROC_AUC. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['image'], context_column_names=['text']. length_normalize=False.
+    # prompt_templates_dict overrides templates with ids [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+    # 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27] (prefix + per-example
+    # pattern). mapping_class_names_to_prompt_names remaps dataset class names to the strings
+    # inserted in prompts. mapping_class_prompt_name_id_to_prompt_template_id selects which name
+    # mapping applies to each prompt template id.
     dataset_name: str = "HuggingFaceM4/Hateful-Memes"
     dataset_config: str = "seen"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -2034,6 +2250,13 @@ class HatefulMemesVgpt2ClassificationInContextAccWithKLAndEntropyROCAUC(Vgpt2Cla
 
 
 class ClevrVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/clevr' (config 'classification'). Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='validation',
+    # default_support_split_name='train'. Columns: label_column_name='answer',
+    # image_column_names=['image'], context_column_names=['question']. length_normalize=False.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/clevr"
     dataset_config: str = "classification"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -2061,10 +2284,22 @@ class ClevrVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationIn
 
 
 class ClevrSampleVgpt2ClassificationInContextAccWithKLAndEntropy(ClevrVgpt2ClassificationInContextAccWithKLAndEntropy):
+    # [CLASS DOC] Same task configuration as ClevrVgpt2ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/clevr-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/clevr-Sample"
 
 
 class SNLIVEImageOnlySampleVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/SNLI-VE-Sample'. Metric
+    # 'UnfoldedClassificationMetrics' computing: MEAN_PER_CLASS_ACCURACY, KL_DISTRIBUTION,
+    # KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['image'], context_column_names=['hypothesis']. length_normalize=False.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
+    # mapping_class_names_to_prompt_names remaps dataset class names to the strings inserted in
+    # prompts.
     dataset_name: str = "HuggingFaceM4/SNLI-VE-Sample"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2100,6 +2335,15 @@ class SNLIVEImageOnlySampleVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2
 
 
 class SNLIVEImagePremiseSampleVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/SNLI-VE_modif_premise_hypothesis-Sample'. Metric
+    # 'UnfoldedClassificationMetrics' computing: MEAN_PER_CLASS_ACCURACY, KL_DISTRIBUTION,
+    # KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['image'], context_column_names=['context']. length_normalize=False.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
+    # mapping_class_names_to_prompt_names remaps dataset class names to the strings inserted in
+    # prompts.
     dataset_name: str = "HuggingFaceM4/SNLI-VE_modif_premise_hypothesis-Sample"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2133,6 +2377,15 @@ class SNLIVEImagePremiseSampleVgpt2ClassificationInContextAccWithKLAndEntropy(Vg
 
 
 class FairFaceAgeVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/FairFace'. Metric 'UnfoldedClassificationMetrics'
+    # computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN,
+    # PER_BUCKET_ACCURACY. Splits: default_query_split_name='validation',
+    # default_support_split_name='train'. Columns: label_column_name='age',
+    # image_column_names=['image']. length_normalize=False. buckets_keys=['gender', 'race'].
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
+    # mapping_class_names_to_prompt_names remaps dataset class names to the strings inserted in
+    # prompts.
     dataset_name: str = "HuggingFaceM4/FairFace"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2173,10 +2426,22 @@ class FairFaceAgeVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2Classifica
 class FairFaceAgeSampleVgpt2ClassificationInContextAccWithKLAndEntropy(
     FairFaceAgeVgpt2ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as FairFaceAgeVgpt2ClassificationInContextAccWithKLAndEntropy, but
+    # loads dataset 'HuggingFaceM4/FairFace-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/FairFace-Sample"
 
 
 class FairFaceGenderVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/FairFace'. Metric 'UnfoldedClassificationMetrics'
+    # computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN,
+    # PER_BUCKET_ACCURACY. Splits: default_query_split_name='validation',
+    # default_support_split_name='train'. Columns: label_column_name='gender',
+    # image_column_names=['image']. length_normalize=False. buckets_keys=['gender', 'race'].
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
+    # mapping_class_names_to_prompt_names remaps dataset class names to the strings inserted in
+    # prompts.
     dataset_name: str = "HuggingFaceM4/FairFace"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2210,10 +2475,22 @@ class FairFaceGenderVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2Classif
 class FairFaceGenderSampleVgpt2ClassificationInContextAccWithKLAndEntropy(
     FairFaceGenderVgpt2ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as FairFaceGenderVgpt2ClassificationInContextAccWithKLAndEntropy,
+    # but loads dataset 'HuggingFaceM4/FairFace-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/FairFace-Sample"
 
 
 class FairFaceRaceVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/FairFace'. Metric 'UnfoldedClassificationMetrics'
+    # computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN,
+    # PER_BUCKET_ACCURACY. Splits: default_query_split_name='validation',
+    # default_support_split_name='train'. Columns: label_column_name='race',
+    # image_column_names=['image']. length_normalize=False. buckets_keys=['gender', 'race'].
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
+    # mapping_class_names_to_prompt_names remaps dataset class names to the strings inserted in
+    # prompts.
     dataset_name: str = "HuggingFaceM4/FairFace"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2252,10 +2529,24 @@ class FairFaceRaceVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2Classific
 class FairFaceRaceSampleVgpt2ClassificationInContextAccWithKLAndEntropy(
     FairFaceGenderVgpt2ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as FairFaceGenderVgpt2ClassificationInContextAccWithKLAndEntropy,
+    # but loads dataset 'HuggingFaceM4/FairFace-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/FairFace-Sample"
 
 
 class NLVR2SampleVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/NLVR2-Sample'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['left_image', 'right_image'], context_column_names=['sentence'].
+    # length_normalize=False. prompt_templates_dict overrides templates with ids [0] (prefix +
+    # per-example pattern). mapping_class_names_to_prompt_names remaps dataset class names to the
+    # strings inserted in prompts.
+    # KNOWN ISSUE: the template contains {image_token}/{token_around_image} fields that _create_example_prompt
+    # never supplies (KeyError) and only one <image> for two image columns (ValueError).
     dataset_name: str = "HuggingFaceM4/NLVR2-Sample"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2289,6 +2580,19 @@ class NLVR2SampleVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2Classifica
 
 
 class NLVR2NewSplitsVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/NLVR2_support_query_sets'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='validation_query_set',
+    # default_support_split_name='validation_support_set',
+    # validation_query_split_name='validation_query_set',
+    # validation_support_split_name='validation_support_set',
+    # test_query_split_name='test_query_set', test_support_split_name='test_support_set'. Columns:
+    # label_column_name='label', image_column_names=['left_image', 'right_image'],
+    # context_column_names=['sentence']. length_normalize=False. prompt_templates_dict overrides
+    # templates with ids [0] (prefix + per-example pattern).
+    # KNOWN ISSUE: the template contains {image_token}/{token_around_image} fields that _create_example_prompt
+    # never supplies (KeyError) and only one <image> for two image columns (ValueError).
     dataset_name: str = "HuggingFaceM4/NLVR2_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2323,6 +2627,13 @@ class NLVR2NewSplitsVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2Classif
 
 
 class ScienceQAVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/ScienceQA_modif'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['image'], context_column_names=['context']. length_normalize=False.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/ScienceQA_modif"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2349,6 +2660,18 @@ class ScienceQAVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2Classificati
 
 
 class ScienceQANewSplitsVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/ScienceQA_support_query_sets'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='validation_query_set',
+    # default_support_split_name='validation_support_set',
+    # validation_query_split_name='validation_query_set',
+    # validation_support_split_name='validation_support_set',
+    # test_query_split_name='test_query_set', test_support_split_name='test_support_set'. Columns:
+    # label_column_name='label', image_column_names=['image'], context_column_names=['question',
+    # 'hint', 'context', 'lecture', 'solution'], tested_ex_excluded_context_columns=['lecture',
+    # 'solution']. length_normalize=False. prompt_templates_dict overrides templates with ids [0]
+    # (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/ScienceQA_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2385,10 +2708,21 @@ class ScienceQANewSplitsVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2Cla
 class ScienceQASampleVgpt2ClassificationInContextAccWithKLAndEntropy(
     ScienceQAVgpt2ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as ScienceQAVgpt2ClassificationInContextAccWithKLAndEntropy, but
+    # loads dataset 'HuggingFaceM4/ScienceQA_modif-Sample' - a small sample used for quick
+    # evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/ScienceQA_modif-Sample"
 
 
 class IIIT5KVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/IIIT-5K-classif'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # tested_labels_column_name='small_lexicon', image_column_names=['image'].
+    # length_normalize=False. prompt_templates_dict overrides templates with ids [0] (prefix +
+    # per-example pattern).
     dataset_name: str = "HuggingFaceM4/IIIT-5K-classif"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2417,12 +2751,19 @@ class IIIT5KVgpt2ClassificationInContextAccWithKLAndEntropy(Vgpt2ClassificationI
 class IIIT5KSampleVgpt2ClassificationInContextAccWithKLAndEntropy(
     IIIT5KVgpt2ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as IIIT5KVgpt2ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/IIIT-5K-classif-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/IIIT-5K-classif-Sample"
 
 
 class SimpleImageNet1kVgpt2ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kVgpt2ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of ImageNet1kVgpt2ClassificationInContextAccWithKLAndEntropy;
+    # declares only class attributes (no new behavior). Dataset: 'HuggingFaceM4/simple-
+    # imagenet-1k'. Metric computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN, ENTROPY_DISTRIBUTION,
+    # ENTROPY_MEAN. Columns: tested_labels_column_name='lexicon'.
     dataset_name: str = "HuggingFaceM4/simple-imagenet-1k"
     metric_kwargs = {
         "metrics": [
@@ -2439,4 +2780,7 @@ class SimpleImageNet1kVgpt2ClassificationInContextAccWithKLAndEntropy(
 class SimpleImageNet1kSampleVgpt2ClassificationInContextAccWithKLAndEntropy(
     SimpleImageNet1kVgpt2ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as SimpleImageNet1kVgpt2ClassificationInContextAccWithKLAndEntropy,
+    # but loads dataset 'HuggingFaceM4/simple-imagenet-1k-Sample' - a small sample used for quick
+    # evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/simple-imagenet-1k-Sample"

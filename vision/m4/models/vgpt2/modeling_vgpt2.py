@@ -1,4 +1,9 @@
 # coding=utf-8
+# [MODULE DOC] PyTorch VGPT2: a GPT-2 language model augmented Flamingo-style with gated cross-attention
+# blocks that attend to vision-encoder (optionally Perceiver-resampled) image features. Adapted
+# from HF transformers' GPT-2. Provides the GPT-2 building blocks (attention, MLP, block), the
+# gated cross-attention block, the pretrained base class, VGPT2Model (backbone) and
+# VGPT2LMHeadModel (LM head, generation helpers, TFLOPs estimate).
 # Copyright 2018 The OpenAI Team Authors and HuggingFace Inc. team.
 # Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -64,6 +69,12 @@ GPT2_PRETRAINED_MODEL_ARCHIVE_LIST = [
 
 
 def load_tf_weights_in_gpt2(model, config, gpt2_checkpoint_path):
+    # [FUNCTION DOC] Load an original TensorFlow GPT-2 checkpoint into a PyTorch `model`. Requires tensorflow
+    # (logs and re-raises ImportError otherwise). Lists checkpoint variables, strips the
+    # "model/" prefix, walks the module tree following the "/"-separated names (w/g -> weight,
+    # b -> bias, wpe/wte -> embedding weight, names with trailing digits index into module
+    # lists), asserts shapes match and assigns the numpy arrays. Logs progress. Returns the
+    # model.
     """Load tf checkpoints in a pytorch model"""
     try:
         import re
@@ -121,7 +132,15 @@ def load_tf_weights_in_gpt2(model, config, gpt2_checkpoint_path):
 
 
 class GPT2Attention(nn.Module):
+    # [CLASS DOC] GPT-2 multi-head attention (self or cross) using Conv1D projections, a registered causal
+    # mask buffer, optional scaling by 1/sqrt(head_dim) and by 1/(layer_idx+1), optional
+    # upcast/reordered computation and head pruning.
     def __init__(self, config, is_cross_attention=False, layer_idx=None):
+        # [FUNCTION DOC] Build attention from config (max_position_embeddings, hidden_size,
+        # num_attention_heads, scale_attn_weights, scale_attn_by_inverse_layer_idx,
+        # reorder_and_upcast_attn, attn_pdrop, resid_pdrop). Cross-attention uses a q
+        # projection from hidden_size and a k/v projection from config.vision_embed_dim (if
+        # present). Raises ValueError if hidden_size is not divisible by the number of heads.
         super().__init__()
 
         max_positions = config.max_position_embeddings
@@ -165,6 +184,8 @@ class GPT2Attention(nn.Module):
         self.pruned_heads = set()
 
     def prune_heads(self, heads):
+        # [FUNCTION DOC] Remove the given heads (set of indices) from the c_attn/c_proj projections and update
+        # split_size, num_heads and pruned_heads. No-op for an empty set.
         if len(heads) == 0:
             return
         heads, index = find_pruneable_heads_and_indices(heads, self.num_heads, self.head_dim, self.pruned_heads)
@@ -180,6 +201,9 @@ class GPT2Attention(nn.Module):
         self.pruned_heads = self.pruned_heads.union(heads)
 
     def _attn(self, query, key, value, attention_mask=None, head_mask=None):
+        # [FUNCTION DOC] HELPER: Standard attention: QK^T, optional scaling, causal masking for self-attention
+        # (using the bias buffer slice), additive attention_mask, softmax, cast to value dtype,
+        # dropout, optional head_mask; returns (output, weights).
         attn_weights = torch.matmul(query, key.transpose(-1, -2))
 
         if self.scale_attn_weights:
@@ -221,6 +245,9 @@ class GPT2Attention(nn.Module):
 
     def _upcast_and_reordered_attn(self, query, key, value, attention_mask=None, head_mask=None):
         # Use `torch.baddbmm` (a bit more efficient w/ alpha param for scaling -- from Megatron-LM)
+        # [FUNCTION DOC] HELPER: Same as _attn but computes the scaled QK^T in float32 with baddbmm and
+        # autocast disabled for numerical stability; raises RuntimeError if weights are not
+        # float32 before the downcast.
         bsz, num_heads, q_seq_len, dk = query.size()
         _, _, k_seq_len, _ = key.size()
 
@@ -272,6 +299,7 @@ class GPT2Attention(nn.Module):
         return attn_output, attn_weights
 
     def _split_heads(self, tensor, num_heads, attn_head_size):
+        # [FUNCTION DOC] HELPER: Reshape (batch, seq, hidden) to (batch, heads, seq, head_dim).
         """
         Splits hidden_size dim into attn_head_size and num_heads
         """
@@ -280,6 +308,8 @@ class GPT2Attention(nn.Module):
         return tensor.permute(0, 2, 1, 3)  # (batch, head, seq_length, head_features)
 
     def _merge_heads(self, tensor, num_heads, attn_head_size):
+        # [FUNCTION DOC] HELPER: Inverse of _split_heads: (batch, heads, seq, head_dim) -> (batch, seq,
+        # hidden).
         """
         Merges attn_head_size dim and num_attn_heads dim into hidden_size
         """
@@ -298,6 +328,11 @@ class GPT2Attention(nn.Module):
         use_cache: Optional[bool] = False,
         output_attentions: Optional[bool] = False,
     ) -> Tuple[Union[torch.Tensor, Tuple[torch.Tensor]], ...]:
+        # [FUNCTION DOC] Compute attention for hidden_states. With encoder_hidden_states (cross-attention)
+        # queries come from q_attn and keys/values from the encoder states, and
+        # encoder_attention_mask replaces attention_mask (ValueError if the module was not
+        # built for cross-attention). Concatenates layer_past keys/values, returns (output,
+        # present or None[, attention weights]).
         if encoder_hidden_states is not None:
             if not hasattr(self, "q_attn"):
                 raise ValueError(
@@ -342,7 +377,10 @@ class GPT2Attention(nn.Module):
 
 
 class GPT2MLP(nn.Module):
+    # [CLASS DOC] GPT-2 feed-forward: Conv1D up-projection, activation, Conv1D down-projection, dropout.
     def __init__(self, intermediate_size, config):
+        # [FUNCTION DOC] Build the MLP with the given intermediate_size and config hidden
+        # size/activation/dropout.
         super().__init__()
         embed_dim = config.hidden_size
         self.c_fc = Conv1D(intermediate_size, embed_dim)
@@ -351,6 +389,7 @@ class GPT2MLP(nn.Module):
         self.dropout = nn.Dropout(config.resid_pdrop)
 
     def forward(self, hidden_states: Optional[Tuple[torch.FloatTensor]]) -> torch.FloatTensor:
+        # [FUNCTION DOC] Apply the feed-forward network to hidden_states and return the result (same shape).
         hidden_states = self.c_fc(hidden_states)
         hidden_states = self.act(hidden_states)
         hidden_states = self.c_proj(hidden_states)
@@ -359,7 +398,11 @@ class GPT2MLP(nn.Module):
 
 
 class GPT2Block(nn.Module):
+    # [CLASS DOC] Pre-LayerNorm GPT-2 transformer block: self-attention, optional cross-attention, MLP, all
+    # residual.
     def __init__(self, config, layer_idx=None):
+        # [FUNCTION DOC] Create ln_1, attention, ln_2, the MLP (inner size n_inner or 4*hidden) and, when
+        # config.add_cross_attention, a cross-attention layer with its LayerNorm.
         super().__init__()
         hidden_size = config.hidden_size
         inner_dim = config.n_inner if config.n_inner is not None else 4 * hidden_size
@@ -385,6 +428,9 @@ class GPT2Block(nn.Module):
         use_cache: Optional[bool] = False,
         output_attentions: Optional[bool] = False,
     ) -> Union[Tuple[torch.Tensor], Optional[Tuple[torch.Tensor, Tuple[torch.FloatTensor, ...]]]]:
+        # [FUNCTION DOC] Run the block. Returns (hidden_states, present?, self-attn weights?, cross-attn
+        # weights?) where present is included only with use_cache. Raises ValueError if
+        # encoder_hidden_states are given without cross-attention layers.
         residual = hidden_states
         hidden_states = self.ln_1(hidden_states)
         attn_outputs = self.attn(
@@ -437,7 +483,15 @@ class GPT2Block(nn.Module):
 
 
 class VGPT2GatedCrossAttentionBlock(nn.Module):
+    # [CLASS DOC] Flamingo-style gated cross-attention block: LayerNorm + cross-attention to image features
+    # and LayerNorm + MLP, each residual branch scaled by tanh(alpha) with learnable alphas.
     def __init__(self, config, layer_idx=None):
+        # [FUNCTION DOC] Build layers and the alpha gates from config.alpha_initializer ("zeros", "ones", or
+        # "normal"/"gaussian"/"random" with std alphas_initializer_range) and config.alpha_type
+        # ("vector" of shape (1,1,hidden) or "float" of shape (1)). Raises ValueError for
+        # unknown alpha_type, NotImplementedError for an unknown initializer.
+        # KNOWN ISSUE: for random init with alpha_type "float", size=(1) is an int rather than a tuple, which
+        # torch.normal rejects.
         super().__init__()
         hidden_size = config.hidden_size
         inner_dim = config.n_inner if config.n_inner is not None else 4 * hidden_size
@@ -498,6 +552,11 @@ class VGPT2GatedCrossAttentionBlock(nn.Module):
         use_cache: Optional[bool] = False,
         output_attentions: Optional[bool] = False,
     ) -> Union[Tuple[torch.Tensor], Optional[Tuple[torch.Tensor, Tuple[torch.FloatTensor, ...]]]]:
+        # [FUNCTION DOC] Apply gated cross-attention to image_hidden_states (required, ValueError if None)
+        # with image_attention_mask, then the gated MLP. Returns (hidden_states, ...) in the
+        # GPT2Block output layout.
+        # KNOWN ISSUE: outputs already contain cross_attn_outputs[1:], and cross_attn_outputs[2:] is appended
+        # again, so attention weights are duplicated when output_attentions is True.
         if image_hidden_states is None:
             raise ValueError(
                 "`image_hidden_states` is required for VGPT2 cross attention module which are visual features to be"
@@ -543,6 +602,9 @@ class VGPT2GatedCrossAttentionBlock(nn.Module):
 
 
 class VGPT2PreTrainedModel(VLOOMPreTrainedModelBase):
+    # [CLASS DOC] Abstract base for VGPT2 models: config class, TF weight loader, base_model_prefix
+    # "transformer", parallelization/gradient-checkpointing support and GPT-2 weight
+    # initialization.
     """
     An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained
     models.
@@ -556,9 +618,14 @@ class VGPT2PreTrainedModel(VLOOMPreTrainedModelBase):
     _no_split_modules = ["GPT2Block"]
 
     def __init__(self, *inputs, **kwargs):
+        # [FUNCTION DOC] Forward all arguments to VLOOMPreTrainedModelBase.
         super().__init__(*inputs, **kwargs)
 
     def _init_weights(self, module):
+        # [FUNCTION DOC] Initialize a module: Linear/Conv1D and Embedding weights ~ N(0, initializer_range)
+        # (zero bias, zero padding row), LayerNorm to weight 1/bias 0; then any parameter named
+        # "c_proj.weight" is re-drawn with std initializer_range / sqrt(2 * n_layer) (GPT-2
+        # residual scaling).
         """Initialize the weights."""
         if isinstance(module, (nn.Linear, Conv1D)):
             # Slightly different from the TF version which uses truncated_normal for initialization
@@ -586,12 +653,16 @@ class VGPT2PreTrainedModel(VLOOMPreTrainedModelBase):
                 p.data.normal_(mean=0.0, std=(self.config.initializer_range / math.sqrt(2 * self.config.n_layer)))
 
     def _set_gradient_checkpointing(self, module, value=False):
+        # [FUNCTION DOC] Set gradient_checkpointing=value on VGPT2Model modules.
         if isinstance(module, VGPT2Model):
             module.gradient_checkpointing = value
 
     @classmethod
     def override_vision_model_wrapper(cls, model, config, vision_model_name, vision_model_params, torch_dtype):
         # this can be called via from_pretrained from a class w/ head or w/o head so we extract the beheaded model version
+        # [FUNCTION DOC] Classmethod: replace the vision encoder of `model` (or of model.transformer when it
+        # has a head) via override_vision_model(vision_model_name, vision_model_params,
+        # torch_dtype) and re-apply parameter freezing from config.
         beheaded_model = model.transformer if hasattr(model, "transformer") else model
         cls.override_vision_model(beheaded_model, vision_model_name, vision_model_params, torch_dtype)
         beheaded_model.freeze_relevant_params(config)
@@ -715,9 +786,15 @@ DEPARALLELIZE_DOCSTRING = r"""
     GPT2_START_DOCSTRING,
 )
 class VGPT2Model(VGPT2PreTrainedModel):
+    # [CLASS DOC] VGPT2 backbone: decoupled token embedding (extra trainable vocabulary), positional
+    # embedding, GPT-2 blocks, a gated cross-attention block before every cross_layer_interval-th
+    # block, optional Perceiver resampler, final LayerNorm and an external vision_model.
     _keys_to_ignore_on_load_missing = ["attn.masked_bias"]
 
     def __init__(self, config, vision_model=None):
+        # [FUNCTION DOC] Build all submodules from config (vocab/additional vocab, hidden size, layers,
+        # cross_layer_interval, resampler settings, image_token_index), store vision_model, run
+        # post_init and freeze parameters per config.
         super().__init__(config)
 
         self.embed_dim = config.hidden_size
@@ -768,6 +845,8 @@ class VGPT2Model(VGPT2PreTrainedModel):
         self.freeze_relevant_params(config)
 
     def freeze_relevant_params(self, config=None):
+        # [FUNCTION DOC] Freeze text layers if config.freeze_text_layers and the vision model if
+        # config.freeze_vision_layers (config defaults to self.config).
         if config is None:
             config = self.config
 
@@ -778,6 +857,8 @@ class VGPT2Model(VGPT2PreTrainedModel):
             freeze_model(self.vision_model)
 
     def freeze_text_layers(self):
+        # [FUNCTION DOC] Freeze wpe, all GPT-2 blocks and ln_f (token embeddings are handled by
+        # DecoupledEmbedding).
         for module in [self.wpe, self.h, self.ln_f]:
             freeze_model(module)
 
@@ -785,6 +866,9 @@ class VGPT2Model(VGPT2PreTrainedModel):
     # TODO(aps): Implement later for VGPT2
     def parallelize(self, device_map=None):
         # Check validity of device_map
+        # [FUNCTION DOC] Naive model parallelism: place wte/wpe on the first device, blocks per device_map
+        # (default: even split over visible GPUs, validated) and ln_f on the last device.
+        # Cross-attention layers, resampler and vision model are not moved (marked TODO).
         self.device_map = (
             get_device_map(len(self.h), range(torch.cuda.device_count())) if device_map is None else device_map
         )
@@ -805,6 +889,8 @@ class VGPT2Model(VGPT2PreTrainedModel):
     @add_start_docstrings(DEPARALLELIZE_DOCSTRING)
     # TODO(aps): Implement later for VGPT2
     def deparallelize(self):
+        # [FUNCTION DOC] Move embeddings, blocks and ln_f back to CPU, reset parallel state and empty the CUDA
+        # cache.
         self.model_parallel = False
         self.device_map = None
         self.first_device = "cpu"
@@ -817,12 +903,15 @@ class VGPT2Model(VGPT2PreTrainedModel):
         torch.cuda.empty_cache()
 
     def get_input_embeddings(self):
+        # [FUNCTION DOC] Return the token embedding module (wte).
         return self.wte
 
     def set_input_embeddings(self, new_embeddings):
+        # [FUNCTION DOC] Replace the token embedding module.
         self.wte = new_embeddings
 
     def _prune_heads(self, heads_to_prune):
+        # [FUNCTION DOC] Prune self-attention heads given a dict {layer index: list of heads}.
         """
         Prunes heads of the model. heads_to_prune: dict of {layer_num: list of heads to prune in this layer}
         """
@@ -854,6 +943,20 @@ class VGPT2Model(VGPT2PreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPastAndCrossAttentions]:
+        # [FUNCTION DOC] Run the backbone. Exactly one of input_ids / inputs_embeds and of pixel_values /
+        # image_embeddings must be given (ValueError otherwise). pixel_values (batch, n_images,
+        # 3, H, W) are encoded by vision_model (last_hidden_state); image_embeddings (batch,
+        # n_images, seq, dim) are used directly; optionally resampled, then flattened to
+        # (batch, n_images*seq, dim). image_attention_mask (batch, text_len, n_images) is
+        # expanded per image token and inverted to an additive mask. The 2-D attention_mask
+        # becomes an additive mask; positions start at the cache length. For each block i, the
+        # gated cross-attention block i // cross_layer_interval runs first when i is a multiple
+        # of the interval (with gradient checkpointing in training, disabling use_cache).
+        # Returns BaseModelOutputWithPastAndCrossAttentions or a tuple (hidden, presents,
+        # hidden_states, attentions...).
+        # KNOWN ISSUE: image_attention_mask is used before its None check (crash if None, the default branch
+        # is dead); without pixel_values/image_embeddings image_hidden_states is undefined;
+        # crossblock_head_mask is ignored.
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -998,6 +1101,10 @@ class VGPT2Model(VGPT2PreTrainedModel):
             ):
                 # TODO(aps): Add cross attention values to respective lists
                 # TODO(aps): Add xblock head mask support
+                # [FUNCTION DOC] HELPER: One layer step: if layer_idx % cross_layer_interval == 0 apply the
+                # matching gated cross-attention block to hidden_states, then run main_block
+                # (GPT2Block) and return its outputs. Defined as a plain function so it can be
+                # wrapped by torch.utils.checkpoint.
                 if layer_idx % cross_layer_interval == 0:
                     xblock = gated_cross_attn_layers[layer_idx // cross_layer_interval]
                     outputs = xblock(
@@ -1106,9 +1213,13 @@ class VGPT2Model(VGPT2PreTrainedModel):
     GPT2_START_DOCSTRING,
 )
 class VGPT2LMHeadModel(VGPT2PreTrainedModel):
+    # [CLASS DOC] VGPT2Model with a (decoupled) linear language-modeling head tied to the input embeddings.
     _keys_to_ignore_on_load_missing = [r"attn.masked_bias", r"attn.bias", r"lm_head.weight"]
 
     def __init__(self, config, vision_model=None):
+        # [FUNCTION DOC] Create the transformer backbone (with optional vision_model) and a DecoupledLinear
+        # head (n_embd -> vocab_size + additional_vocab_size, no bias, freezable via
+        # freeze_lm_head), then post_init.
         super().__init__(config)
         self.transformer = VGPT2Model(config, vision_model=vision_model)
         self.lm_head = DecoupledLinear(
@@ -1128,6 +1239,8 @@ class VGPT2LMHeadModel(VGPT2PreTrainedModel):
 
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
     def parallelize(self, device_map=None):
+        # [FUNCTION DOC] Parallelize the backbone with a (default or given) device_map and put lm_head on the
+        # first device.
         self.device_map = (
             get_device_map(len(self.transformer.h), range(torch.cuda.device_count()))
             if device_map is None
@@ -1140,6 +1253,7 @@ class VGPT2LMHeadModel(VGPT2PreTrainedModel):
 
     @add_start_docstrings(DEPARALLELIZE_DOCSTRING)
     def deparallelize(self):
+        # [FUNCTION DOC] Move backbone and head back to CPU and empty the CUDA cache.
         self.transformer.deparallelize()
         self.transformer = self.transformer.to("cpu")
         self.lm_head = self.lm_head.to("cpu")
@@ -1147,12 +1261,17 @@ class VGPT2LMHeadModel(VGPT2PreTrainedModel):
         torch.cuda.empty_cache()
 
     def get_output_embeddings(self):
+        # [FUNCTION DOC] Return lm_head.
         return self.lm_head
 
     def set_output_embeddings(self, new_embeddings):
+        # [FUNCTION DOC] Replace lm_head.
         self.lm_head = new_embeddings
 
     def tie_weights(self):
+        # [FUNCTION DOC] Tie lm_head weights (and additional-vocabulary weights, asserting matching sizes) to
+        # the input embeddings when config.tie_word_embeddings (default True), and sync
+        # out_features / out_additional_features with the embedding sizes.
         """
         Overwrite `transformers.modeling_utils.PreTrainedModel.tie_weights` to handle the case of DecoupledLinear and DecoupledEmbedding.
         """
@@ -1173,6 +1292,7 @@ class VGPT2LMHeadModel(VGPT2PreTrainedModel):
                 output_embeddings.out_additional_features = input_embeddings.num_additional_embeddings
 
     def prepare_inputs_for_generation(self, input_ids, past=None, **kwargs):
+        # [FUNCTION DOC] Delegate to m4.models.common.prepare_inputs_for_generation.
         return prepare_inputs_for_generation(input_ids, past=past, **kwargs)
 
     @staticmethod
@@ -1180,10 +1300,13 @@ class VGPT2LMHeadModel(VGPT2PreTrainedModel):
         *args,
         **model_kwargs,
     ):
+        # [FUNCTION DOC] Staticmethod delegating to m4.models.common.expand_inputs_for_generation (beam/sample
+        # expansion).
         return expand_inputs_for_generation(*args, **model_kwargs)
 
     @staticmethod
     def _update_model_kwargs_for_generation(outputs, model_kwargs, is_encoder_decoder=False):
+        # [FUNCTION DOC] Staticmethod delegating to m4.models.common.update_model_kwargs_for_generation.
         return update_model_kwargs_for_generation(outputs, model_kwargs, is_encoder_decoder)
 
     @add_start_docstrings_to_model_forward(GPT2_INPUTS_DOCSTRING)
@@ -1212,6 +1335,10 @@ class VGPT2LMHeadModel(VGPT2PreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, CausalLMOutputWithCrossAttentions]:
+        # [FUNCTION DOC] Run the backbone and LM head. If labels are given compute the mean next-token cross-
+        # entropy, restricted to positions where the shifted attention_mask is non-zero when a
+        # mask is provided. Returns CausalLMOutputWithCrossAttentions or a tuple (loss?,
+        # logits, ...).
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
             Labels for language modeling. Note that the labels **are shifted** inside the model, i.e. you can set
@@ -1275,6 +1402,7 @@ class VGPT2LMHeadModel(VGPT2PreTrainedModel):
 
     @staticmethod
     def _reorder_cache(past: Tuple[Tuple[torch.Tensor]], beam_idx: torch.Tensor) -> Tuple[Tuple[torch.Tensor]]:
+        # [FUNCTION DOC] Staticmethod: reorder every cached key/value tensor along the batch dim by beam_idx.
         """
         This function is used to re-order the `past_key_values` cache if [`~PreTrainedModel.beam_search`] or
         [`~PreTrainedModel.beam_sample`] is called. This is required to match `past_key_values` with the correct
@@ -1286,6 +1414,12 @@ class VGPT2LMHeadModel(VGPT2PreTrainedModel):
         )
 
     def get_model_tflops_per_batch_per_gpu(self, hparams, data_param, tokenizer, max_num_images):
+        # [FUNCTION DOC] Estimate training TFLOPs per batch per GPU as the sum of language blocks, cross-
+        # attention blocks (keys from images: resampler latents or patches+CLS times
+        # max_num_images), vision encoder (backward counted only if vision is not frozen) and
+        # optional Perceiver resampler, using hparams (batch_size_per_gpu, grad_acc_size,
+        # gradient_checkpointing, model_params) and data_param.max_seq_len and
+        # tokenizer.vocab_size.
         config_vl_model = self.config
 
         language_embed_size = config_vl_model.n_embd

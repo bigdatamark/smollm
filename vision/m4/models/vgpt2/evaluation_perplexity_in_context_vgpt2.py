@@ -1,3 +1,7 @@
+# [MODULE DOC] Zero-shot perplexity evaluation tasks for VGPT2 models on image-caption pair datasets or web
+# documents (interleaved images and text), reporting per-example perplexity via
+# MetricsPerplexity. Note: the base constructor always raises NotImplementedError, so none of
+# these tasks can currently be built.
 import os
 from typing import Dict, List
 
@@ -19,6 +23,10 @@ from m4.training.utils import (
 
 
 class Vgpt2PerplexityInContext(BaseTask):
+    # [CLASS DOC] Base perplexity task. Class attributes: image_column_name, text_column_name,
+    # context_column_name, ds_type (DatasetTypes.IMAGE_CAPTION_PAIRS or WEB_DOCUMENTS),
+    # add_end_of_doc_token / add_begin_of_doc_token, tokenizer_max_seq_len (1024), max_num_images
+    # (70, padding size for web documents).
     model_class: str = "VGPT2LMHeadModel"
     predictor_class: Predictor = Predictor.in_contexter
     target_keys: List[str] = ["example_ids"]
@@ -35,6 +43,12 @@ class Vgpt2PerplexityInContext(BaseTask):
     max_num_images = 70
 
     def __init__(self, **kwargs) -> None:
+        # [FUNCTION DOC] Parse kwargs (tokenizer_name, evaluation_version, optional tokenizer_use_fast,
+        # vision_encoder_type, image_seq_len, image_size), build the image transform and
+        # tokenizer (HF_TOKEN env), store image token id, eos token, pad id and
+        # token_around_image (ValueError for unknown evaluation version).
+        # KNOWN ISSUE: always raises NotImplementedError at the end (padding for variable image sizes not
+        # implemented), so the class is unusable.
         super().__init__(**kwargs)
         self.tokenizer_name = kwargs.pop("tokenizer_name")
         evaluation_version = kwargs.pop("evaluation_version")
@@ -67,10 +81,16 @@ class Vgpt2PerplexityInContext(BaseTask):
         )
 
     def get_info_from_dataset(self, dataset):
+        # [FUNCTION DOC] No-op hook.
         pass
 
     def get_data_collator(self, **kwargs):
+        # [FUNCTION DOC] Return a DataLoader collate function bound to the given kwargs (support dataset,
+        # num_shots, shot_selection_mode, prompt_template_id, ...) that are forwarded to
+        # prepare_dataset.
         def data_collator(batch):
+            # [FUNCTION DOC] HELPER: Convert a list of example dicts into a dict of column lists (keys from
+            # the first example) and return prepare_dataset(columns, **kwargs) for the batch.
             exs = {key: [ex[key] for ex in batch] for key in batch[0].keys()}
             batch = self.prepare_dataset(exs, **kwargs)
             return batch
@@ -78,6 +98,12 @@ class Vgpt2PerplexityInContext(BaseTask):
         return data_collator
 
     def prepare_image_caption_pair_ds(self, exs: Dict) -> Dict:
+        # [FUNCTION DOC] Build a batch for image-caption pairs: one prompt per example (image tokens + first
+        # caption, plus eos/bos per flags), tokenized with padding/truncation; each image
+        # transformed to (1, 3, H, W). Returns example_ids, input_ids, attention_mask,
+        # pixel_values.
+        # KNOWN ISSUE: context is read as exs[idx][column] although exs is a dict of columns (would fail), and
+        # caption=text[idx][0] takes the first character when the text column holds plain strings.
         nb_exs = len(exs["id"])
         tot_texts = [
             self._create_image_caption_pair_prompt(
@@ -112,12 +138,16 @@ class Vgpt2PerplexityInContext(BaseTask):
         }
 
     def _create_image_caption_pair_prompt(self, caption="", context=None):
+        # [FUNCTION DOC] HELPER: Return token_around_image + image_token * image_seq_len + token_around_image
+        # + caption; raises NotImplementedError when a context is given.
         if context is not None:
             raise NotImplementedError("Context not implemented for this task")
         prompt = f"{self.token_around_image}{self.image_token * self.image_seq_len}{self.token_around_image}{caption}"
         return prompt
 
     def _add_special_tokens_to_prompt(self, prompt):
+        # [FUNCTION DOC] HELPER: Append the tokenizer eos token if add_end_of_doc_token and prepend bos if
+        # add_begin_of_doc_token. Returns the prompt.
         if self.add_end_of_doc_token:
             prompt = f"{prompt}{self.tokenizer.eos_token}"
         if self.add_begin_of_doc_token:
@@ -125,6 +155,18 @@ class Vgpt2PerplexityInContext(BaseTask):
         return prompt
 
     def prepare_webdoc_ds(self, exs: Dict) -> Dict:
+        # [FUNCTION DOC] Build a batch from web documents (lists of images and texts with None gaps).
+        # Documents are split on the END_OF_DOCUMENT_TOKEN_TO_BE_REPLACED marker into sub-
+        # documents (dropping those without images; ValueError if image/text counts diverge).
+        # Each sub-document becomes text where each image is FAKE_TOKEN_AROUND_IMAGE_V2 +
+        # IMAGE_TOKEN (closing fake token before the next text / at the end), images are
+        # transformed and stacked. Token ids get eos/bos per flags, are right-padded with pad
+        # id to tokenizer_max_seq_len (truncated) with an attention mask; images are zero-
+        # padded to max_num_images. Returns example_ids, input_ids, attention_mask,
+        # pixel_values (lists of tensors).
+        # KNOWN ISSUE: uses FAKE_TOKEN_AROUND_IMAGE_V2 and one IMAGE_TOKEN per image regardless of
+        # evaluation_version / image_seq_len; last_was_image is not reset between documents; example_ids count
+        # can differ from the number of produced sub-documents.
         images_batch = exs[self.image_column_name]
         texts_batch = exs[self.text_column_name]
 
@@ -248,6 +290,8 @@ class Vgpt2PerplexityInContext(BaseTask):
         }
 
     def prepare_dataset(self, exs: Dict, **kwargs) -> Dict:
+        # [FUNCTION DOC] Validate kwargs["num_shots"] == 0 (ValueError otherwise) and dispatch on ds_type to
+        # prepare_image_caption_pair_ds or prepare_webdoc_ds (ValueError for other types).
         """
         Prepare batch of examples.
         """
@@ -267,6 +311,14 @@ class Vgpt2PerplexityInContext(BaseTask):
             raise ValueError(f"Invalid dataset type: {self.ds_type}")
 
     def get_perplexities(self, **kwargs):
+        # [FUNCTION DOC] Compute per-example perplexity: stack inputs on the model device (DeepSpeed ZeRO-3
+        # forward flag set as in generation), switch the unwrapped model to eval and run it
+        # under no_grad with labels=input_ids. Image tokens are removed from the attention mask
+        # (in place) and image/pad tokens are excluded from the cross-entropy; loss is summed
+        # per row, divided by the count of remaining tokens and exponentiated. Returns a 1-D
+        # tensor.
+        # KNOWN ISSUE: after boolean masking the flat loss is reshaped to (batch, -1), which fails or mixes
+        # rows when examples have different numbers of kept tokens.
         model = kwargs["model"]
         input_ids = torch.stack(kwargs["input_ids"]).to(model.device)
         attention_mask = torch.stack(kwargs["attention_mask"]).to(model.device)
@@ -305,6 +357,8 @@ class Vgpt2PerplexityInContext(BaseTask):
         return perplexities
 
     def add_batch_metric(self, metric, **kwargs):
+        # [FUNCTION DOC] Compute perplexities and call metric.add_batch(perplexities=..., example_ids).
+        # Returns metric.
         perplexities = self.get_perplexities(**kwargs)
         metric.add_batch(
             perplexities=perplexities,
@@ -314,6 +368,10 @@ class Vgpt2PerplexityInContext(BaseTask):
 
 
 class TextCapsVgpt2PerplexityInContext(Vgpt2PerplexityInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2PerplexityInContext; declares only class attributes (no
+    # new behavior). Dataset: 'HuggingFaceM4/TextCaps'. Metric 'PerplexityMetrics' computing:
+    # PERPLEXITY. Splits: default_query_split_name='validation'. Columns:
+    # image_column_name='image', text_column_name='reference_strs'.
     dataset_name: str = "HuggingFaceM4/TextCaps"
     metric_name: str = "PerplexityMetrics"
     metric_kwargs = {"metrics": [MetricsPerplexity.PERPLEXITY]}
@@ -323,10 +381,16 @@ class TextCapsVgpt2PerplexityInContext(Vgpt2PerplexityInContext):
 
 
 class TextCapsSampleVgpt2PerplexityInContext(TextCapsVgpt2PerplexityInContext):
+    # [CLASS DOC] Same task configuration as TextCapsVgpt2PerplexityInContext, but loads dataset
+    # 'HuggingFaceM4/TextCaps-Sample' - a small sample used for quick evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/TextCaps-Sample"
 
 
 class CommonGenVgpt2PerplexityInContext(Vgpt2PerplexityInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2PerplexityInContext; declares only class attributes (no
+    # new behavior). Dataset: 'HuggingFaceM4/common_gen'. Metric 'PerplexityMetrics' computing:
+    # PERPLEXITY. Splits: default_query_split_name='validation'. Columns:
+    # image_column_name='image', context_column_name='concepts', text_column_name='target'.
     dataset_name: str = "HuggingFaceM4/common_gen"
     metric_name: str = "PerplexityMetrics"
     metric_kwargs = {"metrics": [MetricsPerplexity.PERPLEXITY]}
@@ -336,12 +400,18 @@ class CommonGenVgpt2PerplexityInContext(Vgpt2PerplexityInContext):
     text_column_name: str = "target"
 
     def _create_image_caption_pair_prompt(self, caption="", context=""):
+        # [FUNCTION DOC] HELPER: Prompt "<fake><image><fake>Input: {context}. Output: {caption}" with a single
+        # image token.
         return (
             f"{self.token_around_image}{self.image_token}{self.token_around_image}Input: {context}. Output: {caption}"
         )
 
 
 class NoCapsVgpt2PerplexityInContext(Vgpt2PerplexityInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2PerplexityInContext; declares only class attributes (no
+    # new behavior). Dataset: 'HuggingFaceM4/NoCaps'. Metric 'PerplexityMetrics' computing:
+    # PERPLEXITY. Splits: default_query_split_name='validation'. Columns:
+    # image_column_name='image', text_column_name='annotations_captions'.
     dataset_name: str = "HuggingFaceM4/NoCaps"
     metric_name: str = "PerplexityMetrics"
     metric_kwargs = {"metrics": [MetricsPerplexity.PERPLEXITY]}
@@ -352,10 +422,16 @@ class NoCapsVgpt2PerplexityInContext(Vgpt2PerplexityInContext):
 
 
 class NoCapsSampleVgpt2PerplexityInContext(NoCapsVgpt2PerplexityInContext):
+    # [CLASS DOC] Same task configuration as NoCapsVgpt2PerplexityInContext, but loads dataset
+    # 'HuggingFaceM4/NoCaps-Sample' - a small sample used for quick evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/NoCaps-Sample"
 
 
 class CocoVgpt2PerplexityInContext(Vgpt2PerplexityInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2PerplexityInContext; declares only class attributes (no
+    # new behavior). Dataset: 'HuggingFaceM4/COCO' (config '2014_captions'). Metric
+    # 'PerplexityMetrics' computing: PERPLEXITY. Splits: default_query_split_name='validation'.
+    # Columns: image_column_name='image', text_column_name='sentences_raw'.
     dataset_name: str = "HuggingFaceM4/COCO"
     dataset_config = "2014_captions"
     metric_name: str = "PerplexityMetrics"
@@ -366,11 +442,18 @@ class CocoVgpt2PerplexityInContext(Vgpt2PerplexityInContext):
 
 
 class CocoSampleVgpt2PerplexityInContext(CocoVgpt2PerplexityInContext):
+    # [CLASS DOC] Same task configuration as CocoVgpt2PerplexityInContext, but loads dataset
+    # 'HuggingFaceM4/COCO-2014_captions-Sample' (dataset_config=None) - a small sample used for
+    # quick evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/COCO-2014_captions-Sample"
     dataset_config = None
 
 
 class IIIT5KVgpt2PerplexityInContext(Vgpt2PerplexityInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2PerplexityInContext; declares only class attributes (no
+    # new behavior). Dataset: 'HuggingFaceM4/IIIT-5K'. Metric 'PerplexityMetrics' computing:
+    # PERPLEXITY. Splits: default_query_split_name='test'. Columns: image_column_name='image',
+    # text_column_name='label'.
     dataset_name: str = "HuggingFaceM4/IIIT-5K"
     metric_name: str = "PerplexityMetrics"
     metric_kwargs = {"metrics": [MetricsPerplexity.PERPLEXITY]}
@@ -379,6 +462,8 @@ class IIIT5KVgpt2PerplexityInContext(Vgpt2PerplexityInContext):
     text_column_name: str = "label"
 
     def _create_image_caption_pair_prompt(self, caption="", context=None):
+        # [FUNCTION DOC] HELPER: Prompt "<fake><image><fake>A photo where it is written {caption}" with a
+        # single image token; NotImplementedError if a context is given.
         if context is not None:
             raise NotImplementedError("Context not implemented for this task")
         return (
@@ -388,10 +473,16 @@ class IIIT5KVgpt2PerplexityInContext(Vgpt2PerplexityInContext):
 
 
 class IIIT5KSampleVgpt2PerplexityInContext(IIIT5KVgpt2PerplexityInContext):
+    # [CLASS DOC] Same task configuration as IIIT5KVgpt2PerplexityInContext, but loads dataset
+    # 'HuggingFaceM4/IIIT-5K-Sample' - a small sample used for quick evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/IIIT-5K-Sample"
 
 
 class MiniGPTCaptionsVgpt2PerplexityInContext(Vgpt2PerplexityInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2PerplexityInContext; declares only class attributes (no
+    # new behavior). Dataset: 'HuggingFaceM4/mini-GPT-captions'. Metric 'PerplexityMetrics'
+    # computing: PERPLEXITY. Splits: default_query_split_name='train'. Columns:
+    # image_column_name='image', text_column_name='reference_strs'.
     dataset_name: str = "HuggingFaceM4/mini-GPT-captions"
     metric_name: str = "PerplexityMetrics"
     metric_kwargs = {"metrics": [MetricsPerplexity.PERPLEXITY]}

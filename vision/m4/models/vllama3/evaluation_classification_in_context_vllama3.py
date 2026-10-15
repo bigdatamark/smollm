@@ -1,3 +1,9 @@
+# [MODULE DOC] In-context classification task configurations for VLlama3: reuse Vgpt2ClassificationInContext
+# (scoring each candidate label) with model_class "VLlama3ForCausalLM" and declare many dataset
+# subclasses (Food101, CIFAR, Cars, DTD, SST2, SUN397, Pets, Caltech101, ImageNet-1k incl.
+# partitioned support sets, Hateful Memes, CLEVR, SNLI-VE, FairFace, NLVR2, ScienceQA, IIIT5K,
+# VisDial, MMBench, SEED, SugarCrepe, MMMU, MMStar, AI2D, ...). Classes contain only class
+# attributes.
 from typing import List
 
 from m4.evaluation.custom_metrics.unfolded_classification_metrics import ClassifMetrics
@@ -5,11 +11,19 @@ from m4.models.vgpt2.evaluation_classification_in_context_vgpt2 import Vgpt2Clas
 
 
 class VLlama3ClassificationInContext(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Base VLlama3 classification task: Vgpt2ClassificationInContext with model_class
+    # "VLlama3ForCausalLM" and a larger tokenizer_max_seq_len.
     model_class: str = "VLlama3ForCausalLM"
     tokenizer_max_seq_len = 10240
 
 
 class Food101VLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'food101'. Metric 'UnfoldedClassificationMetrics'
+    # computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits:
+    # default_query_split_name='validation', default_support_split_name='train'. Columns:
+    # label_column_name='label', image_column_names=['image']. length_normalize=False.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "food101"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -37,10 +51,19 @@ class Food101VLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Classifica
 class Food101SampleVLlama3ClassificationInContextAccWithKLAndEntropy(
     Food101VLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as Food101VLlama3ClassificationInContextAccWithKLAndEntropy, but
+    # loads dataset 'HuggingFaceM4/food101-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/food101-Sample"
 
 
 class Cifar10VLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'cifar10'. Metric 'UnfoldedClassificationMetrics'
+    # computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits:
+    # default_query_split_name='test', default_support_split_name='train'. Columns:
+    # label_column_name='label', image_column_names=['img']. length_normalize=False.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "cifar10"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -68,16 +91,27 @@ class Cifar10VLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Classifica
 class Cifar10SampleVLlama3ClassificationInContextAccWithKLAndEntropy(
     Cifar10VLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as Cifar10VLlama3ClassificationInContextAccWithKLAndEntropy, but
+    # loads dataset 'HuggingFaceM4/cifar10-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/cifar10-Sample"
 
 
 class Cifar10DummyVLlama3ClassificationInContextAccWithKLAndEntropy(
     Cifar10VLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as Cifar10VLlama3ClassificationInContextAccWithKLAndEntropy, but
+    # loads dataset 'HuggingFaceM4/cifar10-Dummy'.
     dataset_name: str = "HuggingFaceM4/cifar10-Dummy"
 
 
 class Cifar100VLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'cifar100'. Metric 'UnfoldedClassificationMetrics'
+    # computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits:
+    # default_query_split_name='test', default_support_split_name='train'. Columns:
+    # label_column_name='fine_label', image_column_names=['img']. length_normalize=False.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "cifar100"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -105,10 +139,20 @@ class Cifar100VLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Classific
 class Cifar100SampleVLlama3ClassificationInContextAccWithKLAndEntropy(
     Cifar100VLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as Cifar100VLlama3ClassificationInContextAccWithKLAndEntropy, but
+    # loads dataset 'HuggingFaceM4/cifar100-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/cifar100-Sample"
 
 
 class StanfordCarsVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/Stanford-Cars'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['image']. length_normalize=False. prompt_templates_dict overrides
+    # templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/Stanford-Cars"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -136,10 +180,20 @@ class StanfordCarsVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Class
 class StanfordCarsSampleVLlama3ClassificationInContextAccWithKLAndEntropy(
     StanfordCarsVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as StanfordCarsVLlama3ClassificationInContextAccWithKLAndEntropy,
+    # but loads dataset 'HuggingFaceM4/Stanford-Cars-Sample' - a small sample used for quick
+    # evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/Stanford-Cars-Sample"
 
 
 class DTDVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/DTD_Describable-Textures-Dataset'
+    # (config 'partition_1'). Metric 'UnfoldedClassificationMetrics' computing: ACCURACY,
+    # KL_DISTRIBUTION, KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits:
+    # default_query_split_name='test', default_support_split_name='train'. Columns:
+    # label_column_name='label', image_column_names=['image']. length_normalize=False.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/DTD_Describable-Textures-Dataset"
     dataset_config = "partition_1"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -166,10 +220,20 @@ class DTDVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Classification
 
 
 class DTDSampleVLlama3ClassificationInContextAccWithKLAndEntropy(DTDVLlama3ClassificationInContextAccWithKLAndEntropy):
+    # [CLASS DOC] Same task configuration as DTDVLlama3ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/DTD_Describable-Textures-Dataset-partition_1-Sample' - a small sample
+    # used for quick evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/DTD_Describable-Textures-Dataset-partition_1-Sample"
 
 
 class RenderedSST2VLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/RenderedSST2'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['image']. length_normalize=False. prompt_templates_dict overrides
+    # templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/RenderedSST2"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -197,10 +261,24 @@ class RenderedSST2VLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Class
 class RenderedSST2SampleVLlama3ClassificationInContextAccWithKLAndEntropy(
     RenderedSST2VLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as RenderedSST2VLlama3ClassificationInContextAccWithKLAndEntropy,
+    # but loads dataset 'HuggingFaceM4/RenderedSST2-Sample' - a small sample used for quick
+    # evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/RenderedSST2-Sample"
 
 
 class RenderedSST2NewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/RenderedSST2_support_query_sets'.
+    # Metric 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='validation_query_set',
+    # default_support_split_name='validation_support_set',
+    # validation_query_split_name='validation_query_set',
+    # validation_support_split_name='validation_support_set',
+    # test_query_split_name='test_query_set', test_support_split_name='test_support_set'. Columns:
+    # label_column_name='label', image_column_names=['image']. length_normalize=False.
+    # selected_prompt_template_id=2. prompt_templates_dict overrides templates with ids [0, 1, 2,
+    # 3, 4] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/RenderedSST2_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -258,6 +336,13 @@ class RenderedSST2NewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy(VLl
 
 
 class SUN397VLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/sun397' (config 'standard-
+    # part1-120k'). Metric 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION,
+    # KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['image']. length_normalize=False. prompt_templates_dict overrides
+    # templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/sun397"
     dataset_config = "standard-part1-120k"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -286,11 +371,21 @@ class SUN397VLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Classificat
 class SUN397SampleVLlama3ClassificationInContextAccWithKLAndEntropy(
     SUN397VLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as SUN397VLlama3ClassificationInContextAccWithKLAndEntropy, but
+    # loads dataset 'HuggingFaceM4/sun397-standard-part1-120k-Sample' (dataset_config=None) - a
+    # small sample used for quick evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/sun397-standard-part1-120k-Sample"
     dataset_config = None
 
 
 class OxfordPetsVLlama3ClassificationInContextMeanPerClassAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/Oxford-IIIT-Pet'. Metric
+    # 'UnfoldedClassificationMetrics' computing: MEAN_PER_CLASS_ACCURACY, KL_DISTRIBUTION,
+    # KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['image']. length_normalize=False. prompt_templates_dict overrides
+    # templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/Oxford-IIIT-Pet"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -318,11 +413,22 @@ class OxfordPetsVLlama3ClassificationInContextMeanPerClassAccWithKLAndEntropy(VL
 class OxfordPetsSampleVLlama3ClassificationInContextMeanPerClassAccWithKLAndEntropy(
     OxfordPetsVLlama3ClassificationInContextMeanPerClassAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # OxfordPetsVLlama3ClassificationInContextMeanPerClassAccWithKLAndEntropy, but loads dataset
+    # 'HuggingFaceM4/Oxford-IIIT-Pet-Sample' (dataset_config=None) - a small sample used for quick
+    # evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/Oxford-IIIT-Pet-Sample"
     dataset_config = None
 
 
 class Caltech101VLlama3ClassificationInContextMeanPerClassAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/Caltech-101' (config
+    # 'with_background_category'). Metric 'UnfoldedClassificationMetrics' computing:
+    # MEAN_PER_CLASS_ACCURACY, KL_DISTRIBUTION, KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN.
+    # Splits: default_query_split_name='test', default_support_split_name='train'. Columns:
+    # label_column_name='label', image_column_names=['image']. length_normalize=False.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/Caltech-101"
     dataset_config = "with_background_category"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -351,11 +457,24 @@ class Caltech101VLlama3ClassificationInContextMeanPerClassAccWithKLAndEntropy(VL
 class Caltech101SampleVLlama3ClassificationInContextMeanPerClassAccWithKLAndEntropy(
     Caltech101VLlama3ClassificationInContextMeanPerClassAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # Caltech101VLlama3ClassificationInContextMeanPerClassAccWithKLAndEntropy, but loads dataset
+    # 'HuggingFaceM4/Caltech-101-with_background_category-Sample' (dataset_config=None) - a small
+    # sample used for quick evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/Caltech-101-with_background_category-Sample"
     dataset_config = None
 
 
 class ImageNet1kVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'imagenet-1k'. Metric 'UnfoldedClassificationMetrics'
+    # computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits:
+    # default_query_split_name='validation', default_support_split_name='train'. Columns:
+    # label_column_name='label', image_column_names=['image']. length_normalize=False.
+    # selected_prompt_template_id=0. prompt_templates_dict overrides templates with ids [0]
+    # (prefix + per-example pattern). prompt_templates_dict_instruct overrides templates with ids
+    # [0] (prefix + per-example pattern). mapping_class_names_to_prompt_names remaps dataset class
+    # names to the strings inserted in prompts.
     dataset_name: str = "imagenet-1k"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -1407,6 +1526,15 @@ class ImageNet1kVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Classif
 class ImageNet1kNewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of ImageNet1kVLlama3ClassificationInContextAccWithKLAndEntropy;
+    # declares only class attributes (no new behavior). Dataset:
+    # 'HuggingFaceM4/imagenet1k_support_1k_query_sets'. Splits:
+    # default_query_split_name='validation_query_set',
+    # default_support_split_name='validation_support_set',
+    # validation_query_split_name='validation_query_set',
+    # validation_support_split_name='validation_support_set',
+    # test_query_split_name='test_query_set', test_support_split_name='test_support_set'.
+    # selected_prompt_template_id=0.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -1420,42 +1548,69 @@ class ImageNet1kNewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntr
 class ImageNet1kPart0NewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # ImageNet1kNewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/imagenet1k_support_1k_query_sets_part_0'.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_0"
 
 
 class ImageNet1kPart1NewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # ImageNet1kNewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/imagenet1k_support_1k_query_sets_part_1'.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_1"
 
 
 class ImageNet1kPart2NewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # ImageNet1kNewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/imagenet1k_support_1k_query_sets_part_2'.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_2"
 
 
 class ImageNet1kPart3NewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # ImageNet1kNewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/imagenet1k_support_1k_query_sets_part_3'.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_3"
 
 
 class ImageNet1kPart4NewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # ImageNet1kNewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/imagenet1k_support_1k_query_sets_part_4'.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_4"
 
 
 class ImageNet1kPart5NewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # ImageNet1kNewSplits1kSupportVLlama3ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/imagenet1k_support_1k_query_sets_part_5'.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_5"
 
 
 class ImageNet1kNewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of ImageNet1kVLlama3ClassificationInContextAccWithKLAndEntropy;
+    # declares only class attributes (no new behavior). Dataset:
+    # 'HuggingFaceM4/imagenet1k_support_5k_query_sets'. Splits:
+    # default_query_split_name='validation_query_set',
+    # default_support_split_name='validation_support_set',
+    # validation_query_split_name='validation_query_set',
+    # validation_support_split_name='validation_support_set',
+    # test_query_split_name='test_query_set', test_support_split_name='test_support_set'.
+    # selected_prompt_template_id=0.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -1469,46 +1624,80 @@ class ImageNet1kNewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntr
 class ImageNet1kPart0NewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # ImageNet1kNewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/imagenet1k_support_5k_query_sets_part_0'.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_0"
 
 
 class ImageNet1kPart1NewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # ImageNet1kNewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/imagenet1k_support_5k_query_sets_part_1'.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_1"
 
 
 class ImageNet1kPart2NewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # ImageNet1kNewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/imagenet1k_support_5k_query_sets_part_2'.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_2"
 
 
 class ImageNet1kPart3NewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # ImageNet1kNewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/imagenet1k_support_5k_query_sets_part_3'.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_3"
 
 
 class ImageNet1kPart4NewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # ImageNet1kNewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/imagenet1k_support_5k_query_sets_part_4'.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_4"
 
 
 class ImageNet1kPart5NewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # ImageNet1kNewSplits5kSupportVLlama3ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/imagenet1k_support_5k_query_sets_part_5'.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_5"
 
 
 class ImageNet1kSampleVLlama3ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as ImageNet1kVLlama3ClassificationInContextAccWithKLAndEntropy, but
+    # loads dataset 'HuggingFaceM4/imagenet-1k-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/imagenet-1k-Sample"
 
 
 class HatefulMemesVLlama3ClassificationInContextAccWithKLAndEntropyROCAUC(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/Hateful-Memes' (config 'seen'). Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN, ROC_AUC. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['image'], context_column_names=['text']. length_normalize=False.
+    # selected_prompt_template_id=22. prompt_templates_dict overrides templates with ids [0, 1, 2,
+    # 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]
+    # (prefix + per-example pattern). prompt_templates_dict_instruct overrides templates with ids
+    # [22] (prefix + per-example pattern). mapping_class_names_to_prompt_names remaps dataset
+    # class names to the strings inserted in prompts.
+    # mapping_class_prompt_name_id_to_prompt_template_id selects which name mapping applies to
+    # each prompt template id.
     dataset_name: str = "HuggingFaceM4/Hateful-Memes"
     dataset_config: str = "seen"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -1723,6 +1912,14 @@ class HatefulMemesVLlama3ClassificationInContextAccWithKLAndEntropyROCAUC(VLlama
 class HatefulMemesNewSplitsVLlama3ClassificationInContextAccWithKLAndEntropyROCAUC(
     HatefulMemesVLlama3ClassificationInContextAccWithKLAndEntropyROCAUC
 ):
+    # [CLASS DOC] Task configuration subclass of
+    # HatefulMemesVLlama3ClassificationInContextAccWithKLAndEntropyROCAUC; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/HatefulMemes_support_query_sets'.
+    # Splits: default_query_split_name='validation_query_set',
+    # default_support_split_name='validation_support_set',
+    # validation_query_split_name='validation_query_set',
+    # validation_support_split_name='validation_support_set',
+    # test_query_split_name='test_query_set', test_support_split_name='test_support_set'.
     dataset_name: str = "HuggingFaceM4/HatefulMemes_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -1733,6 +1930,13 @@ class HatefulMemesNewSplitsVLlama3ClassificationInContextAccWithKLAndEntropyROCA
 
 
 class ClevrVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/clevr' (config 'classification').
+    # Metric 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_MEAN, ENTROPY_MEAN. Splits:
+    # default_query_split_name='validation', default_support_split_name='train'. Columns:
+    # label_column_name='answer', image_column_names=['image'], context_column_names=['question'].
+    # length_normalize=False. prompt_templates_dict overrides templates with ids [0] (prefix +
+    # per-example pattern).
     dataset_name: str = "HuggingFaceM4/clevr"
     dataset_config: str = "classification"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -1760,10 +1964,26 @@ class ClevrVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Classificati
 class ClevrSampleVLlama3ClassificationInContextAccWithKLAndEntropy(
     ClevrVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as ClevrVLlama3ClassificationInContextAccWithKLAndEntropy, but loads
+    # dataset 'HuggingFaceM4/clevr-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/clevr-Sample"
 
 
 class ClevrNewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/Clevr_support_query_sets'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_MEAN, ENTROPY_MEAN,
+    # DEFAULT_TO_SERVER_RESULTS. Splits: default_query_split_name='validation_query_set',
+    # default_support_split_name='validation_support_set',
+    # validation_query_split_name='validation_query_set',
+    # validation_support_split_name='validation_support_set',
+    # test_query_split_name='test_query_set', test_support_split_name='test_support_set'. Columns:
+    # label_column_name='answer', image_column_names=['image'], context_column_names=['question'].
+    # length_normalize=False. selected_prompt_template_id=3. prompt_templates_dict overrides
+    # templates with ids [0, 1, 2, 3, 4, 5, 6, 7, 8] (prefix + per-example pattern).
+    # prompt_templates_dict_instruct overrides templates with ids [3] (prefix + per-example
+    # pattern).
     dataset_name: str = "HuggingFaceM4/Clevr_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -1842,6 +2062,10 @@ class ClevrNewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Cla
 class ClevrChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(
     ClevrNewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of
+    # ClevrNewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy; declares only class
+    # attributes (no new behavior). selected_prompt_template_id=0. prompt_templates_dict overrides
+    # templates with ids [0] (prefix + per-example pattern).
     prompt_templates_dict = {
         0: {
             "prefix": "{bos_token}",
@@ -1855,6 +2079,15 @@ class ClevrChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(
 
 
 class SNLIVEImageOnlySampleVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/SNLI-VE-Sample'. Metric
+    # 'UnfoldedClassificationMetrics' computing: MEAN_PER_CLASS_ACCURACY, KL_DISTRIBUTION,
+    # KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['image'], context_column_names=['hypothesis']. length_normalize=False.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
+    # mapping_class_names_to_prompt_names remaps dataset class names to the strings inserted in
+    # prompts.
     dataset_name: str = "HuggingFaceM4/SNLI-VE-Sample"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -1890,6 +2123,15 @@ class SNLIVEImageOnlySampleVLlama3ClassificationInContextAccWithKLAndEntropy(VLl
 
 
 class SNLIVEImagePremiseSampleVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/SNLI-VE_modif_premise_hypothesis-
+    # Sample'. Metric 'UnfoldedClassificationMetrics' computing: MEAN_PER_CLASS_ACCURACY,
+    # KL_DISTRIBUTION, KL_MEAN, ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits:
+    # default_query_split_name='test', default_support_split_name='train'. Columns:
+    # label_column_name='label', image_column_names=['image'], context_column_names=['context'].
+    # length_normalize=False. prompt_templates_dict overrides templates with ids [0] (prefix +
+    # per-example pattern). mapping_class_names_to_prompt_names remaps dataset class names to the
+    # strings inserted in prompts.
     dataset_name: str = "HuggingFaceM4/SNLI-VE_modif_premise_hypothesis-Sample"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -1927,6 +2169,15 @@ class SNLIVEImagePremiseSampleVLlama3ClassificationInContextAccWithKLAndEntropy(
 
 
 class FairFaceAgeVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/FairFace'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN, PER_BUCKET_ACCURACY. Splits:
+    # default_query_split_name='validation', default_support_split_name='train'. Columns:
+    # label_column_name='age', image_column_names=['image']. length_normalize=False.
+    # buckets_keys=['gender', 'race']. prompt_templates_dict overrides templates with ids [0]
+    # (prefix + per-example pattern). mapping_class_names_to_prompt_names remaps dataset class
+    # names to the strings inserted in prompts.
     dataset_name: str = "HuggingFaceM4/FairFace"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -1967,10 +2218,28 @@ class FairFaceAgeVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Classi
 class FairFaceAgeSampleVLlama3ClassificationInContextAccWithKLAndEntropy(
     FairFaceAgeVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as FairFaceAgeVLlama3ClassificationInContextAccWithKLAndEntropy, but
+    # loads dataset 'HuggingFaceM4/FairFace-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/FairFace-Sample"
 
 
 class FairFaceAgeNewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/FairFace_support_query_sets'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN, PER_BUCKET_ACCURACY. Splits:
+    # default_query_split_name='validation_query_set',
+    # default_support_split_name='validation_support_set',
+    # validation_query_split_name='validation_query_set',
+    # validation_support_split_name='validation_support_set',
+    # test_query_split_name='test_query_set', test_support_split_name='test_support_set'. Columns:
+    # label_column_name='age', image_column_names=['image']. length_normalize=False.
+    # buckets_keys=['gender', 'race']. selected_prompt_template_id=5. prompt_templates_dict
+    # overrides templates with ids [0, 1, 2, 3, 4, 5] (prefix + per-example pattern).
+    # prompt_templates_dict_instruct overrides templates with ids [5] (prefix + per-example
+    # pattern). mapping_class_names_to_prompt_names remaps dataset class names to the strings
+    # inserted in prompts.
     dataset_name: str = "HuggingFaceM4/FairFace_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2044,6 +2313,15 @@ class FairFaceAgeNewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy(VLla
 
 
 class FairFaceGenderVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/FairFace'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN, PER_BUCKET_ACCURACY. Splits:
+    # default_query_split_name='validation', default_support_split_name='train'. Columns:
+    # label_column_name='gender', image_column_names=['image']. length_normalize=False.
+    # buckets_keys=['gender', 'race']. prompt_templates_dict overrides templates with ids [0]
+    # (prefix + per-example pattern). mapping_class_names_to_prompt_names remaps dataset class
+    # names to the strings inserted in prompts.
     dataset_name: str = "HuggingFaceM4/FairFace"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2077,10 +2355,28 @@ class FairFaceGenderVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Cla
 class FairFaceGenderSampleVLlama3ClassificationInContextAccWithKLAndEntropy(
     FairFaceGenderVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as FairFaceGenderVLlama3ClassificationInContextAccWithKLAndEntropy,
+    # but loads dataset 'HuggingFaceM4/FairFace-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/FairFace-Sample"
 
 
 class FairFaceGenderNewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/FairFace_support_query_sets'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN, PER_BUCKET_ACCURACY. Splits:
+    # default_query_split_name='validation_query_set',
+    # default_support_split_name='validation_support_set',
+    # validation_query_split_name='validation_query_set',
+    # validation_support_split_name='validation_support_set',
+    # test_query_split_name='test_query_set', test_support_split_name='test_support_set'. Columns:
+    # label_column_name='gender', image_column_names=['image']. length_normalize=False.
+    # buckets_keys=['gender', 'race']. selected_prompt_template_id=0. prompt_templates_dict
+    # overrides templates with ids [0, 1, 2, 3, 4, 5] (prefix + per-example pattern).
+    # prompt_templates_dict_instruct overrides templates with ids [0] (prefix + per-example
+    # pattern). mapping_class_names_to_prompt_names remaps dataset class names to the strings
+    # inserted in prompts.
     dataset_name: str = "HuggingFaceM4/FairFace_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2147,6 +2443,15 @@ class FairFaceGenderNewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy(V
 
 
 class FairFaceRaceVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/FairFace'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN, PER_BUCKET_ACCURACY. Splits:
+    # default_query_split_name='validation', default_support_split_name='train'. Columns:
+    # label_column_name='race', image_column_names=['image']. length_normalize=False.
+    # buckets_keys=['gender', 'race']. prompt_templates_dict overrides templates with ids [0]
+    # (prefix + per-example pattern). mapping_class_names_to_prompt_names remaps dataset class
+    # names to the strings inserted in prompts.
     dataset_name: str = "HuggingFaceM4/FairFace"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2185,10 +2490,28 @@ class FairFaceRaceVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Class
 class FairFaceRaceSampleVLlama3ClassificationInContextAccWithKLAndEntropy(
     FairFaceRaceVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as FairFaceRaceVLlama3ClassificationInContextAccWithKLAndEntropy,
+    # but loads dataset 'HuggingFaceM4/FairFace-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/FairFace-Sample"
 
 
 class FairFaceRaceNewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/FairFace_support_query_sets'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN, PER_BUCKET_ACCURACY. Splits:
+    # default_query_split_name='validation_query_set',
+    # default_support_split_name='validation_support_set',
+    # validation_query_split_name='validation_query_set',
+    # validation_support_split_name='validation_support_set',
+    # test_query_split_name='test_query_set', test_support_split_name='test_support_set'. Columns:
+    # label_column_name='race', image_column_names=['image']. length_normalize=False.
+    # buckets_keys=['gender', 'race']. selected_prompt_template_id=0. prompt_templates_dict
+    # overrides templates with ids [0, 1, 2, 3, 4, 5] (prefix + per-example pattern).
+    # prompt_templates_dict_instruct overrides templates with ids [0] (prefix + per-example
+    # pattern). mapping_class_names_to_prompt_names remaps dataset class names to the strings
+    # inserted in prompts.
     dataset_name: str = "HuggingFaceM4/FairFace_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2260,6 +2583,17 @@ class FairFaceRaceNewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy(VLl
 
 
 class NLVR2SampleVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/NLVR2-Sample'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['left_image', 'right_image'], context_column_names=['sentence'].
+    # length_normalize=False. prompt_templates_dict overrides templates with ids [0] (prefix +
+    # per-example pattern). mapping_class_names_to_prompt_names remaps dataset class names to the
+    # strings inserted in prompts.
+    # KNOWN ISSUE: the template contains {image_token}/{token_around_image} fields that _create_example_prompt
+    # never supplies (KeyError) and only one <image> for two image columns (ValueError).
     dataset_name: str = "HuggingFaceM4/NLVR2-Sample"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2293,6 +2627,20 @@ class NLVR2SampleVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Classi
 
 
 class NLVR2NewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/NLVR2_support_query_sets'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='validation_query_set',
+    # default_support_split_name='validation_support_set',
+    # validation_query_split_name='validation_query_set',
+    # validation_support_split_name='validation_support_set',
+    # test_query_split_name='test_query_set', test_support_split_name='test_support_set'. Columns:
+    # label_column_name='label', image_column_names=['left_image', 'right_image'],
+    # context_column_names=['sentence']. length_normalize=False. selected_prompt_template_id=3.
+    # prompt_templates_dict overrides templates with ids [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] (prefix +
+    # per-example pattern).
+    # KNOWN ISSUE: all templates contain {image_token}/{token_around_image} fields never supplied by
+    # _create_example_prompt (KeyError) and one <image> for two image columns (ValueError).
     dataset_name: str = "HuggingFaceM4/NLVR2_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2412,6 +2760,13 @@ class NLVR2NewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Cla
 
 
 class ScienceQAVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/ScienceQA_modif'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # image_column_names=['image'], context_column_names=['context']. length_normalize=False.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/ScienceQA_modif"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2438,6 +2793,20 @@ class ScienceQAVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Classifi
 
 
 class ScienceQANewSplitsOldSetupVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset:
+    # 'HuggingFaceM4/ScienceQA_support_query_sets_old_setup'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='validation_query_set',
+    # default_support_split_name='validation_support_set',
+    # validation_query_split_name='validation_query_set',
+    # validation_support_split_name='validation_support_set',
+    # test_query_split_name='test_query_set', test_support_split_name='test_support_set'. Columns:
+    # label_column_name='label', image_column_names=['image'], context_column_names=['context',
+    # 'solution'], tested_ex_excluded_context_columns=['solution']. length_normalize=False.
+    # selected_prompt_template_id=1. prompt_templates_dict overrides templates with ids [0, 1, 2,
+    # 3, 4, 5] (prefix + per-example pattern). prompt_templates_dict_instruct overrides templates
+    # with ids [1] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/ScienceQA_support_query_sets_old_setup"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2502,6 +2871,19 @@ class ScienceQANewSplitsOldSetupVLlama3ClassificationInContextAccWithKLAndEntrop
 
 
 class ScienceQANewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/ScienceQA_support_query_sets'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='validation_query_set',
+    # default_support_split_name='validation_support_set',
+    # validation_query_split_name='validation_query_set',
+    # validation_support_split_name='validation_support_set',
+    # test_query_split_name='test_query_set', test_support_split_name='test_support_set'. Columns:
+    # label_column_name='label', image_column_names=['image'], context_column_names=['question',
+    # 'hint', 'context', 'solution'], tested_ex_excluded_context_columns=['solution'].
+    # length_normalize=False. selected_prompt_template_id=1. prompt_templates_dict overrides
+    # templates with ids [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+    # (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/ScienceQA_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2645,10 +3027,21 @@ class ScienceQANewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama
 class ScienceQASampleVLlama3ClassificationInContextAccWithKLAndEntropy(
     ScienceQAVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as ScienceQAVLlama3ClassificationInContextAccWithKLAndEntropy, but
+    # loads dataset 'HuggingFaceM4/ScienceQA_modif-Sample' - a small sample used for quick
+    # evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/ScienceQA_modif-Sample"
 
 
 class IIIT5KVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/IIIT-5K-classif'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='train'. Columns: label_column_name='label',
+    # tested_labels_column_name='small_lexicon', image_column_names=['image'].
+    # length_normalize=False. selected_prompt_template_id=0. prompt_templates_dict overrides
+    # templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/IIIT-5K-classif"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2678,12 +3071,19 @@ class IIIT5KVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Classificat
 class IIIT5KSampleVLlama3ClassificationInContextAccWithKLAndEntropy(
     IIIT5KVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as IIIT5KVLlama3ClassificationInContextAccWithKLAndEntropy, but
+    # loads dataset 'HuggingFaceM4/IIIT-5K-classif-Sample' - a small sample used for quick
+    # evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/IIIT-5K-classif-Sample"
 
 
 class SimpleImageNet1kVLlama3ClassificationInContextAccWithKLAndEntropy(
     ImageNet1kVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of ImageNet1kVLlama3ClassificationInContextAccWithKLAndEntropy;
+    # declares only class attributes (no new behavior). Dataset: 'HuggingFaceM4/simple-
+    # imagenet-1k'. Metric computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN, ENTROPY_DISTRIBUTION,
+    # ENTROPY_MEAN. Columns: tested_labels_column_name='lexicon'.
     dataset_name: str = "HuggingFaceM4/simple-imagenet-1k"
     metric_kwargs = {
         "metrics": [
@@ -2700,10 +3100,27 @@ class SimpleImageNet1kVLlama3ClassificationInContextAccWithKLAndEntropy(
 class SimpleImageNet1kSampleVLlama3ClassificationInContextAccWithKLAndEntropy(
     SimpleImageNet1kVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # SimpleImageNet1kVLlama3ClassificationInContextAccWithKLAndEntropy, but loads dataset
+    # 'HuggingFaceM4/simple-imagenet-1k-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/simple-imagenet-1k-Sample"
 
 
 class VisDialNewSplitsVLlama3ClassificationInContextNDCG(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/VisDial_modif_support_query_sets'.
+    # Metric 'UnfoldedClassificationMetrics' computing: NDCG. Splits:
+    # default_query_split_name='validation_query_set',
+    # default_support_split_name='validation_support_set',
+    # validation_query_split_name='validation_query_set',
+    # validation_support_split_name='validation_support_set',
+    # test_query_split_name='test_query_set', test_support_split_name='test_support_set'. Columns:
+    # label_column_name='answer', tested_labels_column_name='answer_options',
+    # image_column_names=['image'], context_column_names=['context', 'caption'],
+    # relevance_scores_column_name='relevance_scores'. length_normalize=False.
+    # selected_prompt_template_id=1. prompt_templates_dict overrides templates with ids [0, 1, 2,
+    # 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/VisDial_modif_support_query_sets"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2815,6 +3232,18 @@ class VisDialNewSplitsVLlama3ClassificationInContextNDCG(VLlama3ClassificationIn
 
 
 class MMBenchNewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/mmbench_support_query_sets'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN, DEFAULT_TO_SERVER_RESULTS. Splits:
+    # default_query_split_name='validation_query_set',
+    # default_support_split_name='validation_support_set',
+    # validation_query_split_name='validation_query_set',
+    # validation_support_split_name='validation_support_set'. Columns: label_column_name='label',
+    # image_column_names=['image'], context_column_names=['context']. length_normalize=False.
+    # selected_prompt_template_id=0. prompt_templates_dict overrides templates with ids [0]
+    # (prefix + per-example pattern). prompt_templates_dict_instruct overrides templates with ids
+    # [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/mmbench_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2854,6 +3283,15 @@ class MMBenchNewSplitsVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3C
 
 
 class SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/SEED'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='test', test_query_split_name='test',
+    # test_support_split_name='test'. Columns: label_column_name='answer',
+    # image_column_names=['image'], context_column_names=['question', 'choice_a', 'choice_b',
+    # 'choice_c', 'choice_d']. length_normalize=False. selected_prompt_template_id=0.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/SEED"
 
     default_query_split_name: str = "test"
@@ -2893,58 +3331,85 @@ class SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Classifica
 class SEEDSceneUnderstandingVLlama3ClassificationInContextAccWithKLAndEntropy(
     SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy;
+    # declares only class attributes (no new behavior).
     dataset_config = "Scene_Understanding"
 
 
 class SEEDInstanceIdentityVLlama3ClassificationInContextAccWithKLAndEntropy(
     SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy;
+    # declares only class attributes (no new behavior).
     dataset_config = "Instance_Identity"
 
 
 class SEEDInstanceAttributesVLlama3ClassificationInContextAccWithKLAndEntropy(
     SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy;
+    # declares only class attributes (no new behavior).
     dataset_config = "Instance_Attributes"
 
 
 class SEEDInstanceLocationVLlama3ClassificationInContextAccWithKLAndEntropy(
     SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy;
+    # declares only class attributes (no new behavior).
     dataset_config = "Instance_Location"
 
 
 class SEEDInstancesCountingVLlama3ClassificationInContextAccWithKLAndEntropy(
     SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy;
+    # declares only class attributes (no new behavior).
     dataset_config = "Instances_Counting"
 
 
 class SEEDSpatialRelationVLlama3ClassificationInContextAccWithKLAndEntropy(
     SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy;
+    # declares only class attributes (no new behavior).
     dataset_config = "Spatial_Relation"
 
 
 class SEEDInstanceInteractionVLlama3ClassificationInContextAccWithKLAndEntropy(
     SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy;
+    # declares only class attributes (no new behavior).
     dataset_config = "Instance_Interaction"
 
 
 class SEEDVisualReasoningVLlama3ClassificationInContextAccWithKLAndEntropy(
     SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy;
+    # declares only class attributes (no new behavior).
     dataset_config = "Visual_Reasoning"
 
 
 class SEEDTextUnderstandingVLlama3ClassificationInContextAccWithKLAndEntropy(
     SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of SEEDAllVLlama3ClassificationInContextAccWithKLAndEntropy;
+    # declares only class attributes (no new behavior).
     dataset_config = "Text_Understanding"
 
 
 class SugarCrepeSwapObjVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/SugarCrepe_swap_obj'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='test', test_query_split_name='test',
+    # test_support_split_name='test'. Columns: label_column_name='true_label',
+    # tested_labels_column_name='tested_labels', image_column_names=['image'].
+    # length_normalize=False. selected_prompt_template_id=0. prompt_templates_dict overrides
+    # templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/SugarCrepe_swap_obj"
     default_query_split_name: str = "test"
     default_support_split_name: str = "test"
@@ -2980,40 +3445,68 @@ class SugarCrepeSwapObjVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3
 class SugarCrepeSwapAttVLlama3ClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # SugarCrepeSwapObjVLlama3ClassificationInContextAccWithKLAndEntropy, but loads dataset
+    # 'HuggingFaceM4/SugarCrepe_swap_att'.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_swap_att"
 
 
 class SugarCrepeReplaceRelVLlama3ClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # SugarCrepeSwapObjVLlama3ClassificationInContextAccWithKLAndEntropy, but loads dataset
+    # 'HuggingFaceM4/SugarCrepe_replace_rel'.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_replace_rel"
 
 
 class SugarCrepeReplaceObjVLlama3ClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # SugarCrepeSwapObjVLlama3ClassificationInContextAccWithKLAndEntropy, but loads dataset
+    # 'HuggingFaceM4/SugarCrepe_replace_obj'.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_replace_obj"
 
 
 class SugarCrepeReplaceAttVLlama3ClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # SugarCrepeSwapObjVLlama3ClassificationInContextAccWithKLAndEntropy, but loads dataset
+    # 'HuggingFaceM4/SugarCrepe_replace_att'.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_replace_att"
 
 
 class SugarCrepeAddObjVLlama3ClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # SugarCrepeSwapObjVLlama3ClassificationInContextAccWithKLAndEntropy, but loads dataset
+    # 'HuggingFaceM4/SugarCrepe_add_obj'.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_add_obj"
 
 
 class SugarCrepeAddAttVLlama3ClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task configuration as
+    # SugarCrepeSwapObjVLlama3ClassificationInContextAccWithKLAndEntropy, but loads dataset
+    # 'HuggingFaceM4/SugarCrepe_add_att'.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_add_att"
 
 
 class MMBenchChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/MMBench_modif_chatbot'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN, DEFAULT_TO_SERVER_RESULTS. Splits:
+    # default_query_split_name='validation', default_support_split_name='validation',
+    # validation_query_split_name='validation', validation_support_split_name='validation',
+    # test_query_split_name='test', test_support_split_name='test'. Columns:
+    # id_column_name='index', label_column_name='label', image_column_names=['image'],
+    # context_column_names=['context']. length_normalize=False. selected_prompt_template_id=0.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/MMBench_modif_chatbot"
     default_query_split_name: str = "validation"
     default_support_split_name: str = "validation"
@@ -3048,6 +3541,16 @@ class MMBenchChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Cla
 
 
 class MMBenchChatbotValDedupVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/MMBench_modif_chatbot_dedup_val'.
+    # Metric 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN, DEFAULT_TO_SERVER_RESULTS. Splits:
+    # default_query_split_name='validation', default_support_split_name='validation',
+    # validation_query_split_name='validation', validation_support_split_name='validation',
+    # test_query_split_name='test', test_support_split_name='test'. Columns:
+    # label_column_name='label', image_column_names=['image'], context_column_names=['context'].
+    # length_normalize=False. selected_prompt_template_id=0. prompt_templates_dict overrides
+    # templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/MMBench_modif_chatbot_dedup_val"
     default_query_split_name: str = "validation"
     default_support_split_name: str = "validation"
@@ -3081,6 +3584,15 @@ class MMBenchChatbotValDedupVLlama3ClassificationInContextAccWithKLAndEntropy(VL
 
 
 class POPEChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/POPE_modif'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, F1_SCORE, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='test', test_query_split_name='test',
+    # test_support_split_name='test'. Columns: label_column_name='label',
+    # image_column_names=['image'], context_column_names=['context']. length_normalize=False.
+    # selected_prompt_template_id=0. prompt_templates_dict overrides templates with ids [0]
+    # (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/POPE_modif"
     default_query_split_name: str = "test"
     default_support_split_name: str = "test"
@@ -3115,6 +3627,16 @@ class POPEChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Classi
 
 
 class ScienceQAImgChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/ScienceQAImg_Modif'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='validation',
+    # default_support_split_name='validation', validation_query_split_name='validation',
+    # validation_support_split_name='validation', test_query_split_name='test',
+    # test_support_split_name='test'. Columns: label_column_name='label',
+    # image_column_names=['image'], context_column_names=['context']. length_normalize=False.
+    # selected_prompt_template_id=0. prompt_templates_dict overrides templates with ids [0]
+    # (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/ScienceQAImg_Modif"
     default_query_split_name: str = "validation"
     default_support_split_name: str = "validation"
@@ -3147,6 +3669,16 @@ class ScienceQAImgChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlam
 
 
 class ScienceQAImgChatbotgNoMCQVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/ScienceQAImg_Modif_NoMCQ'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='validation',
+    # default_support_split_name='validation', validation_query_split_name='validation',
+    # validation_support_split_name='validation', test_query_split_name='test',
+    # test_support_split_name='test'. Columns: label_column_name='label',
+    # tested_labels_column_name='tested_labels', image_column_names=['image'],
+    # context_column_names=['context']. length_normalize=False. selected_prompt_template_id=0.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/ScienceQAImg_Modif_NoMCQ"
     default_query_split_name: str = "validation"
     default_support_split_name: str = "validation"
@@ -3180,6 +3712,15 @@ class ScienceQAImgChatbotgNoMCQVLlama3ClassificationInContextAccWithKLAndEntropy
 
 
 class SEEDImgChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/SEED_Img_Modif'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='test',
+    # default_support_split_name='test', test_query_split_name='test',
+    # test_support_split_name='test'. Columns: label_column_name='label',
+    # image_column_names=['image'], context_column_names=['question']. length_normalize=False.
+    # selected_prompt_template_id=0. prompt_templates_dict overrides templates with ids [0]
+    # (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/SEED_Img_Modif"
     default_query_split_name: str = "test"
     default_support_split_name: str = "test"
@@ -3210,6 +3751,16 @@ class SEEDImgChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Cla
 
 
 class QBenchChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/QBench_Modif'. Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_DISTRIBUTION, KL_MEAN,
+    # ENTROPY_DISTRIBUTION, ENTROPY_MEAN. Splits: default_query_split_name='validation',
+    # default_support_split_name='validation', validation_query_split_name='validation',
+    # validation_support_split_name='validation', test_query_split_name='test',
+    # test_support_split_name='test'. Columns: label_column_name='label',
+    # tested_labels_column_name='tested_labels', image_column_names=['image'],
+    # context_column_names=['question']. length_normalize=False. selected_prompt_template_id=0.
+    # prompt_templates_dict overrides templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/QBench_Modif"
     default_query_split_name: str = "validation"
     default_support_split_name: str = "validation"
@@ -3243,6 +3794,16 @@ class QBenchChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Clas
 
 
 class RavenChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/RAVEN_rendered' (config None). Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_MEAN, ENTROPY_MEAN,
+    # PER_BUCKET_ACCURACY. Splits: default_query_split_name='validation',
+    # default_support_split_name='validation', validation_query_split_name='validation',
+    # validation_support_split_name='validation', test_query_split_name='test',
+    # test_support_split_name='test'. Columns: label_column_name='label',
+    # image_column_names=['image'], context_column_names=['question']. length_normalize=False.
+    # buckets_keys=['source']. selected_prompt_template_id=0. prompt_templates_dict overrides
+    # templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/RAVEN_rendered"
     dataset_config = None
     default_query_split_name: str = "validation"
@@ -3276,6 +3837,16 @@ class RavenChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Class
 
 
 class VSRChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/VSR_chatbot' (config None). Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_MEAN, ENTROPY_MEAN. Splits:
+    # default_query_split_name='validation', default_support_split_name='train',
+    # validation_query_split_name='validation', validation_support_split_name='train',
+    # test_query_split_name='test', test_support_split_name='train'. Columns:
+    # label_column_name='answer', image_column_names=['image'], context_column_names=['question'].
+    # length_normalize=False. bool_instruct_templates=True. selected_prompt_template_id=0.
+    # prompt_templates_dict_instruct overrides templates with ids [0] (prefix + per-example
+    # pattern).
     dataset_name: str = "HuggingFaceM4/VSR_chatbot"
     dataset_config = None
     default_query_split_name: str = "validation"
@@ -3308,6 +3879,16 @@ class VSRChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Classif
 
 
 class MathVistaMCQChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/MathVista_MCQ' (config None). Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_MEAN, ENTROPY_MEAN. Splits:
+    # default_query_split_name='testmini', default_support_split_name='testmini',
+    # validation_query_split_name='testmini', validation_support_split_name='testmini',
+    # test_query_split_name='test', test_support_split_name='testmini'. Columns:
+    # label_column_name='label', image_column_names=['image'], context_column_names=['question'].
+    # length_normalize=False. bool_instruct_templates=True. selected_prompt_template_id=0.
+    # prompt_templates_dict_instruct overrides templates with ids [0] (prefix + per-example
+    # pattern).
     dataset_name: str = "HuggingFaceM4/MathVista_MCQ"
     dataset_config = None
     default_query_split_name: str = "testmini"
@@ -3340,6 +3921,16 @@ class MathVistaMCQChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlam
 
 
 class MMMUMCQChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/MMMU_MCQ' (config None). Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_MEAN, ENTROPY_MEAN,
+    # DEFAULT_TO_SERVER_RESULTS. Splits: default_query_split_name='validation',
+    # default_support_split_name='dev', validation_query_split_name='validation',
+    # validation_support_split_name='dev', test_query_split_name='test',
+    # test_support_split_name='dev'. Columns: id_column_name='id', label_column_name='label',
+    # image_column_names=['images'], context_column_names=['question']. length_normalize=False.
+    # bool_instruct_templates=True. selected_prompt_template_id=0. prompt_templates_dict_instruct
+    # overrides templates with ids [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/MMMU_MCQ"
     dataset_config = None
     default_query_split_name: str = "validation"
@@ -3374,6 +3965,15 @@ class MMMUMCQChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Cla
 
 
 class MMStarChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/MMStar' (config None). Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_MEAN, ENTROPY_MEAN. Splits:
+    # default_query_split_name='validation', default_support_split_name='validation',
+    # validation_query_split_name='validation', validation_support_split_name='validation'.
+    # Columns: id_column_name='id', label_column_name='label', image_column_names=['image'],
+    # context_column_names=['question']. length_normalize=False. bool_instruct_templates=True.
+    # selected_prompt_template_id=0. prompt_templates_dict_instruct overrides templates with ids
+    # [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/MMStar"
     dataset_config = None
     default_query_split_name: str = "validation"
@@ -3405,6 +4005,16 @@ class MMStarChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Clas
 
 
 class AI2DChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3ClassificationInContext):
+    # [CLASS DOC] Task configuration subclass of VLlama3ClassificationInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/AI2D' (config None). Metric
+    # 'UnfoldedClassificationMetrics' computing: ACCURACY, KL_MEAN, ENTROPY_MEAN. Splits:
+    # default_query_split_name='test', default_support_split_name='test',
+    # validation_query_split_name='test', validation_support_split_name='test',
+    # test_query_split_name='test', test_support_split_name='test'. Columns:
+    # label_column_name='label', image_column_names=['image'], context_column_names=['question'].
+    # length_normalize=False. bool_instruct_templates=True. selected_prompt_template_id=1.
+    # prompt_templates_dict_instruct overrides templates with ids [0, 1, 2] (prefix + per-example
+    # pattern).
     dataset_name: str = "HuggingFaceM4/AI2D"
     dataset_config = None
     default_query_split_name: str = "test"
@@ -3453,6 +4063,10 @@ class AI2DChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(VLlama3Classi
 class AI2DNoLetterLabelChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(
     AI2DChatbotVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of AI2DChatbotVLlama3ClassificationInContextAccWithKLAndEntropy;
+    # declares only class attributes (no new behavior). Dataset: 'HuggingFaceM4/AI2D_4'.
+    # selected_prompt_template_id=0. prompt_templates_dict_instruct overrides templates with ids
+    # [0] (prefix + per-example pattern).
     dataset_name: str = "HuggingFaceM4/AI2D_4"
     prompt_templates_dict_instruct = {
         0: {
@@ -3466,6 +4080,11 @@ class AI2DNoLetterLabelChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(
 class AI2DLetterLabelChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(
     AI2DChatbotVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of AI2DChatbotVLlama3ClassificationInContextAccWithKLAndEntropy;
+    # declares only class attributes (no new behavior). Dataset: 'HuggingFaceM4/AI2D_7'. Columns:
+    # tested_labels_column_name='tested_labels'. selected_prompt_template_id=0.
+    # prompt_templates_dict_instruct overrides templates with ids [0] (prefix + per-example
+    # pattern).
     dataset_name: str = "HuggingFaceM4/AI2D_7"
     tested_labels_column_name: str = "tested_labels"
     prompt_templates_dict_instruct = {
@@ -3480,6 +4099,12 @@ class AI2DLetterLabelChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(
 class MMMUMCQSingleImageChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(
     MMMUMCQChatbotVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of
+    # MMMUMCQChatbotVLlama3ClassificationInContextAccWithKLAndEntropy; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/MMMU_MCQ_single_image'. Splits:
+    # default_query_split_name='validation', default_support_split_name='validation',
+    # validation_query_split_name='validation', validation_support_split_name='validation',
+    # test_query_split_name='validation', test_support_split_name='validation'.
     dataset_name: str = "HuggingFaceM4/MMMU_MCQ_single_image"
     default_query_split_name: str = "validation"
     default_support_split_name: str = "validation"
@@ -3492,6 +4117,12 @@ class MMMUMCQSingleImageChatbotVLlama3ClassificationInContextAccWithKLAndEntropy
 class MMMUMCQMultipleImagesChatbotVLlama3ClassificationInContextAccWithKLAndEntropy(
     MMMUMCQChatbotVLlama3ClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Task configuration subclass of
+    # MMMUMCQChatbotVLlama3ClassificationInContextAccWithKLAndEntropy; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/MMMU_MCQ_multiple_images'. Splits:
+    # default_query_split_name='validation', default_support_split_name='validation',
+    # validation_query_split_name='validation', validation_support_split_name='validation',
+    # test_query_split_name='validation', test_support_split_name='validation'.
     dataset_name: str = "HuggingFaceM4/MMMU_MCQ_multiple_images"
     default_query_split_name: str = "validation"
     default_support_split_name: str = "validation"

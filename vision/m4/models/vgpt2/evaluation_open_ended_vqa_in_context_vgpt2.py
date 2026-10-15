@@ -1,3 +1,6 @@
+# [MODULE DOC] In-context open-ended VQA evaluation for VGPT2-style models: builds few-shot question/answer
+# prompts, generates free-form answers and scores them with OpenEndedVQAMetrics. Contains the
+# base task and VQAv2, OK-VQA, TextVQA, AdVQA configurations (and -Sample variants).
 import os
 import random
 import re
@@ -25,6 +28,11 @@ from m4.training.utils import (
 
 
 class Vgpt2OpenEndedVQAInContext(BaseTaskOpenEndedVQA):
+    # [CLASS DOC] Base generation-based VQA task. Class attributes: stop_words (cut generation at a new
+    # question etc.), prompt_templates_dict (example fields: bos_token, eos_token, question,
+    # answer, context columns, <image>), prompt_templates_dict_instruct + bool_instruct_templates,
+    # plus the tokenizer max length. Subclasses set dataset, metric, image_column_name,
+    # question_column_name, answers_column_name, optional context_column_names and buckets_keys.
     model_class: str = "VGPT2LMHeadModel"
     predictor_class: Predictor = Predictor.in_contexter
     stop_words = [
@@ -132,6 +140,17 @@ class Vgpt2OpenEndedVQAInContext(BaseTaskOpenEndedVQA):
     bool_instruct_templates = False
 
     def __init__(self, **kwargs) -> None:
+        # [FUNCTION DOC] Instantiate the task: parse required evaluation kwargs and build tokenizer and image
+        # transform. Required kwargs: tokenizer_name (HF hub id/path), evaluation_version
+        # (EvaluationVersion v1/v2), vision_encoder_max_image_size (int), vision_encoder_type,
+        # image_seq_len (int, image tokens per image), scale_up_images (bool),
+        # image_size_after_scaling (int); optional tokenizer_use_fast (default False). Side
+        # effects: downloads/loads an AutoTokenizer (truncation_side="left", auth token from
+        # env HF_TOKEN or True), sets padding_side="left"; builds an eval image transform via
+        # build_image_transform; stores image_token (IMAGE_TOKEN) and token_around_image
+        # (FAKE_TOKEN_AROUND_IMAGE_V1 for v1, V2 for v2). Raises ValueError for an unknown
+        # evaluation_version; KeyError if a required kwarg is missing. Side effect: prints all
+        # kwargs to stdout.
         super().__init__(**kwargs)
         print(kwargs)
         self.tokenizer_name = kwargs.pop("tokenizer_name")
@@ -162,6 +181,12 @@ class Vgpt2OpenEndedVQAInContext(BaseTaskOpenEndedVQA):
             raise ValueError(f"Invalid evaluation version: {evaluation_version}")
 
     def simpler_get_splitted_images_and_corresponding_text(self, image):
+        # [FUNCTION DOC] HELPER: Split one PIL image into sub-images and get the matching prompt text.
+        # Delegates to get_splitted_images_and_corresponding_text with the instance's
+        # vision_encoder_max_image_size, max_image_size=image_size_after_scaling,
+        # image_seq_len, no pre-split scale-up, and scale_up_factor=100 when scale_up_images
+        # (forces resizing up to the max size) else 1. Returns (list of sub-images, text string
+        # containing the image/fake tokens to put in place of <image>).
         splitted_images_array, text_splitted_images = get_splitted_images_and_corresponding_text(
             image=image,
             vision_encoder_max_image_size=self.vision_encoder_max_image_size,
@@ -175,10 +200,16 @@ class Vgpt2OpenEndedVQAInContext(BaseTaskOpenEndedVQA):
         return splitted_images_array, text_splitted_images
 
     def get_info_from_dataset(self, dataset):
+        # [FUNCTION DOC] No-op hook.
         pass
 
     def get_data_collator(self, **kwargs):
+        # [FUNCTION DOC] Return a DataLoader collate function bound to the given kwargs (support dataset,
+        # num_shots, shot_selection_mode, prompt_template_id, ...) that are forwarded to
+        # prepare_dataset.
         def data_collator(batch):
+            # [FUNCTION DOC] HELPER: Convert a list of example dicts into a dict of column lists (keys from
+            # the first example) and return prepare_dataset(columns, **kwargs) for the batch.
             exs = {key: [ex[key] for ex in batch] for key in batch[0].keys()}
             batch = self.prepare_dataset(exs, **kwargs)
             return batch
@@ -186,6 +217,17 @@ class Vgpt2OpenEndedVQAInContext(BaseTaskOpenEndedVQA):
         return data_collator
 
     def prepare_dataset(self, exs: Dict, **kwargs) -> Dict:
+        # [FUNCTION DOC] Build a generation batch. kwargs: support_dataset,
+        # support_dataset_vision_encoder_embeddings, num_shots, shot_selection_mode,
+        # prompt_template_id. If the image column holds lists, each example has several images.
+        # Shots: random (or num_shots==0), first num_shots rows (first_without_image, images
+        # removed from shot text) or nearest embeddings. Shot prompts use the most common
+        # answer and the eos token; the query prompt has an empty answer (instruct templates
+        # also drop the trailing "<end_of_utterance>\n"). Text = prefix + shots + query,
+        # stripped and tokenized (left pad/truncate, no special tokens). Images are split,
+        # transformed and padded per example into (n, 3, H, W) with boolean masks. Returns
+        # example_ids, answers, input_ids, attention_mask, pixel_values, pixel_attention_masks,
+        # buckets ("key=value/..." strings or "").
         """
         Prepare batch of examples.
         """
@@ -201,6 +243,11 @@ class Vgpt2OpenEndedVQAInContext(BaseTaskOpenEndedVQA):
         multiple_images_dataset = isinstance(support_dataset[0][self.image_column_name], list)
 
         def retrieve_idx_closest_examples(ref_embedding, embeddings_to_compare, num_examples):
+            # [FUNCTION DOC] HELPER: Similarity-based shot retrieval. Computes dot products between
+            # ref_embedding (1-D array) and each row of embeddings_to_compare (2-D array),
+            # selects the num_examples largest with an argpartition (linear time), then orders
+            # those by increasing similarity (most similar last, i.e. closest to the query in
+            # the prompt). Returns a list of int row indices into the support dataset.
             "Returns the indices of the `num_examples` closest embeddings in ascending order"
             sim = np.dot(embeddings_to_compare, ref_embedding)
             # We can achieve linear complexity because we don't need to sort all the numbers,
@@ -356,6 +403,8 @@ class Vgpt2OpenEndedVQAInContext(BaseTaskOpenEndedVQA):
         if self.buckets_keys:
 
             def bucket_infos_to_str(bucket_infos):
+                # [FUNCTION DOC] HELPER: Join one example's bucket column values with buckets_keys into
+                # "key1=v1/key2=v2".
                 name = []
                 for info, info_type in zip(bucket_infos, self.buckets_keys):
                     name.append(f"{info_type}={info}")
@@ -386,6 +435,11 @@ class Vgpt2OpenEndedVQAInContext(BaseTaskOpenEndedVQA):
         multiple_images_dataset=False,
         contexts=None,
     ):
+        # [FUNCTION DOC] HELPER: Format the template "example" with bos_token, the given eos_token, question,
+        # answer and context columns. With without_image all <image> placeholders are removed;
+        # otherwise the placeholder count must equal the number of images (one, or the list
+        # when multiple_images_dataset) else ValueError, and each is replaced by that image's
+        # split-image text. Returns the prompt.
         if self.bool_instruct_templates:
             prompt_templates_dict = self.prompt_templates_dict_instruct
         else:
@@ -425,6 +479,11 @@ class Vgpt2OpenEndedVQAInContext(BaseTaskOpenEndedVQA):
         return prompt
 
     def _create_prefix_prompt(self, prompt_template_id):
+        # [FUNCTION DOC] HELPER: Build the prompt prefix for prompt_template_id from
+        # prompt_templates_dict_instruct when bool_instruct_templates else
+        # prompt_templates_dict. Returns "" when the template's prefix is None, otherwise the
+        # prefix formatted with the tokenizer's bos_token/eos_token. Raises KeyError for an
+        # unknown template id.
         if self.bool_instruct_templates:
             prompt_templates_dict = self.prompt_templates_dict_instruct
         else:
@@ -441,6 +500,18 @@ class Vgpt2OpenEndedVQAInContext(BaseTaskOpenEndedVQA):
 
     def generate_tokens(self, **kwargs):
         # Flamingo: Beam search with a beam size of 3
+        # [FUNCTION DOC] Generate continuations for a prepared batch. kwargs: model, input_ids /
+        # attention_mask (lists of 1-D tensors, stacked), pixel_values / pixel_attention_masks
+        # (per-example tensors of shape (n_images, 3, H, W) and (n_images, H, W)), num_beams,
+        # no_repeat_ngram_size, max_new_tokens. Images are zero-padded into a (batch,
+        # max_images, 3, max_H, max_W) tensor plus a boolean mask, moved to the model device.
+        # Bad words (newline, double newline, image token, token-around-image) are banned. For
+        # DeepSpeed ZeRO-3 models it flags every submodule's _parameters._in_forward=True to
+        # allow external-parameter discovery, and uses synced_gpus. Runs model.generate (on the
+        # unwrapped model, no grad, use_cache, early_stopping). Returns only the newly
+        # generated token ids (prompt length stripped).
+        # KNOWN ISSUE: passes pixel_attention_mask, which VGPT2LMHeadModel.forward (the declared model_class)
+        # does not accept; only works with models such as VLlama3 that take that argument.
         model = kwargs["model"]
         input_ids = torch.stack(kwargs["input_ids"]).to(model.device)
         attention_mask = torch.stack(kwargs["attention_mask"]).to(model.device)
@@ -498,12 +569,17 @@ class Vgpt2OpenEndedVQAInContext(BaseTaskOpenEndedVQA):
         return generated_tokens
 
     def format_tokens_to_texts(self, tokens) -> List[str]:
+        # [FUNCTION DOC] Decode generated token ids with skip_special_tokens and truncate each text at the
+        # first occurrence of any stop word (stop words joined as an unescaped regex
+        # alternation). Returns a list of strings.
         texts = self.tokenizer.batch_decode(tokens, skip_special_tokens=True)
         stop_words_pattern = r"|".join(self.stop_words)
         texts = [re.split(stop_words_pattern, text)[0] for text in texts]
         return texts
 
     def add_batch_metric(self, metric, **kwargs):
+        # [FUNCTION DOC] Generate answers, store them in kwargs["generated_texts"] and call metric.add_batch
+        # with the kwargs entries named by metric.features. Returns metric.
         generated_tokens = self.generate_tokens(**kwargs)
         generated_texts = self.format_tokens_to_texts(generated_tokens)
         kwargs["generated_texts"] = generated_texts
@@ -514,6 +590,12 @@ class Vgpt2OpenEndedVQAInContext(BaseTaskOpenEndedVQA):
 
 
 class VQAv2Vgpt2OpenEndedVQAInContextAcc(Vgpt2OpenEndedVQAInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2OpenEndedVQAInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/VQAv2_modif'. Metric 'OpenEndedVQAMetrics'
+    # computing: FIRST_WORD_VQA_ACCURACY, OE_VQA_ACCURACY, GT_VISION_LAB_FIRST_WORD_VQA_ACCURACY,
+    # GT_VISION_LAB_OE_VQA_ACCURACY. Splits: default_query_split_name='validation',
+    # default_support_split_name='train'. Columns: image_column_name='image',
+    # question_column_name='question', answers_column_name='answers'.
     dataset_name: str = "HuggingFaceM4/VQAv2_modif"
     metric_name: str = "OpenEndedVQAMetrics"
     metric_kwargs = {
@@ -532,12 +614,21 @@ class VQAv2Vgpt2OpenEndedVQAInContextAcc(Vgpt2OpenEndedVQAInContext):
 
 
 class VQAv2SampleVgpt2OpenEndedVQAInContextAcc(VQAv2Vgpt2OpenEndedVQAInContextAcc):
+    # [CLASS DOC] Same task configuration as VQAv2Vgpt2OpenEndedVQAInContextAcc, but loads dataset
+    # 'HuggingFaceM4/VQAv2_modif-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/VQAv2_modif-Sample"
 
 
 class OKVQAVgpt2OpenEndedVQAInContextAcc(Vgpt2OpenEndedVQAInContext):
     # We are considering the raw answers. In the original paper,
     # they are doing a step of stemming (standardize pluralization and conjugation).
+    # [CLASS DOC] Task configuration subclass of Vgpt2OpenEndedVQAInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/OK-VQA_modif'. Metric 'OpenEndedVQAMetrics'
+    # computing: FIRST_WORD_VQA_ACCURACY, OE_VQA_ACCURACY, GT_VISION_LAB_FIRST_WORD_VQA_ACCURACY,
+    # GT_VISION_LAB_OE_VQA_ACCURACY. Splits: default_query_split_name='validation',
+    # default_support_split_name='train'. Columns: image_column_name='image',
+    # question_column_name='question', answers_column_name='answers'.
     dataset_name: str = "HuggingFaceM4/OK-VQA_modif"
     metric_name: str = "OpenEndedVQAMetrics"
     metric_kwargs = {
@@ -556,10 +647,19 @@ class OKVQAVgpt2OpenEndedVQAInContextAcc(Vgpt2OpenEndedVQAInContext):
 
 
 class OKVQASampleVgpt2OpenEndedVQAInContextAcc(OKVQAVgpt2OpenEndedVQAInContextAcc):
+    # [CLASS DOC] Same task configuration as OKVQAVgpt2OpenEndedVQAInContextAcc, but loads dataset
+    # 'HuggingFaceM4/OK-VQA_modif-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/OK-VQA_modif-Sample"
 
 
 class TextVQAVgpt2OpenEndedVQAInContextAcc(Vgpt2OpenEndedVQAInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2OpenEndedVQAInContext; declares only class attributes
+    # (no new behavior). Dataset: 'textvqa'. Metric 'OpenEndedVQAMetrics' computing:
+    # FIRST_WORD_VQA_ACCURACY, OE_VQA_ACCURACY, GT_VISION_LAB_FIRST_WORD_VQA_ACCURACY,
+    # GT_VISION_LAB_OE_VQA_ACCURACY. Splits: default_query_split_name='validation',
+    # default_support_split_name='train'. Columns: image_column_name='image',
+    # question_column_name='question', answers_column_name='answers'.
     dataset_name: str = "textvqa"
     metric_name: str = "OpenEndedVQAMetrics"
     metric_kwargs = {
@@ -578,10 +678,18 @@ class TextVQAVgpt2OpenEndedVQAInContextAcc(Vgpt2OpenEndedVQAInContext):
 
 
 class TextVQASampleVgpt2OpenEndedVQAInContextAcc(TextVQAVgpt2OpenEndedVQAInContextAcc):
+    # [CLASS DOC] Same task configuration as TextVQAVgpt2OpenEndedVQAInContextAcc, but loads dataset
+    # 'HuggingFaceM4/textvqa-Sample' - a small sample used for quick evaluation runs/debugging.
     dataset_name: str = "HuggingFaceM4/textvqa-Sample"
 
 
 class AdVQAVgpt2OpenEndedVQAInContextAcc(Vgpt2OpenEndedVQAInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2OpenEndedVQAInContext; declares only class attributes
+    # (no new behavior). Dataset: 'HuggingFaceM4/AdVQA_modif'. Metric 'OpenEndedVQAMetrics'
+    # computing: FIRST_WORD_VQA_ACCURACY, OE_VQA_ACCURACY, GT_VISION_LAB_FIRST_WORD_VQA_ACCURACY,
+    # GT_VISION_LAB_OE_VQA_ACCURACY. Splits: default_query_split_name='validation',
+    # default_support_split_name='train'. Columns: image_column_name='image',
+    # question_column_name='question', answers_column_name='answers'.
     dataset_name: str = "HuggingFaceM4/AdVQA_modif"
     metric_name: str = "OpenEndedVQAMetrics"
     metric_kwargs = {
@@ -600,4 +708,7 @@ class AdVQAVgpt2OpenEndedVQAInContextAcc(Vgpt2OpenEndedVQAInContext):
 
 
 class AdVQASampleVgpt2OpenEndedVQAInContextAcc(AdVQAVgpt2OpenEndedVQAInContextAcc):
+    # [CLASS DOC] Same task configuration as AdVQAVgpt2OpenEndedVQAInContextAcc, but loads dataset
+    # 'HuggingFaceM4/AdVQA_modif-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/AdVQA_modif-Sample"

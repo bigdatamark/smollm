@@ -1,3 +1,6 @@
+# [MODULE DOC] VQA evaluated as closed-set classification for VGPT2 models: every question is scored against
+# each answer of the fixed VQA answer vocabulary (_VQA_ANSWERS) and the metric uses the scores.
+# Contains the base task and the VQAv2 (and sample) configurations.
 import random
 from collections import Counter
 from typing import Dict, List, Optional
@@ -13,10 +16,15 @@ from m4.models.vgpt2.evaluation_classification_in_context_vgpt2 import Vgpt2Clas
 
 
 class Vgpt2ClassificationVQAInContext(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Scoring-based VQA task built on Vgpt2ClassificationInContext; uses question_column_name,
+    # answers_column_name and a single image_column_name instead of label/image column lists.
     def __init__(self, **kwargs) -> None:
+        # [FUNCTION DOC] Same as the parent constructor (all kwargs forwarded unchanged).
         super().__init__(**kwargs)
 
     def get_info_from_dataset(self, dataset):
+        # [FUNCTION DOC] Ignore the dataset and use the global _VQA_ANSWERS list as class_names; sets
+        # class_str2int / class_int2str (dict and list lookups) and class_ids = 0..N-1.
         _str2int_mapping = {answer: i for i, answer in enumerate(_VQA_ANSWERS)}
         self.class_names = _VQA_ANSWERS
         self.class_str2int = lambda s: _str2int_mapping[s]
@@ -24,6 +32,17 @@ class Vgpt2ClassificationVQAInContext(Vgpt2ClassificationInContext):
         self.class_ids = [self.class_str2int(class_name) for class_name in self.class_names]
 
     def prepare_dataset(self, exs: Dict, **kwargs) -> Dict:
+        # [FUNCTION DOC] Build a scoring batch pairing each question with every VQA answer (answer-major
+        # order). Shots (random or embedding-nearest, as in the parent) use the most common
+        # annotated answer. Text = shots + query prompt with the candidate answer (no prefix
+        # prompt), tokenized with tokenizer special tokens added. Each image is transformed
+        # whole (no splitting); per example shots + query are padded to (n, 3, H, W) with
+        # boolean masks and repeated for every answer. Returns example_ids, true_labels (answer
+        # lists), tested_labels (answer strings), input_ids, attention_mask, pixel_values,
+        # pixel_attention_masks.
+        # KNOWN ISSUE: uses self.classes_names (typo for class_names) -> AttributeError at runtime.
+        # KNOWN ISSUE: no "relevance_scores" key is returned although the inherited target_keys require it,
+        # and _create_prompt inserts a single image token instead of image_seq_len tokens.
         """
         Prepare batch of examples.
         Each example (X, y) where y is among (y1, y2, ..., yN) - the labels options -
@@ -39,6 +58,11 @@ class Vgpt2ClassificationVQAInContext(Vgpt2ClassificationInContext):
         nb_exs = len(exs["id"])
 
         def retrieve_idx_closest_examples(ref_embedding, embeddings_to_compare, num_examples):
+            # [FUNCTION DOC] HELPER: Similarity-based shot retrieval. Computes dot products between
+            # ref_embedding (1-D array) and each row of embeddings_to_compare (2-D array),
+            # selects the num_examples largest with an argpartition (linear time), then orders
+            # those by increasing similarity (most similar last, i.e. closest to the query in
+            # the prompt). Returns a list of int row indices into the support dataset.
             "Returns the indices of the `num_examples` closest embeddings in ascending order"
             sim = np.dot(embeddings_to_compare, ref_embedding)
             # We can achieve linear complexity because we don't need to sort all the numbers,
@@ -145,6 +169,8 @@ class Vgpt2ClassificationVQAInContext(Vgpt2ClassificationInContext):
         }
 
     def _create_prompt(self, question, answer=""):
+        # [FUNCTION DOC] HELPER: Return "<fake><image><fake>Question: {question} Answer: {answer}" using
+        # token_around_image and a single image_token; answer defaults to "".
         return (
             f"{self.token_around_image}{self.image_token}{self.token_around_image}Question:"
             f" {question} Answer: {answer}"
@@ -152,6 +178,12 @@ class Vgpt2ClassificationVQAInContext(Vgpt2ClassificationInContext):
 
 
 class VQAv2Vgpt2ClassificationVQAInContextAcc(Vgpt2ClassificationVQAInContext):
+    # [CLASS DOC] Task configuration subclass of Vgpt2ClassificationVQAInContext; declares only class
+    # attributes (no new behavior). Dataset: 'HuggingFaceM4/VQAv2_modif'. Metric
+    # 'ClassificationVQAMetrics' computing: VQA_ACCURACY, ENTROPY_DISTRIBUTION, ENTROPY_MEAN.
+    # Splits: default_query_split_name='validation', default_support_split_name='train'. Columns:
+    # image_column_name='image', question_column_name='question', answers_column_name='answers'.
+    # length_normalize=False.
     dataset_name: str = "HuggingFaceM4/VQAv2_modif"
     metric_name: str = "ClassificationVQAMetrics"
     metric_kwargs = {
@@ -170,4 +202,7 @@ class VQAv2Vgpt2ClassificationVQAInContextAcc(Vgpt2ClassificationVQAInContext):
 
 
 class VQAv2SampleVgpt2ClassificationVQAInContextAcc(VQAv2Vgpt2ClassificationVQAInContextAcc):
+    # [CLASS DOC] Same task configuration as VQAv2Vgpt2ClassificationVQAInContextAcc, but loads dataset
+    # 'HuggingFaceM4/VQAv2_modif-Sample' - a small sample used for quick evaluation
+    # runs/debugging.
     dataset_name: str = "HuggingFaceM4/VQAv2_modif-Sample"

@@ -1,4 +1,7 @@
 # coding=utf-8
+# [MODULE DOC] Configuration classes for VLlama3 (Llama-3 text backbone + vision encoder + Perceiver
+# resampler): VLlama3VisionConfig, VLlama3PerceiverConfig and the composite VLlama3Config
+# (model_type "vllama3").
 # Copyright 2023 Meta AI and the HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -34,6 +37,8 @@ LLAMA3_PRETRAINED_CONFIG_ARCHIVE_MAP = {
 
 
 class VLlama3VisionConfig(PretrainedConfig):
+    # [CLASS DOC] Vision encoder config derived from a hub vision model's config; maps hidden_size to
+    # embed_dim.
     r"""
     This is the configuration class to store the configuration of a [`LlamaModel`]. It is used to instantiate an LLaMA
     model according to the specified arguments, defining the model architecture. Instantiating a configuration with the
@@ -59,6 +64,12 @@ class VLlama3VisionConfig(PretrainedConfig):
         vision_model_name="HuggingFaceM4/siglip-so400m-14-384",
         **kwargs,
     ):
+        # [FUNCTION DOC] Load AutoConfig for vision_model_name (default "HuggingFaceM4/siglip-so400m-14-384",
+        # trust_remote_code; network/cache access), use its nested vision_config if any, and
+        # copy embed_dim (or hidden_size), image_size, patch_size, num_hidden_layers and
+        # intermediate_size. Raises ValueError if any is missing. Remaining kwargs go to
+        # PretrainedConfig.
+        # KNOWN ISSUE: docstring describes a LlamaModel configuration rather than the vision config.
         self.vision_model_name = vision_model_name
         vision_config = AutoConfig.from_pretrained(vision_model_name, trust_remote_code=True)
         if hasattr(vision_config, "vision_config"):
@@ -97,6 +108,8 @@ class VLlama3VisionConfig(PretrainedConfig):
 
 
 class VLlama3PerceiverConfig(PretrainedConfig):
+    # [CLASS DOC] Perceiver resampler hyper-parameters (activation, number of latents, depth, heads, key/value
+    # heads, head dim, qk layer norms, attention dropout).
     r"""
     This is the configuration class to store the configuration of a [`LlamaModel`]. It is used to instantiate an LLaMA
     model according to the specified arguments, defining the model architecture. Instantiating a configuration with the
@@ -133,6 +146,10 @@ class VLlama3PerceiverConfig(PretrainedConfig):
         attention_dropout=0.0,
         **kwargs,
     ):
+        # [FUNCTION DOC] Store the resampler hyper-parameters (defaults: silu, 64 latents, depth 6, 16 heads,
+        # 1 kv head, head_dim 96, no qk norms, dropout 0). Raises ValueError if
+        # num_key_value_heads > resampler_n_heads.
+        # KNOWN ISSUE: docstring defaults differ from code (e.g. resampler_n_latents default left blank).
         self.hidden_act = hidden_act
         self.resampler_n_latents = resampler_n_latents
         self.resampler_depth = resampler_depth
@@ -151,6 +168,9 @@ class VLlama3PerceiverConfig(PretrainedConfig):
 
 
 class VLlama3Config(PretrainedConfig):
+    # [CLASS DOC] Composite VLlama3 config: Llama text settings, image_token_id, freezing options, NEFTune
+    # alpha, flash-attention flag, resampler toggle, pixel_shuffle_factor and nested
+    # vision/perceiver configs.
     r"""
     This is the configuration class to store the configuration of a [`LlamaModel`]. It is used to instantiate an LLaMA
     model according to the specified arguments, defining the model architecture. Instantiating a configuration with the
@@ -322,6 +342,14 @@ class VLlama3Config(PretrainedConfig):
         pixel_shuffle_factor=4,
         **kwargs,
     ):
+        # [FUNCTION DOC] Store all text-model fields (num_key_value_heads defaults to num_attention_heads),
+        # freezing and resampler options; build perceiver_config / vision_config from None
+        # (defaults), a dict, or an instance; copy a legacy rope_scaling "type" to "rope_type"
+        # and validate RoPE settings; pass token ids and tie_word_embeddings to
+        # PretrainedConfig.
+        # KNOWN ISSUE: docstring defaults disagree with code (vocab_size 32000 vs 128256, bos/eos 1/2 vs
+        # 128000/128001, use_resampler False vs True); a vision/perceiver config of any other type leaves the
+        # attribute unset.
         self.vocab_size = vocab_size
         self.additional_vocab_size = additional_vocab_size
         self.image_token_id = image_token_id
@@ -396,6 +424,8 @@ class VLlama3Config(PretrainedConfig):
         # Do any required checks inside `from_pretrained` once the superclass' `from_pretrained` was run.
 
     def to_dict(self):
+        # [FUNCTION DOC] Serialize to a dict: deep copy of __dict__ with vision_config and perceiver_config
+        # converted via their to_dict and model_type set to the class model_type.
         """
         Serializes this instance to a Python dictionary. Override the default [`~PretrainedConfig.to_dict`].
         Returns:
@@ -411,5 +441,6 @@ class VLlama3Config(PretrainedConfig):
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
+        # [FUNCTION DOC] Classmethod: plain passthrough to PretrainedConfig.from_pretrained.
         outputs = super(VLlama3Config, cls).from_pretrained(pretrained_model_name_or_path, **kwargs)
         return outputs
