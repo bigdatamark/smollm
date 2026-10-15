@@ -1,4 +1,12 @@
 #!/usr/bin/env python
+# [MODULE DOC] Standalone script that builds a tiny random-weight LlamaForCausalLM ("tiny-random-Llama3ForCausalLM") for
+# use in tests where only the machinery matters, not output quality. Steps: creates directory
+# "tiny-random-Llama3ForCausalLM" in the current working directory; builds a LlamaConfig with vocab_size
+# 128256 (Llama-3 vocab), hidden_size 16, intermediate_size 64, 2 layers, 4 attention heads, 1 KV head;
+# instantiates the model with random weights; loads the "meta-llama/Meta-Llama-3-8B" tokenizer from the Hub
+# (network, gated repo access needed); runs a smoke-test generate on "This is a test"; casts the model to fp16
+# and saves model, config and tokenizer to the directory; reloads the model to check it loads; prints a
+# message asking to upload. No functions or classes; everything runs at import time.
 
 # This script creates a super tiny model that is useful inside tests, when we just want to test that
 # the machinery works, without needing to check the quality of the outcomes.

@@ -1,4 +1,8 @@
 # coding=utf-8
+# [MODULE DOC] Configuration classes for the IDEFICS model (LLaMA language model + CLIP-like vision encoder +
+# optional Perceiver resampler, with gated cross-attention). IdeficsConfig composes IdeficsVisionConfig and
+# IdeficsPerceiverConfig and serializes them as nested dicts. Module defines a logger and an empty
+# LLAMA_PRETRAINED_CONFIG_ARCHIVE_MAP.
 # Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
 #
 # This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
@@ -33,6 +37,10 @@ LLAMA_PRETRAINED_CONFIG_ARCHIVE_MAP = {}
 
 
 class IdeficsVisionConfig(PretrainedConfig):
+    # [CLASS DOC] Vision-encoder sub-config. Instead of storing all encoder hyperparameters, it records
+    # vision_model_name and derives embed_dim and image_size from that model's (hub) config. attribute_map
+    # aliases hidden_size -> embed_dim.
+    # KNOWN ISSUE: class docstring is a copy of IdeficsConfig's and does not describe this class.
     r"""
     This is the configuration class to store the configuration of a [`IdeficsModel`]. It is used to instantiate an
     Idefics model according to the specified arguments, defining the model architecture. Instantiating a configuration
@@ -58,6 +66,15 @@ class IdeficsVisionConfig(PretrainedConfig):
         image_size=None,
         **kwargs,
     ):
+        # [FUNCTION DOC] Inputs: vision_model_name (default "laion/CLIP-ViT-H-14-laion2B-s32B-b79K"),
+        # image_size (optional int), **kwargs to PretrainedConfig. Loads
+        # AutoConfig.from_pretrained(vision_model_name, trust_remote_code=True) (network/hub access) and uses
+        # its nested vision_config if present. embed_dim = its embed_dim, else hidden_size (left unset if
+        # neither exists). image_size = given value (logs a warning when it differs from the encoder's) or the
+        # encoder's image_size; raises ValueError if the encoder config has no image_size.
+        # KNOWN ISSUE: the ValueError message interpolates the image_size argument (usually None) instead of
+        # naming the missing attribute; and a provided image_size is ignored when the encoder config lacks
+        # image_size.
         self.vision_model_name = vision_model_name
         vision_config = AutoConfig.from_pretrained(vision_model_name, trust_remote_code=True)
         if hasattr(vision_config, "vision_config"):
@@ -88,6 +105,9 @@ class IdeficsVisionConfig(PretrainedConfig):
 
 
 class IdeficsPerceiverConfig(PretrainedConfig):
+    # [CLASS DOC] Perceiver resampler sub-config: use_resampler, number of latents, depth, heads, head dim and
+    # whether to use q/k layer norms.
+    # KNOWN ISSUE: docstring says resampler_n_latents has an empty default (code: 64).
     r"""
     This is the configuration class to store the configuration of a [`IdeficsModel`]. It is used to instantiate an
     Idefics model according to the specified arguments, defining the model architecture. Instantiating a configuration
@@ -121,6 +141,9 @@ class IdeficsPerceiverConfig(PretrainedConfig):
         qk_layer_norms_perceiver=False,
         **kwargs,
     ):
+        # [FUNCTION DOC] Store the resampler hyperparameters (defaults: use_resampler False, n_latents 64,
+        # depth 6, n_heads 16, head_dim 96, qk_layer_norms_perceiver False) and forward **kwargs to
+        # PretrainedConfig.
         self.use_resampler = use_resampler
         self.resampler_n_latents = resampler_n_latents
         self.resampler_depth = resampler_depth
@@ -132,6 +155,9 @@ class IdeficsPerceiverConfig(PretrainedConfig):
 
 
 class IdeficsConfig(PretrainedConfig):
+    # [CLASS DOC] Top-level IDEFICS config (model_type "idefics", is_composition True). Holds language-model
+    # sizes, gating alpha settings, cross-attention interval, freezing flags and the nested vision_config /
+    # perceiver_config.
     r"""
     This is the configuration class to store the configuration of a [`IdeficsModel`]. It is used to instantiate an
     Idefics model according to the specified arguments, defining the model architecture. Instantiating a configuration
@@ -239,6 +265,13 @@ class IdeficsConfig(PretrainedConfig):
         perceiver_config=None,
         **kwargs,
     ):
+        # [FUNCTION DOC] Store all arguments as attributes (see class docstring for meaning/defaults).
+        # perceiver_config and vision_config may be None (default sub-config; note default IdeficsVisionConfig
+        # hits the hub), a dict (expanded into the sub-config class) or an instance. pad/bos/eos ids and
+        # tie_word_embeddings go to PretrainedConfig.__init__ with remaining kwargs. No argument validation by
+        # design (see inline comment).
+        # KNOWN ISSUE: a sub-config of any other type is silently ignored, leaving the attribute unset;
+        # mutable list defaults ([]) for the *_module_exceptions arguments are shared between instances.
         self.vocab_size = vocab_size
         self.additional_vocab_size = additional_vocab_size
         self.hidden_size = hidden_size
@@ -294,6 +327,8 @@ class IdeficsConfig(PretrainedConfig):
         # Do any required checks inside `from_pretrained` once the superclass' `from_pretrained` was run.
 
     def to_dict(self):
+        # [FUNCTION DOC] Return a deep copy of the instance __dict__ with vision_config and perceiver_config
+        # replaced by their own to_dict() and model_type set to the class's model_type.
         """
         Serializes this instance to a Python dictionary. Override the default [`~PretrainedConfig.to_dict`].
         Returns:
@@ -309,5 +344,7 @@ class IdeficsConfig(PretrainedConfig):
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
+        # [FUNCTION DOC] Thin passthrough to PretrainedConfig.from_pretrained; returns its result (config, or
+        # tuple when return_unused_kwargs=True). No extra checks.
         outputs = super(IdeficsConfig, cls).from_pretrained(pretrained_model_name_or_path, **kwargs)
         return outputs

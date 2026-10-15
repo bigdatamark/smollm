@@ -1,4 +1,9 @@
 # coding=utf-8
+# [MODULE DOC] Configuration classes for VMistral: a vision sub-config (derived from a Hub vision model's config), a
+# perceiver resampler sub-config, and the top-level composite VMistralConfig that combines Mistral
+# text-decoder settings with the two sub-configs and training/freezing options. Also defines
+# MISTRAL_PRETRAINED_CONFIG_ARCHIVE_MAP (Hub URLs of the original Mistral configs) and a module logger (unused
+# here).
 # Copyright 2023 Mistral AI and the HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -33,6 +38,12 @@ MISTRAL_PRETRAINED_CONFIG_ARCHIVE_MAP = {
 
 
 class VMistralVisionConfig(PretrainedConfig):
+    # [CLASS DOC] Vision-encoder configuration (model_type "vmistral"; "hidden_size" is aliased to embed_dim). Stores the
+    # vision model name and copies the key dimensions (embed_dim, image_size, patch_size, num_hidden_layers,
+    # intermediate_size) from that model's Hub config.
+    # KNOWN ISSUE: the docstring is copied from MistralConfig and describes a Mistral text model, and lists
+    # embed_dim and image_size as constructor args, while the constructor actually only takes
+    # vision_model_name.
     r"""
     This is the configuration class to store the configuration of a [`MistralModel`]. It is used to instantiate an
     Mistral model according to the specified arguments, defining the model architecture. Instantiating a configuration
@@ -61,6 +72,12 @@ class VMistralVisionConfig(PretrainedConfig):
         vision_model_name="HuggingFaceM4/siglip-so400m-14-384",
         **kwargs,
     ):
+        # [FUNCTION DOC] Args: vision_model_name (str, default "HuggingFaceM4/siglip-so400m-14-384"), extra kwargs forwarded
+        # to PretrainedConfig. Loads the named model's config with AutoConfig.from_pretrained
+        # (trust_remote_code=True; network or cache access); if it has a nested vision_config (e.g. a
+        # CLIP/SigLIP composite) that nested one is used. Sets embed_dim from embed_dim, else from
+        # hidden_size; sets image_size, patch_size, num_hidden_layers and intermediate_size. Raises ValueError
+        # for any of these attributes missing on the loaded config.
         self.vision_model_name = vision_model_name
         vision_config = AutoConfig.from_pretrained(vision_model_name, trust_remote_code=True)
         if hasattr(vision_config, "vision_config"):
@@ -99,6 +116,9 @@ class VMistralVisionConfig(PretrainedConfig):
 
 
 class VMistralPerceiverConfig(PretrainedConfig):
+    # [CLASS DOC] Perceiver resampler configuration (model_type "vmistral") holding resampler hyper-parameters.
+    # KNOWN ISSUE: docstring is copied from MistralConfig (starts with typo "TThis"), documents a
+    # use_resampler arg that does not exist here and a wrong resampler_n_latents default (blank; actual 64).
     r"""
     TThis is the configuration class to store the configuration of a [`MistralModel`]. It is used to instantiate an
     Mistral model according to the specified arguments, defining the model architecture. Instantiating a configuration
@@ -138,6 +158,11 @@ class VMistralPerceiverConfig(PretrainedConfig):
         attention_dropout=0.0,
         **kwargs,
     ):
+        # [FUNCTION DOC] Args (stored as attributes): hidden_act ("silu"), resampler_n_latents (64, number of output
+        # latents), resampler_depth (6, number of resampler blocks), resampler_n_heads (16),
+        # num_key_value_heads (1, for grouped KV attention in the resampler), resampler_head_dim (96),
+        # qk_layer_norms_perceiver (False), attention_dropout (0.0); other kwargs go to PretrainedConfig.
+        # Raises ValueError if num_key_value_heads > resampler_n_heads.
         self.hidden_act = hidden_act
         self.resampler_n_latents = resampler_n_latents
         self.resampler_depth = resampler_depth
@@ -156,6 +181,10 @@ class VMistralPerceiverConfig(PretrainedConfig):
 
 
 class VMistralConfig(PretrainedConfig):
+    # [CLASS DOC] Top-level VMistral configuration (model_type "vmistral", composite, ignores past_key_values at
+    # inference). Holds Mistral decoder hyper-parameters plus image token id, additional (trainable) vocab
+    # size, gating-alpha options, freezing options, NEFTune noise, flash-attention flag, resampler use, and
+    # nested vision/perceiver configs.
     r"""
     This is the configuration class to store the configuration of a [`MistralModel`]. It is used to instantiate an
     Mistral model according to the specified arguments, defining the model architecture. Instantiating a configuration
@@ -290,6 +319,24 @@ class VMistralConfig(PretrainedConfig):
         perceiver_config=None,
         **kwargs,
     ):
+        # [FUNCTION DOC] Stores every argument as an attribute of the same name. Defaults: additional_vocab_size 0,
+        # vocab_size 32000, hidden_size 4096, intermediate_size 14336, 32 layers, 32 heads,
+        # num_key_value_heads 8 (None means equal to num_attention_heads), hidden_act "silu",
+        # max_position_embeddings 131072, initializer_range 0.02, alpha_initializer "zeros",
+        # alphas_initializer_range 0.0, alpha_type "float", rms_norm_eps 1e-6, use_cache True, pad/bos/eos ids
+        # 0/1/2, image_token_id 32001, tie_word_embeddings False, rope_theta 10000, sliding_window 4096,
+        # cross_layer_interval 1, qk_layer_norms False, freeze_text_layers True, freeze_text_module_exceptions
+        # [], freeze_lm_head False, freeze_vision_layers True, freeze_vision_module_exceptions [],
+        # attention_dropout 0.0, neftune_noise_alpha 0.0, _flash_attn_2_enabled True, use_resampler True.
+        # perceiver_config / vision_config may be None (default sub-config built; the vision one loads from
+        # the Hub), a dict (sub-config built from it) or a sub-config instance (used as is). pad/bos/eos ids,
+        # tie_word_embeddings and remaining kwargs are passed to PretrainedConfig.
+        # KNOWN ISSUE: a sub-config of any other type (e.g. a VLlama3 config object) is silently ignored,
+        # leaving the attribute unset (AttributeError later).
+        # KNOWN ISSUE: mutable list defaults ([]) for the freeze_*_module_exceptions args are shared across
+        # instances.
+        # KNOWN ISSUE: docstring says use_resampler defaults to False and pad_token_id has no default; code
+        # uses True and 0.
         self.vocab_size = vocab_size
         self.additional_vocab_size = additional_vocab_size
         self.image_token_id = image_token_id
@@ -357,6 +404,9 @@ class VMistralConfig(PretrainedConfig):
         # Do any required checks inside `from_pretrained` once the superclass' `from_pretrained` was run.
 
     def to_dict(self):
+        # [FUNCTION DOC] Serializes the config: deep copy of the instance attribute mapping, with vision_config and
+        # perceiver_config replaced by their own to_dict() mappings and "model_type" set to the class
+        # model_type. Returns the dict.
         """
         Serializes this instance to a Python dictionary. Override the default [`~PretrainedConfig.to_dict`].
         Returns:
@@ -372,5 +422,8 @@ class VMistralConfig(PretrainedConfig):
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
+        # [FUNCTION DOC] Classmethod that simply delegates to PretrainedConfig.from_pretrained with the given name/path and
+        # kwargs and returns its result (a VMistralConfig, or a (config, unused_kwargs) tuple if
+        # return_unused_kwargs is set). Exists as a hook for post-load checks, none are done.
         outputs = super(VMistralConfig, cls).from_pretrained(pretrained_model_name_or_path, **kwargs)
         return outputs

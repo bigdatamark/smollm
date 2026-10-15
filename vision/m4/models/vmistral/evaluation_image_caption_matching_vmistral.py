@@ -1,3 +1,6 @@
+# [MODULE DOC] VMistral evaluation task classes for image-caption matching (e.g. Winoground), scoring every image/caption
+# pair by log-likelihood. Logic is inherited from Vgpt2ImageCaptionMatching; these classes only set
+# configuration attributes.
 from typing import List
 
 from m4.evaluation.custom_metrics.image_caption_matching_metrics import MetricsImageCaptionMatching
@@ -5,11 +8,20 @@ from m4.models.vgpt2.evaluation_image_caption_matching_vgpt2 import Vgpt2ImageCa
 
 
 class VMistralImageCaptionMatching(Vgpt2ImageCaptionMatching):
+    # [CLASS DOC] Base image-caption matching task for VMistral: model_class "VMistralForCausalLM", tokenizer_max_seq_len
+    # 4096.
     model_class: str = "VMistralForCausalLM"
     tokenizer_max_seq_len = 4096
 
 
 class WinogroundVMistralImageCaptionMatchingAccWithKLAndEntropy(VMistralImageCaptionMatching):
+    # [CLASS DOC] Winoground (facebook/winoground) task: every split name is "test" (support splits unused); two image
+    # columns (image_0, image_1) and two caption columns (caption_0, caption_1), id column "id"; metrics text,
+    # image and group score; length-normalized log-likelihoods; prompt template 0 ("<image> Description of the
+    # image: {caption}") is selected out of 7 templates in prompt_templates_dict (templates differ in bos/eos
+    # tokens and wording).
+    # KNOWN ISSUE: the class name mentions "AccWithKLAndEntropy" but metric_kwargs only requests
+    # text/image/group scores.
     dataset_name: str = "facebook/winoground"
     metric_name: str = "ImageCaptionMatchingMetrics"
     metric_kwargs = {

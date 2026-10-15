@@ -1,3 +1,12 @@
+# [MODULE DOC] VMistral in-context (few-shot) classification evaluation tasks. Each candidate label is inserted in a prompt
+# template ({class_name}) and scored by log-likelihood; the prediction is the most likely label. All logic
+# (prompt building, image splitting, scoring, metrics) is inherited from Vgpt2ClassificationInContext; classes
+# here only set class-level configuration: dataset name/config, metric list, split names, label/image/context
+# column names, optional mapping from raw class names to prompt names, prompt templates
+# (prompt_templates_dict, or prompt_templates_dict_instruct when bool_instruct_templates is True) and the
+# selected template id. Every "<image>" in a template must match one image column. "Sample"/"Dummy" variants
+# point at small dataset copies; "NewSplits"/"PartN" at pre-made support/query splits;
+# DEFAULT_TO_SERVER_RESULTS dumps predictions for external scoring.
 from typing import List
 
 from m4.evaluation.custom_metrics.unfolded_classification_metrics import ClassifMetrics
@@ -5,11 +14,15 @@ from m4.models.vgpt2.evaluation_classification_in_context_vgpt2 import Vgpt2Clas
 
 
 class VMistralClassificationInContext(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Base classification task for VMistral: model_class "VMistralForCausalLM", tokenizer_max_seq_len 4096.
     model_class: str = "VMistralForCausalLM"
     tokenizer_max_seq_len = 4096
 
 
 class Food101VMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] Food-101 ("food101"): query validation, support train; label "label", image "image"; template "<image>a
+    # photo of a {class_name}."; no length normalization; metrics accuracy, KL (distribution and mean) and
+    # entropy (distribution and mean).
     dataset_name: str = "food101"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -37,10 +50,14 @@ class Food101VMistralClassificationInContextAccWithKLAndEntropy(VMistralClassifi
 class Food101SampleVMistralClassificationInContextAccWithKLAndEntropy(
     Food101VMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset "HuggingFaceM4/food101-Sample".
     dataset_name: str = "HuggingFaceM4/food101-Sample"
 
 
 class Cifar10VMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] CIFAR-10 ("cifar10"): query test, support train; label "label", image column "img"; template "<image>a
+    # photo of a {class_name}."; metrics accuracy, KL (distribution and mean) and entropy (distribution and
+    # mean).
     dataset_name: str = "cifar10"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -68,16 +85,21 @@ class Cifar10VMistralClassificationInContextAccWithKLAndEntropy(VMistralClassifi
 class Cifar10SampleVMistralClassificationInContextAccWithKLAndEntropy(
     Cifar10VMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset "HuggingFaceM4/cifar10-Sample".
     dataset_name: str = "HuggingFaceM4/cifar10-Sample"
 
 
 class Cifar10DummyVMistralClassificationInContextAccWithKLAndEntropy(
     Cifar10VMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the tiny debugging dataset "HuggingFaceM4/cifar10-Dummy".
     dataset_name: str = "HuggingFaceM4/cifar10-Dummy"
 
 
 class Cifar100VMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] CIFAR-100 ("cifar100"): query test, support train; label "fine_label", image "img"; template "<image>a
+    # photo of a {class_name}."; metrics accuracy, KL (distribution and mean) and entropy (distribution and
+    # mean).
     dataset_name: str = "cifar100"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -105,10 +127,13 @@ class Cifar100VMistralClassificationInContextAccWithKLAndEntropy(VMistralClassif
 class Cifar100SampleVMistralClassificationInContextAccWithKLAndEntropy(
     Cifar100VMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset "HuggingFaceM4/cifar100-Sample".
     dataset_name: str = "HuggingFaceM4/cifar100-Sample"
 
 
 class StanfordCarsVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] Stanford Cars (HuggingFaceM4/Stanford-Cars): query test, support train; template "<image>a photo of a
+    # {class_name}."; metrics accuracy, KL (distribution and mean) and entropy (distribution and mean).
     dataset_name: str = "HuggingFaceM4/Stanford-Cars"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -136,10 +161,14 @@ class StanfordCarsVMistralClassificationInContextAccWithKLAndEntropy(VMistralCla
 class StanfordCarsSampleVMistralClassificationInContextAccWithKLAndEntropy(
     StanfordCarsVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset "HuggingFaceM4/Stanford-Cars-Sample".
     dataset_name: str = "HuggingFaceM4/Stanford-Cars-Sample"
 
 
 class DTDVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] Describable Textures Dataset (HuggingFaceM4/DTD_Describable-Textures-Dataset, config "partition_1"):
+    # query test, support train; template "<image>a photo of a {class_name} texture."; metrics accuracy, KL
+    # (distribution and mean) and entropy (distribution and mean).
     dataset_name: str = "HuggingFaceM4/DTD_Describable-Textures-Dataset"
     dataset_config = "partition_1"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -168,10 +197,15 @@ class DTDVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificati
 class DTDSampleVMistralClassificationInContextAccWithKLAndEntropy(
     DTDVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset
+    # "HuggingFaceM4/DTD_Describable-Textures-Dataset-partition_1-Sample" (config inherited as partition_1).
     dataset_name: str = "HuggingFaceM4/DTD_Describable-Textures-Dataset-partition_1-Sample"
 
 
 class RenderedSST2VMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] Rendered SST-2 (movie-review sentiment rendered as images, HuggingFaceM4/RenderedSST2): query test,
+    # support train; template "<image>a {class_name} review of a movie."; metrics accuracy, KL (distribution
+    # and mean) and entropy (distribution and mean).
     dataset_name: str = "HuggingFaceM4/RenderedSST2"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -199,10 +233,16 @@ class RenderedSST2VMistralClassificationInContextAccWithKLAndEntropy(VMistralCla
 class RenderedSST2SampleVMistralClassificationInContextAccWithKLAndEntropy(
     RenderedSST2VMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset "HuggingFaceM4/RenderedSST2-Sample".
     dataset_name: str = "HuggingFaceM4/RenderedSST2-Sample"
 
 
 class RenderedSST2NewSplitsVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] Rendered SST-2 on HuggingFaceM4/RenderedSST2_support_query_sets. Uses the "*_support_query_sets" dataset
+    # variant with validation/test query and support sets ("<split>_query_set" / "<split>_support_set"). Five
+    # templates (0 is the plain one; 1-4 add an instruction/task prefix asking for positive/negative
+    # sentiment); template 2 ("Image:<image>Sentiment: {class_name}.") is selected; metrics accuracy, KL
+    # (distribution and mean) and entropy (distribution and mean).
     dataset_name: str = "HuggingFaceM4/RenderedSST2_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -260,6 +300,9 @@ class RenderedSST2NewSplitsVMistralClassificationInContextAccWithKLAndEntropy(VM
 
 
 class SUN397VMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] SUN397 scenes (HuggingFaceM4/sun397, config "standard-part1-120k"): query test, support train; template
+    # "<image>a photo of a {class_name}."; metrics accuracy, KL (distribution and mean) and entropy
+    # (distribution and mean).
     dataset_name: str = "HuggingFaceM4/sun397"
     dataset_config = "standard-part1-120k"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -288,11 +331,16 @@ class SUN397VMistralClassificationInContextAccWithKLAndEntropy(VMistralClassific
 class SUN397SampleVMistralClassificationInContextAccWithKLAndEntropy(
     SUN397VMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset "HuggingFaceM4/sun397-standard-part1-120k-Sample" with no dataset
+    # config.
     dataset_name: str = "HuggingFaceM4/sun397-standard-part1-120k-Sample"
     dataset_config = None
 
 
 class OxfordPetsVMistralClassificationInContextMeanPerClassAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] Oxford-IIIT Pet (HuggingFaceM4/Oxford-IIIT-Pet): query test, support train; template "<image>A photo of
+    # a {class_name}, a type of pet."; metrics mean per-class accuracy, KL (distribution and mean) and entropy
+    # (distribution and mean).
     dataset_name: str = "HuggingFaceM4/Oxford-IIIT-Pet"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -320,11 +368,15 @@ class OxfordPetsVMistralClassificationInContextMeanPerClassAccWithKLAndEntropy(V
 class OxfordPetsSampleVMistralClassificationInContextMeanPerClassAccWithKLAndEntropy(
     OxfordPetsVMistralClassificationInContextMeanPerClassAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset "HuggingFaceM4/Oxford-IIIT-Pet-Sample" with no dataset config.
     dataset_name: str = "HuggingFaceM4/Oxford-IIIT-Pet-Sample"
     dataset_config = None
 
 
 class Caltech101VMistralClassificationInContextMeanPerClassAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] Caltech-101 (HuggingFaceM4/Caltech-101, config "with_background_category"): query test, support train;
+    # template "<image>a photo of a {class_name}."; metrics mean per-class accuracy, KL (distribution and
+    # mean) and entropy (distribution and mean).
     dataset_name: str = "HuggingFaceM4/Caltech-101"
     dataset_config = "with_background_category"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -353,11 +405,18 @@ class Caltech101VMistralClassificationInContextMeanPerClassAccWithKLAndEntropy(V
 class Caltech101SampleVMistralClassificationInContextMeanPerClassAccWithKLAndEntropy(
     Caltech101VMistralClassificationInContextMeanPerClassAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset "HuggingFaceM4/Caltech-101-with_background_category-Sample" with
+    # no dataset config.
     dataset_name: str = "HuggingFaceM4/Caltech-101-with_background_category-Sample"
     dataset_config = None
 
 
 class ImageNet1kVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] ImageNet-1k ("imagenet-1k"): query validation, support train; mapping_class_names_to_prompt_names
+    # converts each of the 1000 WordNet-style class names ("tench, Tinca tinca") to a cleaner prompt name
+    # ("tench"); template 0 "<image>a photo of a {class_name}." selected (an instruct chat template exists but
+    # is unused since bool_instruct_templates is False); metrics accuracy, KL (distribution and mean) and
+    # entropy (distribution and mean).
     dataset_name: str = "imagenet-1k"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -1409,6 +1468,9 @@ class ImageNet1kVMistralClassificationInContextAccWithKLAndEntropy(VMistralClass
 class ImageNet1kNewSplits1kSupportVMistralClassificationInContextAccWithKLAndEntropy(
     ImageNet1kVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] ImageNet-1k with 1k-example support sets (HuggingFaceM4/imagenet1k_support_1k_query_sets). Uses the
+    # "*_support_query_sets" dataset variant with validation/test query and support sets ("<split>_query_set"
+    # / "<split>_support_set"). Template 0.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -1422,42 +1484,57 @@ class ImageNet1kNewSplits1kSupportVMistralClassificationInContextAccWithKLAndEnt
 class ImageNet1kPart0NewSplits1kSupportVMistralClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 0 of the ImageNet-1k 1k-support new-splits dataset
+    # (HuggingFaceM4/imagenet1k_support_1k_query_sets_part_0).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_0"
 
 
 class ImageNet1kPart1NewSplits1kSupportVMistralClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 1 of the ImageNet-1k 1k-support new-splits dataset
+    # (HuggingFaceM4/imagenet1k_support_1k_query_sets_part_1).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_1"
 
 
 class ImageNet1kPart2NewSplits1kSupportVMistralClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 2 of the ImageNet-1k 1k-support new-splits dataset
+    # (HuggingFaceM4/imagenet1k_support_1k_query_sets_part_2).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_2"
 
 
 class ImageNet1kPart3NewSplits1kSupportVMistralClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 3 of the ImageNet-1k 1k-support new-splits dataset
+    # (HuggingFaceM4/imagenet1k_support_1k_query_sets_part_3).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_3"
 
 
 class ImageNet1kPart4NewSplits1kSupportVMistralClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 4 of the ImageNet-1k 1k-support new-splits dataset
+    # (HuggingFaceM4/imagenet1k_support_1k_query_sets_part_4).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_4"
 
 
 class ImageNet1kPart5NewSplits1kSupportVMistralClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 5 of the ImageNet-1k 1k-support new-splits dataset
+    # (HuggingFaceM4/imagenet1k_support_1k_query_sets_part_5).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_5"
 
 
 class ImageNet1kNewSplits5kSupportVMistralClassificationInContextAccWithKLAndEntropy(
     ImageNet1kVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] ImageNet-1k with 5k-example support sets (HuggingFaceM4/imagenet1k_support_5k_query_sets). Uses the
+    # "*_support_query_sets" dataset variant with validation/test query and support sets ("<split>_query_set"
+    # / "<split>_support_set"). Template 0.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -1471,46 +1548,66 @@ class ImageNet1kNewSplits5kSupportVMistralClassificationInContextAccWithKLAndEnt
 class ImageNet1kPart0NewSplits5kSupportVMistralClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 0 of the ImageNet-1k 5k-support new-splits dataset
+    # (HuggingFaceM4/imagenet1k_support_5k_query_sets_part_0).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_0"
 
 
 class ImageNet1kPart1NewSplits5kSupportVMistralClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 1 of the ImageNet-1k 5k-support new-splits dataset
+    # (HuggingFaceM4/imagenet1k_support_5k_query_sets_part_1).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_1"
 
 
 class ImageNet1kPart2NewSplits5kSupportVMistralClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 2 of the ImageNet-1k 5k-support new-splits dataset
+    # (HuggingFaceM4/imagenet1k_support_5k_query_sets_part_2).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_2"
 
 
 class ImageNet1kPart3NewSplits5kSupportVMistralClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 3 of the ImageNet-1k 5k-support new-splits dataset
+    # (HuggingFaceM4/imagenet1k_support_5k_query_sets_part_3).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_3"
 
 
 class ImageNet1kPart4NewSplits5kSupportVMistralClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 4 of the ImageNet-1k 5k-support new-splits dataset
+    # (HuggingFaceM4/imagenet1k_support_5k_query_sets_part_4).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_4"
 
 
 class ImageNet1kPart5NewSplits5kSupportVMistralClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 5 of the ImageNet-1k 5k-support new-splits dataset
+    # (HuggingFaceM4/imagenet1k_support_5k_query_sets_part_5).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_5"
 
 
 class ImageNet1kSampleVMistralClassificationInContextAccWithKLAndEntropy(
     ImageNet1kVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset "HuggingFaceM4/imagenet-1k-Sample".
     dataset_name: str = "HuggingFaceM4/imagenet-1k-Sample"
 
 
 class HatefulMemesVMistralClassificationInContextAccWithKLAndEntropyROCAUC(VMistralClassificationInContext):
+    # [CLASS DOC] Hateful Memes (HuggingFaceM4/Hateful-Memes, config "seen"): query test, support train; context column
+    # "text" (meme text); metrics accuracy, KL (distribution and mean) and entropy (distribution and mean)
+    # plus ROC-AUC. 28 few-shot templates (ids 0-27) with varied prefixes/wording; template 22 is selected.
+    # Label wording depends on the template: mapping_class_prompt_name_id_to_prompt_template_id assigns
+    # templates to one of two label mappings (0: not-hateful/hateful -> "no"/"yes"; 1: -> "not
+    # hateful"/"hateful"). Note: prompt_templates_dict_instruct (key 22) is unused because
+    # bool_instruct_templates is False.
     dataset_name: str = "HuggingFaceM4/Hateful-Memes"
     dataset_config: str = "seen"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -1725,6 +1822,8 @@ class HatefulMemesVMistralClassificationInContextAccWithKLAndEntropyROCAUC(VMist
 class HatefulMemesNewSplitsVMistralClassificationInContextAccWithKLAndEntropyROCAUC(
     HatefulMemesVMistralClassificationInContextAccWithKLAndEntropyROCAUC
 ):
+    # [CLASS DOC] Hateful Memes on HuggingFaceM4/HatefulMemes_support_query_sets. Uses the "*_support_query_sets" dataset
+    # variant with validation/test query and support sets ("<split>_query_set" / "<split>_support_set").
     dataset_name: str = "HuggingFaceM4/HatefulMemes_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -1735,6 +1834,9 @@ class HatefulMemesNewSplitsVMistralClassificationInContextAccWithKLAndEntropyROC
 
 
 class ClevrVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] CLEVR as classification (HuggingFaceM4/clevr, config "classification"): query validation, support train;
+    # label "answer", context "question"; template "<image>Question: {question} Answer: {class_name}"; metrics
+    # accuracy, KL mean, entropy mean.
     dataset_name: str = "HuggingFaceM4/clevr"
     dataset_config: str = "classification"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -1762,10 +1864,15 @@ class ClevrVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassifica
 class ClevrSampleVMistralClassificationInContextAccWithKLAndEntropy(
     ClevrVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset "HuggingFaceM4/clevr-Sample".
     dataset_name: str = "HuggingFaceM4/clevr-Sample"
 
 
 class ClevrNewSplitsVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] CLEVR on HuggingFaceM4/Clevr_support_query_sets. Uses the "*_support_query_sets" dataset variant with
+    # validation/test query and support sets ("<split>_query_set" / "<split>_support_set"). Several
+    # question/answer templates; template 3 ("<image>{question}\nAnswer: {class_name}.") selected (instruct
+    # dict unused); metrics accuracy, KL mean, entropy mean, DEFAULT_TO_SERVER_RESULTS.
     dataset_name: str = "HuggingFaceM4/Clevr_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -1844,6 +1951,8 @@ class ClevrNewSplitsVMistralClassificationInContextAccWithKLAndEntropy(VMistralC
 class ClevrChatbotVMistralClassificationInContextAccWithKLAndEntropy(
     ClevrNewSplitsVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] CLEVR new splits with a single chat template asking for "a very brief answer". Chat-formatted template
+    # "User:<image>...<end_of_utterance>\nAssistant: ...<end_of_utterance>" prefixed by the bos token.
     prompt_templates_dict = {
         0: {
             "prefix": "{bos_token}",
@@ -1857,6 +1966,10 @@ class ClevrChatbotVMistralClassificationInContextAccWithKLAndEntropy(
 
 
 class SNLIVEImageOnlySampleVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] SNLI-VE visual entailment, image as premise (HuggingFaceM4/SNLI-VE-Sample): query test, support train;
+    # context "hypothesis"; labels mapped to correct/incorrect/inconclusive wording; template asks whether the
+    # hypothesis is correct, incorrect or inconclusive; metrics mean per-class accuracy, KL (distribution and
+    # mean) and entropy (distribution and mean).
     dataset_name: str = "HuggingFaceM4/SNLI-VE-Sample"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -1892,6 +2005,9 @@ class SNLIVEImageOnlySampleVMistralClassificationInContextAccWithKLAndEntropy(VM
 
 
 class SNLIVEImagePremiseSampleVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] SNLI-VE with text premise + hypothesis combined in a "context" column
+    # (HuggingFaceM4/SNLI-VE_modif_premise_hypothesis-Sample); otherwise as the image-only variant; metrics
+    # mean per-class accuracy, KL (distribution and mean) and entropy (distribution and mean).
     dataset_name: str = "HuggingFaceM4/SNLI-VE_modif_premise_hypothesis-Sample"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -1929,6 +2045,10 @@ class SNLIVEImagePremiseSampleVMistralClassificationInContextAccWithKLAndEntropy
 
 
 class FairFaceAgeVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] FairFace age (HuggingFaceM4/FairFace): query validation, support train; label "age" (9 age ranges mapped
+    # to prompt names); template "<image>a photo of a person {class_name}."; metrics accuracy, KL
+    # (distribution and mean) and entropy (distribution and mean) plus per-bucket accuracy over buckets gender
+    # and race.
     dataset_name: str = "HuggingFaceM4/FairFace"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -1969,10 +2089,16 @@ class FairFaceAgeVMistralClassificationInContextAccWithKLAndEntropy(VMistralClas
 class FairFaceAgeSampleVMistralClassificationInContextAccWithKLAndEntropy(
     FairFaceAgeVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset "HuggingFaceM4/FairFace-Sample".
     dataset_name: str = "HuggingFaceM4/FairFace-Sample"
 
 
 class FairFaceAgeNewSplitsVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] FairFace age on HuggingFaceM4/FairFace_support_query_sets. Uses the "*_support_query_sets" dataset
+    # variant with validation/test query and support sets ("<split>_query_set" / "<split>_support_set").
+    # Metrics accuracy, KL mean, entropy mean, per-bucket accuracy (gender, race). bool_instruct_templates is
+    # True and instruct template 5 (chat: "How old is the person in the picture?") is selected; the few-shot
+    # templates 0-5 are unused.
     dataset_name: str = "HuggingFaceM4/FairFace_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2045,6 +2171,9 @@ class FairFaceAgeNewSplitsVMistralClassificationInContextAccWithKLAndEntropy(VMi
 
 
 class FairFaceGenderVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] FairFace gender: label "gender" (2 classes mapped to prompt names); template "<image>a photo of a
+    # {class_name} person."; metrics accuracy, KL (distribution and mean) and entropy (distribution and mean)
+    # plus per-bucket accuracy (gender, race).
     dataset_name: str = "HuggingFaceM4/FairFace"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2078,10 +2207,15 @@ class FairFaceGenderVMistralClassificationInContextAccWithKLAndEntropy(VMistralC
 class FairFaceGenderSampleVMistralClassificationInContextAccWithKLAndEntropy(
     FairFaceGenderVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset "HuggingFaceM4/FairFace-Sample".
     dataset_name: str = "HuggingFaceM4/FairFace-Sample"
 
 
 class FairFaceGenderNewSplitsVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] FairFace gender on the support/query sets. Uses the "*_support_query_sets" dataset variant with
+    # validation/test query and support sets ("<split>_query_set" / "<split>_support_set"). Metrics accuracy,
+    # KL mean, entropy mean, per-bucket accuracy. Instruct chat template 0 ("What is this person's gender?")
+    # selected via bool_instruct_templates.
     dataset_name: str = "HuggingFaceM4/FairFace_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2147,6 +2281,9 @@ class FairFaceGenderNewSplitsVMistralClassificationInContextAccWithKLAndEntropy(
 
 
 class FairFaceRaceVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] FairFace race: label "race" (7 classes mapped to prompt names); template "<image>a photo of a
+    # {class_name} person."; metrics accuracy, KL (distribution and mean) and entropy (distribution and mean)
+    # plus per-bucket accuracy (gender, race).
     dataset_name: str = "HuggingFaceM4/FairFace"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2185,10 +2322,15 @@ class FairFaceRaceVMistralClassificationInContextAccWithKLAndEntropy(VMistralCla
 class FairFaceRaceSampleVMistralClassificationInContextAccWithKLAndEntropy(
     FairFaceRaceVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset "HuggingFaceM4/FairFace-Sample".
     dataset_name: str = "HuggingFaceM4/FairFace-Sample"
 
 
 class FairFaceRaceNewSplitsVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] FairFace race on the support/query sets. Uses the "*_support_query_sets" dataset variant with
+    # validation/test query and support sets ("<split>_query_set" / "<split>_support_set"). Metrics accuracy,
+    # KL mean, entropy mean, per-bucket accuracy. Instruct chat template 0 ("What is this person's race?")
+    # selected via bool_instruct_templates.
     dataset_name: str = "HuggingFaceM4/FairFace_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2259,6 +2401,12 @@ class FairFaceRaceNewSplitsVMistralClassificationInContextAccWithKLAndEntropy(VM
 
 
 class NLVR2SampleVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] NLVR2 (HuggingFaceM4/NLVR2-Sample): two image columns (left_image, right_image), context "sentence",
+    # True/False labels mapped to prompt names; query test, support train; metrics accuracy, KL (distribution
+    # and mean) and entropy (distribution and mean).
+    # KNOWN ISSUE: the template uses "<image>{image_token}{token_around_image}" for the second image, but the
+    # base class only supplies bos_token/eos_token/class_name and contexts to the format call (KeyError) and
+    # requires one "<image>" per image (1 vs 2 -> ValueError), so this task cannot build prompts as written.
     dataset_name: str = "HuggingFaceM4/NLVR2-Sample"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2292,6 +2440,12 @@ class NLVR2SampleVMistralClassificationInContextAccWithKLAndEntropy(VMistralClas
 
 
 class NLVR2NewSplitsVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] NLVR2 on HuggingFaceM4/NLVR2_support_query_sets. Uses the "*_support_query_sets" dataset variant with
+    # validation/test query and support sets ("<split>_query_set" / "<split>_support_set"). Four
+    # left/right-image templates, template 3 selected; metrics accuracy, KL (distribution and mean) and
+    # entropy (distribution and mean). No class-name mapping (raw labels used).
+    # KNOWN ISSUE: same as the sample variant: templates reference {image_token}/{token_around_image} and
+    # contain a single "<image>" for two images, which the base prompt builder rejects.
     dataset_name: str = "HuggingFaceM4/NLVR2_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2411,6 +2565,9 @@ class NLVR2NewSplitsVMistralClassificationInContextAccWithKLAndEntropy(VMistralC
 
 
 class ScienceQAVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] ScienceQA (HuggingFaceM4/ScienceQA_modif): query test, support train; context "context"; template
+    # "<image>{context}Answer: The best answer is {class_name}."; metrics accuracy, KL (distribution and mean)
+    # and entropy (distribution and mean).
     dataset_name: str = "HuggingFaceM4/ScienceQA_modif"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2437,6 +2594,12 @@ class ScienceQAVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassi
 
 
 class ScienceQANewSplitsOldSetupVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] ScienceQA support/query sets, old setup (HuggingFaceM4/ScienceQA_support_query_sets_old_setup). Uses the
+    # "*_support_query_sets" dataset variant with validation/test query and support sets ("<split>_query_set"
+    # / "<split>_support_set"). Contexts "context" and "solution"; the solution is shown in support examples
+    # but removed from the tested example (tested_ex_excluded_context_columns); 6 templates, template 1
+    # selected (instruct dict unused); metrics accuracy, KL (distribution and mean) and entropy (distribution
+    # and mean).
     dataset_name: str = "HuggingFaceM4/ScienceQA_support_query_sets_old_setup"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2501,6 +2664,11 @@ class ScienceQANewSplitsOldSetupVMistralClassificationInContextAccWithKLAndEntro
 
 
 class ScienceQANewSplitsVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] ScienceQA support/query sets (HuggingFaceM4/ScienceQA_support_query_sets). Uses the
+    # "*_support_query_sets" dataset variant with validation/test query and support sets ("<split>_query_set"
+    # / "<split>_support_set"). Contexts question, hint, context, solution (solution excluded for the tested
+    # example); several answer-sheet style templates, template 1 selected; metrics accuracy, KL (distribution
+    # and mean) and entropy (distribution and mean).
     dataset_name: str = "HuggingFaceM4/ScienceQA_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2644,10 +2812,14 @@ class ScienceQANewSplitsVMistralClassificationInContextAccWithKLAndEntropy(VMist
 class ScienceQASampleVMistralClassificationInContextAccWithKLAndEntropy(
     ScienceQAVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset "HuggingFaceM4/ScienceQA_modif-Sample".
     dataset_name: str = "HuggingFaceM4/ScienceQA_modif-Sample"
 
 
 class IIIT5KVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] IIIT-5K word recognition as classification (HuggingFaceM4/IIIT-5K-classif): candidate labels per example
+    # come from the "small_lexicon" column; template '<image>"{class_name}" is written on the picture.'; query
+    # test, support train; metrics accuracy, KL (distribution and mean) and entropy (distribution and mean).
     dataset_name: str = "HuggingFaceM4/IIIT-5K-classif"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2677,12 +2849,16 @@ class IIIT5KVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassific
 class IIIT5KSampleVMistralClassificationInContextAccWithKLAndEntropy(
     IIIT5KVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset "HuggingFaceM4/IIIT-5K-classif-Sample".
     dataset_name: str = "HuggingFaceM4/IIIT-5K-classif-Sample"
 
 
 class SimpleImageNet1kVMistralClassificationInContextAccWithKLAndEntropy(
     ImageNet1kVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Simplified ImageNet-1k (HuggingFaceM4/simple-imagenet-1k): like ImageNet1k but candidate labels per
+    # example come from the "lexicon" column; metrics accuracy, KL (distribution and mean) and entropy
+    # (distribution and mean).
     dataset_name: str = "HuggingFaceM4/simple-imagenet-1k"
     metric_kwargs = {
         "metrics": [
@@ -2699,10 +2875,16 @@ class SimpleImageNet1kVMistralClassificationInContextAccWithKLAndEntropy(
 class SimpleImageNet1kSampleVMistralClassificationInContextAccWithKLAndEntropy(
     SimpleImageNet1kVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset "HuggingFaceM4/simple-imagenet-1k-Sample".
     dataset_name: str = "HuggingFaceM4/simple-imagenet-1k-Sample"
 
 
 class VisDialNewSplitsVMistralClassificationInContextNDCG(VMistralClassificationInContext):
+    # [CLASS DOC] VisDial answer ranking (HuggingFaceM4/VisDial_modif_support_query_sets). Uses the "*_support_query_sets"
+    # dataset variant with validation/test query and support sets ("<split>_query_set" /
+    # "<split>_support_set"). Label "answer", candidates from "answer_options", relevance scores column
+    # "relevance_scores", contexts "context" (dialog history + question) and "caption"; several caption/dialog
+    # templates, template 1 selected; metric NDCG.
     dataset_name: str = "HuggingFaceM4/VisDial_modif_support_query_sets"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2814,6 +2996,9 @@ class VisDialNewSplitsVMistralClassificationInContextNDCG(VMistralClassification
 
 
 class MMBenchNewSplitsVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] MMBench support/query sets (HuggingFaceM4/mmbench_support_query_sets), validation splits only; context
+    # "context" (question + options); template "<image>{context}{class_name}." (instruct dict unused); metrics
+    # accuracy, KL (distribution and mean) and entropy (distribution and mean) plus DEFAULT_TO_SERVER_RESULTS.
     dataset_name: str = "HuggingFaceM4/mmbench_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2853,6 +3038,9 @@ class MMBenchNewSplitsVMistralClassificationInContextAccWithKLAndEntropy(VMistra
 
 
 class SEEDAllVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] SEED-Bench, all categories (HuggingFaceM4/SEED), test split for query and support; label "answer";
+    # contexts question and choice_a..choice_d; one chat-style template listing options A-D with a system-like
+    # prefix; metrics accuracy, KL (distribution and mean) and entropy (distribution and mean).
     dataset_name: str = "HuggingFaceM4/SEED"
 
     default_query_split_name: str = "test"
@@ -2892,58 +3080,71 @@ class SEEDAllVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassifi
 class SEEDSceneUnderstandingVMistralClassificationInContextAccWithKLAndEntropy(
     SEEDAllVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to the "Scene_Understanding" category (dataset config).
     dataset_config = "Scene_Understanding"
 
 
 class SEEDInstanceIdentityVMistralClassificationInContextAccWithKLAndEntropy(
     SEEDAllVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to the "Instance_Identity" category (dataset config).
     dataset_config = "Instance_Identity"
 
 
 class SEEDInstanceAttributesVMistralClassificationInContextAccWithKLAndEntropy(
     SEEDAllVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to the "Instance_Attributes" category (dataset config).
     dataset_config = "Instance_Attributes"
 
 
 class SEEDInstanceLocationVMistralClassificationInContextAccWithKLAndEntropy(
     SEEDAllVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to the "Instance_Location" category (dataset config).
     dataset_config = "Instance_Location"
 
 
 class SEEDInstancesCountingVMistralClassificationInContextAccWithKLAndEntropy(
     SEEDAllVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to the "Instances_Counting" category (dataset config).
     dataset_config = "Instances_Counting"
 
 
 class SEEDSpatialRelationVMistralClassificationInContextAccWithKLAndEntropy(
     SEEDAllVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to the "Spatial_Relation" category (dataset config).
     dataset_config = "Spatial_Relation"
 
 
 class SEEDInstanceInteractionVMistralClassificationInContextAccWithKLAndEntropy(
     SEEDAllVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to the "Instance_Interaction" category (dataset config).
     dataset_config = "Instance_Interaction"
 
 
 class SEEDVisualReasoningVMistralClassificationInContextAccWithKLAndEntropy(
     SEEDAllVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to the "Visual_Reasoning" category (dataset config).
     dataset_config = "Visual_Reasoning"
 
 
 class SEEDTextUnderstandingVMistralClassificationInContextAccWithKLAndEntropy(
     SEEDAllVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to the "Text_Understanding" category (dataset config).
     dataset_config = "Text_Understanding"
 
 
 class SugarCrepeSwapObjVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] SugarCrepe compositionality, swap-object subset (HuggingFaceM4/SugarCrepe_swap_obj), test split only:
+    # the true caption (label "true_label") competes with candidates from "tested_labels" under a chat
+    # "Describe this image." template; metrics accuracy, KL (distribution and mean) and entropy (distribution
+    # and mean).
     dataset_name: str = "HuggingFaceM4/SugarCrepe_swap_obj"
     default_query_split_name: str = "test"
     default_support_split_name: str = "test"
@@ -2979,40 +3180,53 @@ class SugarCrepeSwapObjVMistralClassificationInContextAccWithKLAndEntropy(VMistr
 class SugarCrepeSwapAttVMistralClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SugarCrepe "swap_att" subset (HuggingFaceM4/SugarCrepe_swap_att); otherwise as the swap-object task.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_swap_att"
 
 
 class SugarCrepeReplaceRelVMistralClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SugarCrepe "replace_rel" subset (HuggingFaceM4/SugarCrepe_replace_rel); otherwise as the swap-object
+    # task.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_replace_rel"
 
 
 class SugarCrepeReplaceObjVMistralClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SugarCrepe "replace_obj" subset (HuggingFaceM4/SugarCrepe_replace_obj); otherwise as the swap-object
+    # task.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_replace_obj"
 
 
 class SugarCrepeReplaceAttVMistralClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SugarCrepe "replace_att" subset (HuggingFaceM4/SugarCrepe_replace_att); otherwise as the swap-object
+    # task.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_replace_att"
 
 
 class SugarCrepeAddObjVMistralClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SugarCrepe "add_obj" subset (HuggingFaceM4/SugarCrepe_add_obj); otherwise as the swap-object task.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_add_obj"
 
 
 class SugarCrepeAddAttVMistralClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjVMistralClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SugarCrepe "add_att" subset (HuggingFaceM4/SugarCrepe_add_att); otherwise as the swap-object task.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_add_att"
 
 
 class MMBenchChatbotVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] MMBench chatbot (HuggingFaceM4/MMBench_modif_chatbot): validation/test splits (support = same split); id
+    # "index"; context "context"; template answers "Answer: {class_name}". Chat-formatted template
+    # "User:<image>...<end_of_utterance>\nAssistant: ...<end_of_utterance>" prefixed by the bos token. metrics
+    # accuracy, KL (distribution and mean) and entropy (distribution and mean) plus DEFAULT_TO_SERVER_RESULTS.
     dataset_name: str = "HuggingFaceM4/MMBench_modif_chatbot"
     default_query_split_name: str = "validation"
     default_support_split_name: str = "validation"
@@ -3047,6 +3261,8 @@ class MMBenchChatbotVMistralClassificationInContextAccWithKLAndEntropy(VMistralC
 
 
 class MMBenchChatbotValDedupVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] Same as MMBench chatbot but on the deduplicated validation dataset
+    # (HuggingFaceM4/MMBench_modif_chatbot_dedup_val) and without an id column.
     dataset_name: str = "HuggingFaceM4/MMBench_modif_chatbot_dedup_val"
     default_query_split_name: str = "validation"
     default_support_split_name: str = "validation"
@@ -3080,6 +3296,10 @@ class MMBenchChatbotValDedupVMistralClassificationInContextAccWithKLAndEntropy(V
 
 
 class POPEChatbotVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] POPE object-hallucination yes/no benchmark (HuggingFaceM4/POPE_modif), test split; template appends
+    # "Answer yes or no."; metrics accuracy, F1, KL and entropy (distribution and mean). Chat-formatted
+    # template "User:<image>...<end_of_utterance>\nAssistant: ...<end_of_utterance>" prefixed by the bos
+    # token.
     dataset_name: str = "HuggingFaceM4/POPE_modif"
     default_query_split_name: str = "test"
     default_support_split_name: str = "test"
@@ -3114,6 +3334,10 @@ class POPEChatbotVMistralClassificationInContextAccWithKLAndEntropy(VMistralClas
 
 
 class ScienceQAImgChatbotVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] ScienceQA image subset chatbot (HuggingFaceM4/ScienceQAImg_Modif): validation/test splits; template
+    # answers "Answer: {class_name}"; metrics accuracy, KL (distribution and mean) and entropy (distribution
+    # and mean). Chat-formatted template "User:<image>...<end_of_utterance>\nAssistant: ...<end_of_utterance>"
+    # prefixed by the bos token.
     dataset_name: str = "HuggingFaceM4/ScienceQAImg_Modif"
     default_query_split_name: str = "validation"
     default_support_split_name: str = "validation"
@@ -3146,6 +3370,11 @@ class ScienceQAImgChatbotVMistralClassificationInContextAccWithKLAndEntropy(VMis
 
 
 class ScienceQAImgChatbotgNoMCQVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] ScienceQA image subset without multiple-choice letters (HuggingFaceM4/ScienceQAImg_Modif_NoMCQ):
+    # candidate answers from "tested_labels" scored as full texts; metrics accuracy, KL (distribution and
+    # mean) and entropy (distribution and mean). Chat-formatted template
+    # "User:<image>...<end_of_utterance>\nAssistant: ...<end_of_utterance>" prefixed by the bos token.
+    # KNOWN ISSUE: class name contains a typo ("Chatbotg"); task configs must use that exact spelling.
     dataset_name: str = "HuggingFaceM4/ScienceQAImg_Modif_NoMCQ"
     default_query_split_name: str = "validation"
     default_support_split_name: str = "validation"
@@ -3179,6 +3408,10 @@ class ScienceQAImgChatbotgNoMCQVMistralClassificationInContextAccWithKLAndEntrop
 
 
 class SEEDImgChatbotVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] SEED-Bench image subset chatbot (HuggingFaceM4/SEED_Img_Modif), test split; label "answer", context
+    # "question"; template answers "Answer: {class_name}"; metrics accuracy, KL (distribution and mean) and
+    # entropy (distribution and mean). Chat-formatted template "User:<image>...<end_of_utterance>\nAssistant:
+    # ...<end_of_utterance>" prefixed by the bos token.
     dataset_name: str = "HuggingFaceM4/SEED_Img_Modif"
     default_query_split_name: str = "test"
     default_support_split_name: str = "test"
@@ -3209,6 +3442,10 @@ class SEEDImgChatbotVMistralClassificationInContextAccWithKLAndEntropy(VMistralC
 
 
 class QBenchChatbotVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] Q-Bench low-level vision chatbot (HuggingFaceM4/QBench_Modif): validation/test; candidates from
+    # "tested_labels"; context "question"; metrics accuracy, KL (distribution and mean) and entropy
+    # (distribution and mean). Chat-formatted template "User:<image>...<end_of_utterance>\nAssistant:
+    # ...<end_of_utterance>" prefixed by the bos token.
     dataset_name: str = "HuggingFaceM4/QBench_Modif"
     default_query_split_name: str = "validation"
     default_support_split_name: str = "validation"
@@ -3242,6 +3479,10 @@ class QBenchChatbotVMistralClassificationInContextAccWithKLAndEntropy(VMistralCl
 
 
 class RavenChatbotVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] RAVEN rendered visual reasoning (HuggingFaceM4/RAVEN_rendered): validation/test; context "question";
+    # metrics accuracy, KL mean, entropy mean, per-bucket accuracy over bucket "source". Chat-formatted
+    # template "User:<image>...<end_of_utterance>\nAssistant: ...<end_of_utterance>" prefixed by the bos
+    # token.
     dataset_name: str = "HuggingFaceM4/RAVEN_rendered"
     dataset_config = None
     default_query_split_name: str = "validation"
@@ -3275,6 +3516,10 @@ class RavenChatbotVMistralClassificationInContextAccWithKLAndEntropy(VMistralCla
 
 
 class VSRChatbotVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] Visual Spatial Reasoning chatbot (HuggingFaceM4/VSR_chatbot): query validation/test, support train;
+    # label "answer", context "question"; metrics accuracy, KL mean, entropy mean; uses instruct template 0
+    # (bool_instruct_templates True). Chat-formatted template "User:<image>...<end_of_utterance>\nAssistant:
+    # ...<end_of_utterance>" prefixed by the bos token.
     dataset_name: str = "HuggingFaceM4/VSR_chatbot"
     dataset_config = None
     default_query_split_name: str = "validation"
@@ -3307,6 +3552,10 @@ class VSRChatbotVMistralClassificationInContextAccWithKLAndEntropy(VMistralClass
 
 
 class MathVistaMCQChatbotVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] MathVista multiple-choice subset (HuggingFaceM4/MathVista_MCQ): query testmini/test, support testmini;
+    # metrics accuracy, KL mean, entropy mean, DEFAULT_TO_SERVER_RESULTS; instruct template answering "Answer:
+    # {class_name}". Chat-formatted template "User:<image>...<end_of_utterance>\nAssistant:
+    # ...<end_of_utterance>" prefixed by the bos token.
     dataset_name: str = "HuggingFaceM4/MathVista_MCQ"
     dataset_config = None
     default_query_split_name: str = "testmini"
@@ -3340,6 +3589,10 @@ class MathVistaMCQChatbotVMistralClassificationInContextAccWithKLAndEntropy(VMis
 
 
 class MMMUMCQChatbotVMistralClassificationInContextAccWithKLAndEntropy(VMistralClassificationInContext):
+    # [CLASS DOC] MMMU multiple-choice subset (HuggingFaceM4/MMMU_MCQ): query validation/test, support dev; images column
+    # "images" (list; "<image>" tokens are embedded in the question text, so the template "User:
+    # {question}..." has none); id "id"; metrics accuracy, KL mean, entropy mean, DEFAULT_TO_SERVER_RESULTS;
+    # instruct template 0.
     dataset_name: str = "HuggingFaceM4/MMMU_MCQ"
     dataset_config = None
     default_query_split_name: str = "validation"

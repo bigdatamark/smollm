@@ -1,4 +1,7 @@
 # coding=utf-8
+# [MODULE DOC] Configuration for VGPT2, a GPT-2 language model augmented with a vision encoder
+# (vision_model_name), gated cross-attention layers, an optional Perceiver resampler and freezing options.
+# Defines a logger and GPT2_PRETRAINED_CONFIG_ARCHIVE_MAP (hub URLs of the GPT-2 checkpoints).
 # Copyright 2018 The OpenAI Team Authors and HuggingFace Inc. team.
 # Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -34,6 +37,13 @@ GPT2_PRETRAINED_CONFIG_ARCHIVE_MAP = {
 
 
 class VGPT2Config(PretrainedConfig):
+    # [CLASS DOC] GPT-2 style config (model_type "vgpt2") with m4 additions: additional_vocab_size, gating
+    # alpha settings, cross_layer_interval, freeze_* flags, vision_model_name/vision_model_params (string of a
+    # Python dict literal), vision_embed_dim, vision_image_size, image_token_index and resampler_* settings.
+    # attribute_map aliases hidden_size/max_position_embeddings/num_attention_heads/num_hidden_layers to
+    # n_embd/n_positions/n_head/n_layer.
+    # KNOWN ISSUE: docstring is admittedly out of sync (e.g. activation_function default is "gelu_new", not
+    # "gelu").
     """
     This is the configuration class to store the configuration of a [`GPT2Model`] or a [`TFGPT2Model`]. It is used to
     instantiate a GPT-2 model according to the specified arguments, defining the model architecture. Instantiating a
@@ -194,6 +204,9 @@ class VGPT2Config(PretrainedConfig):
         resampler_head_dim=96,
         **kwargs,
     ):
+        # [FUNCTION DOC] Store every argument as an attribute (defaults per signature), then call
+        # PretrainedConfig.__init__ with bos/eos ids, tie_word_embeddings and remaining kwargs. Deliberately
+        # no validation here; see check_compatibilities.
         self.vocab_size = vocab_size
         self.additional_vocab_size = additional_vocab_size
         self.n_positions = n_positions
@@ -253,6 +266,12 @@ class VGPT2Config(PretrainedConfig):
         )
 
     def check_compatibilities(self):
+        # [FUNCTION DOC] Validate the config; raises ValueError when: tie_word_embeddings is set but
+        # freeze_text_layers != freeze_lm_head; vision_embed_dim differs from the vision model's hidden_size;
+        # vision_image_size differs from its image_size. Loads AutoConfig for vision_model_name (hub access)
+        # with kwargs from eval(vision_model_params), using the nested vision_config when present.
+        # KNOWN ISSUE: uses eval() on a config string (arbitrary code execution from untrusted configs); the
+        # image size error message says "hidden size" instead of "image size".
         if self.tie_word_embeddings and (self.freeze_text_layers != self.freeze_lm_head):
             raise ValueError(
                 "if `tie_word_embeddings` is True, then `freeze_lm_head` and `freeze_text_layers` must be equal."
@@ -279,6 +298,9 @@ class VGPT2Config(PretrainedConfig):
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
+        # [FUNCTION DOC] Load via PretrainedConfig.from_pretrained, then run check_compatibilities on the
+        # config (first element when a (config, unused_kwargs) tuple is returned). Returns what the parent
+        # returned.
         outputs = super(VGPT2Config, cls).from_pretrained(pretrained_model_name_or_path, **kwargs)
         if isinstance(outputs, Tuple):
             # When called with return_unused_kwargs=True, the first item will be the config

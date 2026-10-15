@@ -1,3 +1,10 @@
+# [MODULE DOC] Custom torch modules and a base PreTrainedModel shared by m4 vision-language models.
+# - VLOOMPreTrainedModelBase: loading logic (from_pretrained / from_pretrained_models) that avoids nested
+#   DeepSpeed ZeRO-3 zero.Init contexts when inserting a pretrained vision encoder into the composite model.
+# - DecoupledEmbedding / DecoupledLinear: embedding and linear layers whose original weights can be frozen
+#   while a small set of extra rows / output features (e.g. new special tokens such as <image>) stay
+#   trainable. Running the file as a script performs a small smoke test printing parameters, outputs and
+#   gradients.
 import os
 
 import torch
@@ -18,6 +25,10 @@ from m4.training.utils import (
 
 
 class VLOOMPreTrainedModelBase(PreTrainedModel):
+    # [CLASS DOC] Base class for m4 composite (vision + language) models. Subclasses must define config_class
+    # (whose config has vision_config.vision_model_name and vision_config.image_size) and a classmethod
+    # override_vision_model_wrapper(model, config, vision_model_name, vision_model_params, torch_dtype), which
+    # is called when building a brand-new model and normally delegates to override_vision_model.
     # The problem we are trying to solve is 2 nested zero.Init thanks to fetching from_pretrained(vision_model_name)
     # and then one more zero.Init to override from_pretrained(vision_model_name) once again as it was done in the original - this breaks deepspeed zero3 w/ zero.Init
     # So one solution is this:
@@ -30,6 +41,13 @@ class VLOOMPreTrainedModelBase(PreTrainedModel):
 
     @classmethod
     def override_vision_model(cls, model, vision_model_name, vision_config, torch_dtype):
+        # [FUNCTION DOC] Replace model.vision_model with pretrained weights of `vision_model_name`. Inputs:
+        # model (instance with .vision_model), vision_model_name (hub id/path), vision_config (dict of config
+        # kwargs; mutated: "torch_dtype" is set), torch_dtype. Loads
+        # AutoModel.from_pretrained(trust_remote_code=True) with DeepSpeed zero.Init disabled, extracts the
+        # relevant submodule via vision_model_name_to_model (e.g. CLIP's vision tower). Under ZeRO-3
+        # zero.Init, copies the state dict into the already-sharded model.vision_model via
+        # load_state_dict_into_model (gathering shards); otherwise assigns the module directly. Returns None.
         vision_config["torch_dtype"] = torch_dtype
         # 1. fetch the pretrained vision model w/o zero.Init
         with ContextManagers(deepspeed_zero_init_disabled_context_manager()):
@@ -48,11 +66,15 @@ class VLOOMPreTrainedModelBase(PreTrainedModel):
 
     @classmethod
     def from_config(cls, config, **kwargs):
+        # [FUNCTION DOC] Instantiate cls(config, **kwargs) directly (no weight loading) and return it.
         model = cls(config, **kwargs)
         return model
 
     @classmethod
     def from_pretrained_models(cls, *args, **kwargs):
+        # [FUNCTION DOC] Create a new, untrained composite model from pretrained components: calls
+        # from_pretrained(*args, **kwargs, new_model=True), so the language model weights come from the path
+        # and the vision encoder is overridden with its own pretrained weights.
         """
         Use this method when creating a new vloom model that hasn't been yet trained and it'll be
         composed of 2 pre-trained models - hence `pretrained_models`.
@@ -62,6 +84,20 @@ class VLOOMPreTrainedModelBase(PreTrainedModel):
 
     @classmethod
     def from_pretrained(cls, *model_args, is_resume=False, new_model=False, **kwargs):
+        # [FUNCTION DOC] Load a composite model in one of three modes. Inputs: *model_args (path / hub id),
+        # is_resume (bool, default False), new_model (bool, default False), **kwargs forwarded to
+        # PreTrainedModel.from_pretrained (may include config, torch_dtype). Config resolution: if kwargs has
+        # no "config", load cls.config_class from model_args; if config is not a PretrainedConfig it must be
+        # an os.PathLike (AssertionError otherwise) and is loaded from that path. Then builds the vision
+        # AutoConfig from config.vision_config.vision_model_name (network/hub access) and sets its image_size
+        # (on the nested vision_config if any) to config.vision_config.image_size. Modes: new_model ->
+        # super().from_pretrained then cls.override_vision_model_wrapper(...) to load pretrained vision
+        # weights; is_resume -> super().from_pretrained(None, config=config, state_dict={}) giving an empty
+        # model whose weights DeepSpeed restores later; otherwise -> plain super().from_pretrained (hub or
+        # checkpoint path). Returns the model.
+        # KNOWN ISSUE: vision_model_config is built and its image_size set, but it is only used for the
+        # new_model path (as a dict passed to the wrapper); for the other paths it is dead work that still
+        # hits the hub.
         """
         Use this method when loading an already pretrained vloom model - either from a checkpoint or from hub.
         For creating an untrained model use `pretrained_models` instead.
@@ -143,6 +179,9 @@ class VLOOMPreTrainedModelBase(PreTrainedModel):
 
 
 class DecoupledEmbedding(nn.Embedding):
+    # [CLASS DOC] nn.Embedding with `num_embeddings` regular rows (`weight`, optionally frozen) plus
+    # `num_additional_embeddings` extra rows held in a separate always-trainable nn.Embedding
+    # `additional_embedding`. Ids >= num_embeddings index the additional table (id - num_embeddings).
     # Derived from https://pytorch.org/docs/stable/_modules/torch/nn/modules/sparse.html#Embedding
     """
     Implements a decoupling of parameters to allow freezing (or not) a subset of the embeddings.
@@ -161,6 +200,12 @@ class DecoupledEmbedding(nn.Embedding):
         padding_idx=None,
         **kwargs,
     ) -> None:
+        # [FUNCTION DOC] Inputs: num_embeddings, num_additional_embeddings, embedding_dim, partially_freeze
+        # (default False; freezes `weight`), device, dtype, padding_idx, **kwargs forwarded to nn.Embedding.
+        # Raises ValueError if padding_idx > num_embeddings. Creates `additional_embedding` only when
+        # num_additional_embeddings > 0.
+        # KNOWN ISSUE: the check should be padding_idx >= num_embeddings; padding_idx == num_embeddings passes
+        # here but nn.Embedding then raises its own assertion.
         """
         num_additional_embeddings: int. Number of additional embeddings. Only useful when you `partially_freeze=True`.
         partially_freeze: bool. If True, the regular `weight` will be frozen. `additional_weight` is never frozen.
@@ -194,6 +239,14 @@ class DecoupledEmbedding(nn.Embedding):
             )
 
     def forward(self, input_ids):
+        # [FUNCTION DOC] Look up input_ids (LongTensor of any shape) across both tables: clones ids, finds
+        # positions with id >= num_embeddings, embeds those with additional_embedding (shifted by
+        # num_embeddings), replaces them by 0 for the regular F.embedding lookup on `weight`, then overwrites
+        # those positions with the additional vectors. Returns tensor of shape ids.shape + (embedding_dim,).
+        # Does not apply padding_idx / max_norm semantics.
+        # KNOWN ISSUE: when num_additional_embeddings == 0 it returns self.additional_embedding(input_ids),
+        # but that attribute is never created in that case, so this raises AttributeError instead of behaving
+        # like nn.Embedding (should use F.embedding with self.weight).
         """
         we have 2 embeddings, with different indices - one pretrained self.weight and another
         self.additional_embedding.weight that is being trained.
@@ -233,6 +286,8 @@ class DecoupledEmbedding(nn.Embedding):
         return full_vector
 
     def extra_repr(self) -> str:
+        # [FUNCTION DOC] Return the repr string listing num_embeddings, num_additional_embeddings,
+        # embedding_dim, partially_freeze.
         return "num_embeddings={}, num_additional_embeddings={}, embedding_dim={}, partially_freeze={}".format(
             self.num_embeddings,
             self.num_additional_embeddings,
@@ -242,10 +297,14 @@ class DecoupledEmbedding(nn.Embedding):
 
     @classmethod
     def from_pretrained(cls, embeddings, freeze=True, **kwargs):
+        # [FUNCTION DOC] Not supported: always raises NotImplementedError.
         raise NotImplementedError
 
 
 class DecoupledLinear(nn.Linear):
+    # [CLASS DOC] nn.Linear with frozen-able original weight/bias plus `out_additional_features` extra output
+    # units in an always-trainable nn.Linear `additional_fc`; outputs are concatenated along the last dim
+    # (out_features + out_additional_features), mirroring DecoupledEmbedding for tied LM heads.
     # Derived from https://pytorch.org/docs/stable/_modules/torch/nn/modules/linear.html#Linear
     """
     Implements a decoupling of parameters to allow freezing (or not) a subset of the parameters.
@@ -263,6 +322,10 @@ class DecoupledLinear(nn.Linear):
         device=None,
         dtype=None,
     ) -> None:
+        # [FUNCTION DOC] Inputs: in_features, out_features, out_additional_features (default 0), bias (default
+        # True), partially_freeze (default True: sets requires_grad False on weight and bias), device, dtype.
+        # Creates additional_fc (in_features -> out_additional_features, same bias setting) when
+        # out_additional_features > 0.
         """
         out_additional_features: int. Number of additional trainable dimensions. Only makes sense when `partially_freeze=True`.
         partially_freeze: bool. If True, the regular `weight` will be frozen and extra parameters (if any) will be trainable. If False, default to the regular behavior of nn.Linear.
@@ -289,6 +352,8 @@ class DecoupledLinear(nn.Linear):
             )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
+        # [FUNCTION DOC] Compute F.linear(input, weight, bias); if extra features exist, concatenate
+        # additional_fc(input) on the last dim. Returns (..., out_features [+ out_additional_features]).
         output = F.linear(input, self.weight, self.bias)
 
         if self.out_additional_features > 0:
@@ -298,6 +363,8 @@ class DecoupledLinear(nn.Linear):
         return output
 
     def extra_repr(self) -> str:
+        # [FUNCTION DOC] Return the repr string with in/out features, out_additional_features, whether bias
+        # exists, partially_freeze.
         """Overwriting `nn.Linear.extra_repr` to include new parameters."""
         return "in_features={}, out_features={}, out_additional_features={}, bias={}, partially_freeze={}".format(
             self.in_features,

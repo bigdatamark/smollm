@@ -1,3 +1,11 @@
+# [MODULE DOC] Perceiver Resampler (Flamingo-style) used by m4 models (e.g. vmistral / vllama3) to compress a
+# variable-length sequence of vision embeddings into a fixed number of learned latents. Each layer lets the
+# latents attend (multi-head, optional grouped-query KV heads, optional q/k RMSNorm) over the concatenation
+# [context; latents], followed by a gated MLP, both with pre-RMSNorm and residuals. Supports eager attention
+# and FlashAttention-2 (flash_attn imported only when available). Expects a config with hidden_size,
+# rms_norm_eps, optional _flash_attn_2_enabled, and perceiver_config with resampler_n_heads,
+# resampler_head_dim, num_key_value_heads, qk_layer_norms_perceiver, attention_dropout, hidden_act,
+# resampler_n_latents, resampler_depth.
 """
 perceiver.py
 Generic interface to various configurations of the Perceiver Resampler, that simply takes in a series of (potentially
@@ -32,6 +40,9 @@ logger = logging.get_logger(__name__)
 
 # Copied from transformers.models.llama.modeling_llama._get_unpad_data
 def _get_unpad_data(attention_mask):
+    # [FUNCTION DOC] HELPER: from a (batch, seq) 0/1 attention mask return (flat indices of non-pad tokens,
+    # int32 cumulative sequence lengths with a leading 0, max sequence length as python int), as required by
+    # flash_attn varlen kernels.
     seqlens_in_batch = attention_mask.sum(dim=-1, dtype=torch.int32)
     indices = torch.nonzero(attention_mask.flatten(), as_tuple=False).flatten()
     max_seqlen_in_batch = seqlens_in_batch.max().item()
@@ -45,6 +56,9 @@ def _get_unpad_data(attention_mask):
 
 # Copied from transformers.models.llama.modeling_llama.repeat_kv
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    # [FUNCTION DOC] HELPER: expand key/value heads for grouped-query attention: (batch, kv_heads, seq,
+    # head_dim) -> (batch, kv_heads * n_rep, seq, head_dim), each head repeated n_rep times consecutively;
+    # returned unchanged if n_rep == 1.
     """
     This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
     num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
@@ -57,7 +71,13 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
 
 
 class PerceiverAttention(nn.Module):
+    # [CLASS DOC] Eager (matmul + softmax) non-causal cross-attention from latents (queries) to [context;
+    # latents] (keys/values). Bias-free q/k/v/o projections; keys/values use num_key_value_heads heads,
+    # repeated to num_heads.
     def __init__(self, config) -> None:
+        # [FUNCTION DOC] Read sizes from config (see module doc), build q_proj (hidden -> heads*head_dim),
+        # k_proj/v_proj (hidden -> kv_heads*head_dim), o_proj (heads*head_dim -> hidden) and, if
+        # qk_layer_norms_perceiver, per-head RMSNorms q_layer_norm/k_layer_norm. Sets is_causal False.
         """Perceiver Cross-Attention Module --> let long-form inputs be `context`, resampled embeddings be `latents`"""
         super().__init__()
 
@@ -92,6 +112,15 @@ class PerceiverAttention(nn.Module):
         output_attentions: bool = False,
         use_cache: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+        # [FUNCTION DOC] Inputs: latents (bsz, n_latents, hidden), context (bsz, seq, hidden), attention_mask
+        # optional additive float mask of shape (bsz, 1, n_latents, seq + n_latents), position_ids (unused; no
+        # rotary embedding), past_key_value optional (k, v) tuple concatenated before the new keys/values,
+        # output_attentions, use_cache. Projects queries from latents and keys/values from [context; latents],
+        # optionally RMS-normalizes q and k (after caching), repeats kv heads, computes softmax(q k^T /
+        # sqrt(head_dim) + mask) in fp32 then casts back, multiplies by v, merges heads and applies o_proj.
+        # Raises ValueError on unexpected attention weight / mask / output shapes. Returns (output (bsz,
+        # n_latents, hidden), attention weights or None, (k, v) cache or None). Attention dropout is not
+        # applied in this eager path.
         """
         Runs Perceiver Self-Attention, with special (context, latents) appended along the `seq` dimension!
         :param context: Tensor of shape [bsz, seq, embed_dim] representing long-form context to resample.
@@ -172,6 +201,8 @@ class PerceiverAttention(nn.Module):
 
 
 class PerceiverFlashAttention2(PerceiverAttention):
+    # [CLASS DOC] FlashAttention-2 variant of PerceiverAttention with identical weights; handles padding via
+    # unpadding and varlen kernels. Attention mask here is a 2D (bsz, seq + n_latents) 0/1 padding mask.
     """
     Llama flash attention module. This module inherits from `LlamaAttention` as the weights of the module stays
     untouched. The only required change would be on the forward pass where it needs to correctly call the public API of
@@ -179,6 +210,7 @@ class PerceiverFlashAttention2(PerceiverAttention):
     """
 
     def __init__(self, *args, **kwargs):
+        # [FUNCTION DOC] Delegates to PerceiverAttention.__init__.
         super().__init__(*args, **kwargs)
 
     def forward(
@@ -192,6 +224,16 @@ class PerceiverFlashAttention2(PerceiverAttention):
         use_cache: bool = False,
         **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+        # [FUNCTION DOC] Same inputs/outputs as PerceiverAttention.forward but attention_mask is a 2D padding
+        # mask. Projects q from latents and k/v from [context; latents]; with a cache, optionally trims the
+        # cache to config.sliding_window (raising ValueError if the trimmed cache length is not sliding_window
+        # - 1) and adjusts the mask, then concatenates. Repeats kv heads, uses attention_dropout only in
+        # training mode, casts fp32 inputs back to the pre-quantization or q_proj weight dtype (logging a one-
+        # time warning), transposes to (bsz, seq, heads, dim) and calls _flash_attention_forward (non-causal,
+        # no sliding window), then o_proj.
+        # KNOWN ISSUE: q/k layer norms (qk_layer_norms_perceiver) are never applied in this path, so outputs
+        # differ from the eager PerceiverAttention when that option is on.
+        # KNOWN ISSUE: attn_weights is never assigned, so output_attentions=True raises UnboundLocalError.
         bsz, q_len, _ = latents.size()
         kv_seq_len = q_len + context.size()[1]
 
@@ -297,6 +339,12 @@ class PerceiverFlashAttention2(PerceiverAttention):
         softmax_scale=None,
         use_sliding_windows=False,
     ):
+        # [FUNCTION DOC] HELPER: run flash attention on (bsz, seq, heads, dim) tensors. If attention_mask is
+        # given, unpad q/k/v via _upad_input, call flash_attn_varlen_func with cumulative lengths and re-pad
+        # the output to (bsz, query_length, ...); otherwise call flash_attn_func directly. dropout is the
+        # dropout probability, softmax_scale defaults to 1/sqrt(head_dim) inside flash_attn,
+        # use_sliding_windows adds window_size=(sliding_window, sliding_window). Causality follows
+        # self.is_causal (False). Returns the attention output (bsz, query_length, heads, dim).
         """
         Calls the forward method of Flash Attention - if the input hidden states contain at least one padding token
         first unpad the input, then computes the attention scores and pad the final attention scores.
@@ -381,6 +429,12 @@ class PerceiverFlashAttention2(PerceiverAttention):
         return attn_output
 
     def _upad_input(self, query_layer, key_layer, value_layer, attention_mask, query_length):
+        # [FUNCTION DOC] HELPER: unpad q/k/v for varlen flash attention. Keys/values are gathered with the
+        # mask indices; queries are gathered the same way when query_length equals the kv length, treated as
+        # one token per batch when query_length == 1, else unpadded using the last query_length mask columns
+        # (assumes left padding). Returns (q, k, v, indices_q, (cu_seqlens_q, cu_seqlens_k), (max_seqlen_q,
+        # max_seqlen_k)). For the resampler, query_length (n_latents) is normally smaller than the kv length,
+        # so the last branch is used.
         indices_k, cu_seqlens_k, max_seqlen_in_batch_k = _get_unpad_data(attention_mask)
         batch_size, kv_seq_len, num_key_value_heads, head_dim = key_layer.shape
 
@@ -420,7 +474,12 @@ class PerceiverFlashAttention2(PerceiverAttention):
 
 
 class PerceiverLayer(nn.Module):
+    # [CLASS DOC] One resampler block: latents = latents + attn(RMSNorm(latents), RMSNorm(context)); latents =
+    # latents + MLP(RMSNorm(latents)) where MLP is the gated MLP with intermediate size 4 * hidden_size.
+    # Chooses PerceiverFlashAttention2 when config._flash_attn_2_enabled is true, else PerceiverAttention.
     def __init__(self, config):
+        # [FUNCTION DOC] Read hidden size, activation, n_latents, depth and rms eps from config; build
+        # input_latents_norm, input_context_norm, self_attn, post_attention_layernorm and mlp.
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
@@ -456,6 +515,15 @@ class PerceiverLayer(nn.Module):
         use_cache: Optional[bool] = False,
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
+        # [FUNCTION DOC] Inputs: latents (bsz, n_latents, hidden), context (bsz, seq, hidden), attention_mask
+        # optional 2D (bsz, seq) padding mask over the context (defaults to all ones), plus position_ids /
+        # past_key_value / output_attentions / use_cache. Extends the mask with ones for the latents, converts
+        # it to a 4D additive mask (eager) or passes it as-is (flash), runs attention and MLP with residuals.
+        # Returns a tuple (latents,) plus attention weights if output_attentions and the cache if use_cache.
+        # KNOWN ISSUE: position_ids, past_key_value, output_attentions and use_cache are not forwarded to
+        # self_attn, so the returned attention weights and cache are always None.
+        # KNOWN ISSUE: reads config._flash_attn_2_enabled directly (AttributeError if the attribute is absent)
+        # while __init__ uses getattr with a False default.
         """
         Args:
             latents (`torch.FloatTensor`): input to the layer of shape `(batch, seq_len, embed_dim)`
@@ -520,10 +588,16 @@ class PerceiverLayer(nn.Module):
 
 
 class PerceiverResampler(nn.Module):
+    # [CLASS DOC] Full resampler: a learned (n_latents, hidden) latent array (initialized to ones), broadcast
+    # over the batch, refined by `resampler_depth` PerceiverLayers over the context, then a final RMSNorm.
     def __init__(
         self,
         config,
     ) -> None:
+        # [FUNCTION DOC] Read sizes from config and create latents parameter, the ModuleList of PerceiverLayer
+        # and final norm.
+        # KNOWN ISSUE: the docstring documents embed_dim/depth/n_heads/head_dim/n_latents parameters, but the
+        # constructor only takes a config.
         """
         Instantiates a Perceiver Resampler that operates over a sequence of embeddings (say from a ResNet or ViT or
         MAE) of a given dimension, performs `depth` blocks of cross-attention with a fixed `n_latents` inputs, then
@@ -556,6 +630,9 @@ class PerceiverResampler(nn.Module):
         context: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        # [FUNCTION DOC] Inputs: context (bsz, seq, hidden) embeddings and optional (bsz, seq) padding mask.
+        # Repeats latents to the batch size, runs each layer (no cache, no attention outputs) and returns
+        # normalized latents (bsz, n_latents, hidden).
         latents = repeat(self.latents, "seq embed -> bsz seq embed", bsz=context.shape[0])
 
         for perceiver_layer in self.layers:

@@ -1,4 +1,10 @@
 # coding=utf-8
+# [MODULE DOC] PyTorch implementation of IDEFICS (Flamingo-style): a LLaMA decoder whose layers are
+# interleaved with gated cross-attention layers attending to vision-encoder (optionally Perceiver-resampled)
+# image features. Contents: mask helpers, LLaMA building blocks (RMSNorm, rotary embedding, MLP, attention
+# using torch SDPA, decoder layer), IdeficsGatedCrossAttentionLayer, IdeficsPreTrainedModel (init, vision-
+# model override hook), IdeficsModel (backbone), IdeficsForCausalLM (LM head with decoupled extra vocab, loss,
+# generation hooks, TFLOPs estimate). Text layers / vision encoder are frozen per config at construction.
 # Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
 #
 # This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
@@ -58,6 +64,9 @@ _CONFIG_FOR_DOC = "IdeficsConfig"
 
 
 def _make_causal_mask(input_ids_shape: torch.Size, dtype: torch.dtype, past_key_values_length: int = 0):
+    # [FUNCTION DOC] HELPER: build an additive causal mask of shape (bsz, 1, tgt_len, tgt_len + past_len): 0
+    # where a query may attend (key index <= query index, and all past positions), dtype-min elsewhere.
+    # input_ids_shape is (bsz, tgt_len). Created on CPU; caller moves it to the device.
     """
     Make causal mask used for bi-directional self-attention.
     """
@@ -73,6 +82,8 @@ def _make_causal_mask(input_ids_shape: torch.Size, dtype: torch.dtype, past_key_
 
 
 def _expand_mask(mask: torch.Tensor, dtype: torch.dtype, tgt_len: Optional[int] = None):
+    # [FUNCTION DOC] HELPER: convert a (bsz, src_len) 1/0 padding mask into an additive (bsz, 1, tgt_len,
+    # src_len) mask in `dtype` (0 for keep, dtype-min for padded); tgt_len defaults to src_len.
     """
     Expands attention_mask from `[bsz, seq_len]` to `[bsz, 1, tgt_seq_len, src_seq_len]`.
     """
@@ -87,7 +98,10 @@ def _expand_mask(mask: torch.Tensor, dtype: torch.dtype, tgt_len: Optional[int] 
 
 
 class LlamaRMSNorm(nn.Module):
+    # [CLASS DOC] LLaMA RMSNorm: x * rsqrt(mean(x^2) + eps) with a learned weight (init ones), no
+    # bias/centering.
     def __init__(self, hidden_size, eps=1e-6):
+        # [FUNCTION DOC] hidden_size: normalized dim; eps default 1e-6.
         """
         LlamaRMSNorm is equivalent to T5LayerNorm
         """
@@ -96,6 +110,8 @@ class LlamaRMSNorm(nn.Module):
         self.variance_epsilon = eps
 
     def forward(self, hidden_states):
+        # [FUNCTION DOC] Compute the variance in fp32 and normalize; cast to the weight dtype only when the
+        # weight is fp16/bf16; return weight * normalized states.
         variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
         hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
 
@@ -107,7 +123,11 @@ class LlamaRMSNorm(nn.Module):
 
 
 class LlamaRotaryEmbedding(torch.nn.Module):
+    # [CLASS DOC] Rotary position embedding tables: precomputes cos/sin caches of shape (1, 1, max_len, dim)
+    # using inverse frequencies base^(-2i/dim); cache buffers are non-persistent.
     def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None):
+        # [FUNCTION DOC] dim: head dim; max_position_embeddings default 2048; base default 10000; device for
+        # inv_freq. Registers inv_freq (persistent buffer) and cos_cached / sin_cached.
         super().__init__()
         inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float().to(device) / dim))
         self.register_buffer("inv_freq", inv_freq)
@@ -122,6 +142,10 @@ class LlamaRotaryEmbedding(torch.nn.Module):
         self.register_buffer("sin_cached", emb.sin()[None, None, :, :], persistent=False)
 
     def forward(self, x, seq_len=None):
+        # [FUNCTION DOC] Return (cos, sin) truncated to seq_len and cast to x's dtype. If seq_len exceeds the
+        # cache, rebuilds and re-registers larger caches on x's device (mutates module state).
+        # KNOWN ISSUE: seq_len defaults to None but is compared with an int, so calling without seq_len raises
+        # TypeError.
         # x: [bs, num_attention_heads, seq_len, head_size]
         # This `if` block is unlikely to be run after we build sin/cos in `__init__`. Keep the logic here just in case.
         if seq_len > self.max_seq_len_cached:
@@ -139,6 +163,8 @@ class LlamaRotaryEmbedding(torch.nn.Module):
 
 
 def rotate_half(x):
+    # [FUNCTION DOC] HELPER: split the last dim in two halves (x1, x2) and return concat(-x2, x1), used by
+    # rotary embeddings.
     """Rotates half the hidden dims of the input."""
     x1 = x[..., : x.shape[-1] // 2]
     x2 = x[..., x.shape[-1] // 2 :]
@@ -146,6 +172,8 @@ def rotate_half(x):
 
 
 def apply_rotary_pos_emb(q, k, cos, sin, position_ids):
+    # [FUNCTION DOC] HELPER: gather cos/sin rows at position_ids (bsz, seq) and apply the rotation q*cos +
+    # rotate_half(q)*sin (same for k). q/k are (bsz, heads, seq, head_dim). Returns (q_embed, k_embed).
     gather_indices = position_ids[:, None, :, None]  # [bs, 1, seq_len, 1]
     gather_indices = gather_indices.repeat(1, cos.shape[1], 1, cos.shape[3])
     cos = torch.gather(cos.repeat(gather_indices.shape[0], 1, 1, 1), 2, gather_indices)
@@ -156,12 +184,15 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids):
 
 
 class LlamaMLP(nn.Module):
+    # [CLASS DOC] SwiGLU feed-forward: down_proj(act(gate_proj(x)) * up_proj(x)), all bias-free linear layers.
     def __init__(
         self,
         hidden_size: int,
         intermediate_size: int,
         hidden_act: str,
     ):
+        # [FUNCTION DOC] Build gate/up (hidden_size -> intermediate_size) and down (intermediate_size ->
+        # hidden_size) projections; hidden_act is resolved through ACT2FN.
         super().__init__()
         self.gate_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
         self.down_proj = nn.Linear(intermediate_size, hidden_size, bias=False)
@@ -169,10 +200,14 @@ class LlamaMLP(nn.Module):
         self.act_fn = ACT2FN[hidden_act]
 
     def forward(self, x):
+        # [FUNCTION DOC] Apply the SwiGLU MLP to x (..., hidden_size).
         return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
 
 
 class LlamaAttention(nn.Module):
+    # [CLASS DOC] Multi-head attention used both as causal self-attention (with rotary embeddings) and as
+    # cross-attention from text to image features (no rotary). Computed with torch
+    # scaled_dot_product_attention; attention weights are never returned.
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
     def __init__(
@@ -184,6 +219,11 @@ class LlamaAttention(nn.Module):
         config: PretrainedConfig = None,
         qk_layer_norms: bool = False,
     ):
+        # [FUNCTION DOC] Inputs: hidden_size, num_heads (head_dim = hidden_size // num_heads; ValueError if
+        # not divisible), dropout (default 0.0), is_cross_attention (default False), config (needed for cross-
+        # attention to read vision_config.embed_dim as key/value input dim, else hidden_size, and for
+        # rms_norm_eps when qk_layer_norms), qk_layer_norms (default False: adds per-head RMSNorm on q and k).
+        # All projections are bias-free; also creates a LlamaRotaryEmbedding (used only for self-attention).
         super().__init__()
         self.hidden_size = hidden_size
         self.num_heads = num_heads
@@ -242,6 +282,8 @@ class LlamaAttention(nn.Module):
             self.k_layer_norm = LlamaRMSNorm(self.head_dim, eps=config.rms_norm_eps)
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
+        # [FUNCTION DOC] HELPER: reshape (bsz, seq, hidden) to contiguous (bsz, heads, seq, head_dim). Unused
+        # in this file.
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
 
     def forward(
@@ -254,6 +296,16 @@ class LlamaAttention(nn.Module):
         output_attentions: bool = False,
         use_cache: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+        # [FUNCTION DOC] Inputs: hidden_states (bsz, q_len, hidden); key_value_states (bsz, kv_len, kv_dim)
+        # for cross-attention; attention_mask additive (bsz, 1, q_len, kv_seq_len) or None; position_ids (bsz,
+        # q_len) for rotary; past_key_value (k, v) to prepend; output_attentions (ignored); use_cache. Self-
+        # attention projects q/k/v from hidden_states and applies rotary embeddings; cross-attention projects
+        # k/v from key_value_states. Concatenates the cache, optionally q/k RMS-normalizes, validates mask
+        # shape (ValueError), runs SDPA (non-causal; causality comes from the mask), merges heads and applies
+        # o_proj. Logs a one-time warning that attention weights are not available. Returns (output (bsz,
+        # q_len, hidden), None, (k, v) if use_cache else None).
+        # KNOWN ISSUE: dropout_p=self.dropout is passed to SDPA unconditionally, so attention dropout is also
+        # applied in eval mode when config.dropout > 0.
         # if key_value_states are provided this layer is used as a cross-attention layer
         is_cross_attention = self.is_cross_attention or key_value_states is not None
 
@@ -323,7 +375,11 @@ class LlamaAttention(nn.Module):
 
 
 class LlamaDecoderLayer(nn.Module):
+    # [CLASS DOC] Standard pre-norm LLaMA decoder block: x + dropout(self_attn(RMSNorm(x))), then x +
+    # dropout(MLP(RMSNorm(x))).
     def __init__(self, config: IdeficsConfig):
+        # [FUNCTION DOC] Build self-attention, SwiGLU MLP and the two RMSNorms from config (hidden_size,
+        # num_attention_heads, dropout, intermediate_size, hidden_act, rms_norm_eps).
         super().__init__()
         self.hidden_size = config.hidden_size
         self.self_attn = LlamaAttention(
@@ -350,6 +406,9 @@ class LlamaDecoderLayer(nn.Module):
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
+        # [FUNCTION DOC] Run the block (see class doc). attention_mask is the 4D additive causal+padding mask.
+        # Returns a tuple (hidden_states,) + (attn weights,) if output_attentions + (present (k, v),) if
+        # use_cache.
         """
         Args:
             hidden_states (`torch.FloatTensor`): input to the layer of shape `(batch, seq_len, embed_dim)`
@@ -399,7 +458,17 @@ class LlamaDecoderLayer(nn.Module):
 
 
 class IdeficsGatedCrossAttentionLayer(nn.Module):
+    # [CLASS DOC] Flamingo gated cross-attention block inserted before decoder layers: text attends to image
+    # features, and both the attention output and the following MLP output are scaled by tanh(alpha) gates
+    # before being added to the residual; text positions with no visible image get no cross-attention
+    # contribution.
     def __init__(self, config: IdeficsConfig):
+        # [FUNCTION DOC] Build cross-attention LlamaAttention (with optional qk norms), SwiGLU MLP, two
+        # RMSNorms, tanh activations and the gate parameters alpha_cross_attn / alpha_dense. Gate init per
+        # config.alpha_initializer: "zeros", "ones", or "normal"/"gaussian"/"random" (std
+        # alphas_initializer_range); shape per config.alpha_type: "vector" (1, 1, hidden) or "float" (1,).
+        # Raises ValueError for unknown alpha_type, NotImplementedError for unknown initializer. Stores the
+        # dropout probability in self.config (misleading name).
         super().__init__()
         self.hidden_size = config.hidden_size
         self.cross_attn = LlamaAttention(
@@ -474,6 +543,14 @@ class IdeficsGatedCrossAttentionLayer(nn.Module):
         use_cache: Optional[bool] = False,
         past_key_value: Optional[Tuple[torch.Tensor]] = None,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
+        # [FUNCTION DOC] Inputs: hidden_states (bsz, seq, hidden); attention_mask (unused);
+        # image_hidden_states (bsz, n_img_tokens, vision_dim, required: ValueError if None);
+        # image_attention_mask additive (bsz, 1, seq, n_img_tokens); output_attentions, use_cache;
+        # past_key_value must be None (NotImplementedError otherwise). Computes residual + row_mask *
+        # tanh(alpha_cross_attn) * dropout(cross_attn(norm(x))) where row_mask is 1 for text positions having
+        # at least one attendable image token (mask value 0), then residual + tanh(alpha_dense) *
+        # dropout(MLP(norm(x))). Returns (hidden_states,) + optional attn weights + optional present key/value
+        # (always None, since use_cache is not passed to cross_attn).
         """
         Args:
             hidden_states (`torch.FloatTensor`): input to the layer of shape `(batch, seq_len, embed_dim)`
@@ -555,13 +632,29 @@ LLAMA_START_DOCSTRING = r"""
     LLAMA_START_DOCSTRING,
 )
 class IdeficsPreTrainedModel(VLOOMPreTrainedModelBase):
+    # [CLASS DOC] Common base for IDEFICS models: config_class IdeficsConfig, base_model_prefix "model",
+    # gradient checkpointing support, no-split modules for device maps, custom weight init and the vision-
+    # override hook used by VLOOMPreTrainedModelBase.from_pretrained.
     config_class = IdeficsConfig
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
     _no_split_modules = ["LlamaDecoderLayer", "IdeficsGatedCrossAttentionLayer"]
 
     def _init_weights(self, module):
+        # [FUNCTION DOC] Initialize one module (called by post_init for every submodule), gathering ZeRO-3
+        # shards when needed:
+        # - gated cross-attention layers: every nn.Linear ~ N(0, 0.4 / (in_features * factor)), factor =
+        #   2*num_hidden_layers for down_proj, else 1; biases zeroed.
+        # - PerceiverResampler: latents ~ N(0, 1/vision embed_dim); linears ~ N(0, 0.4 / (vision embed_dim *
+        #   factor)).
+        # - nn.Embedding (incl. DecoupledEmbedding): N(0, 1/hidden_size), padding row zeroed.
+        # - DecoupledLinear: only additional_fc ~ N(0, 1/in_features). Other modules (decoder linears, norms)
+        #   are left as created / loaded.
+        # KNOWN ISSUE: for the perceiver the factor checks for "c_proj" names, which do not exist in
+        # PerceiverResampler, so the factor is always 1.
         def init_a_linear(module, mean=0.0, std=self.config.initializer_range):
+            # [FUNCTION DOC] HELPER: under a DeepSpeed gathered-parameters context, fill module.weight with
+            # N(mean, std) (std defaults to config.initializer_range) and zero module.bias if present.
             with ContextManagers(deepspeed_gathered_parameters_context_manager(module.weight, modify=True)):
                 module.weight.data.normal_(mean=mean, std=std)
                 if module.bias is not None:
@@ -596,11 +689,16 @@ class IdeficsPreTrainedModel(VLOOMPreTrainedModelBase):
                 init_a_linear(module.additional_fc, std=(1.0 / (module.additional_fc.in_features)) ** 0.5)
 
     def _set_gradient_checkpointing(self, module, value=False):
+        # [FUNCTION DOC] Set gradient_checkpointing = value on IdeficsModel instances (legacy transformers
+        # hook).
         if isinstance(module, IdeficsModel):
             module.gradient_checkpointing = value
 
     @classmethod
     def override_vision_model_wrapper(cls, model, config, vision_model_name, vision_model_params, torch_dtype):
+        # [FUNCTION DOC] Hook called by VLOOMPreTrainedModelBase.from_pretrained for new models: take the
+        # backbone (model.model if present), load pretrained vision weights via override_vision_model, then
+        # re-apply freezing with freeze_relevant_params(config).
         # this can be called via from_pretrained from a class w/ head or w/o head so we extract the beheaded model version
         beheaded_model = model.model if hasattr(model, "model") else model
         cls.override_vision_model(beheaded_model, vision_model_name, vision_model_params, torch_dtype)
@@ -675,6 +773,9 @@ LLAMA_INPUTS_DOCSTRING = r"""
     LLAMA_START_DOCSTRING,
 )
 class IdeficsModel(IdeficsPreTrainedModel):
+    # [CLASS DOC] IDEFICS backbone: decoupled token embeddings, vision encoder (injected), optional Perceiver
+    # resampler, num_hidden_layers LLaMA decoder layers with a gated cross-attention layer before every
+    # cross_layer_interval-th layer, final RMSNorm.
     """
     Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`LlamaDecoderLayer`]
 
@@ -683,6 +784,15 @@ class IdeficsModel(IdeficsPreTrainedModel):
     """
 
     def __init__(self, config: IdeficsConfig, vision_model=None):
+        # [FUNCTION DOC] Build embed_tokens (DecoupledEmbedding with additional_vocab_size trainable rows,
+        # base rows frozen if freeze_text_layers), store vision_model (default None; set later by
+        # from_pretrained), optional perceiver, decoder layers, num_hidden_layers // cross_layer_interval
+        # gated cross-attention layers and the final norm; run post_init (weight init) and
+        # freeze_relevant_params.
+        # KNOWN ISSUE: PerceiverResampler is called with 6 positional arguments but its constructor only
+        # accepts config, so use_resampler=True raises TypeError.
+        # KNOWN ISSUE: freeze_relevant_params runs freeze_model on self.vision_model, which is None by
+        # default.
         super().__init__(config)
         self.config = config
         self.padding_idx = config.pad_token_id
@@ -729,6 +839,9 @@ class IdeficsModel(IdeficsPreTrainedModel):
         self.freeze_relevant_params(config)
 
     def freeze_relevant_params(self, config=None):
+        # [FUNCTION DOC] Freeze text layers (decoder layers + final norm, except module_exceptions) if
+        # config.freeze_text_layers, and the vision model (except freeze_vision_module_exceptions) if
+        # config.freeze_vision_layers. config defaults to self.config.
         if config is None:
             config = self.config
 
@@ -739,17 +852,24 @@ class IdeficsModel(IdeficsPreTrainedModel):
             freeze_model(self.vision_model, module_exceptions=config.freeze_vision_module_exceptions)
 
     def freeze_text_layers(self, module_exceptions):
+        # [FUNCTION DOC] Apply m4 freeze_model to self.layers and self.norm, keeping modules matching
+        # module_exceptions trainable. Embeddings and cross-attention layers are not frozen here.
         for module in [self.layers, self.norm]:
             freeze_model(module, module_exceptions=module_exceptions)
 
     def get_input_embeddings(self):
+        # [FUNCTION DOC] Return embed_tokens.
         return self.embed_tokens
 
     def set_input_embeddings(self, value):
+        # [FUNCTION DOC] Replace embed_tokens with value.
         self.embed_tokens = value
 
     # Copied from transformers.models.bart.modeling_bart.BartDecoder._prepare_decoder_attention_mask
     def _prepare_decoder_attention_mask(self, attention_mask, input_shape, inputs_embeds, past_key_values_length):
+        # [FUNCTION DOC] HELPER: combine a causal mask (only when the current input has > 1 token) and the
+        # expanded padding mask into one additive (bsz, 1, seq, seq + past) mask in inputs_embeds'
+        # dtype/device; returns None if neither applies.
         # create causal mask
         # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
         combined_attention_mask = None
@@ -785,6 +905,23 @@ class IdeficsModel(IdeficsPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
+        # [FUNCTION DOC] Run the backbone. Inputs: input_ids (bsz, seq) or inputs_embeds (exactly one, else
+        # ValueError); attention_mask (bsz, seq+past) 1/0; position_ids (derived from the mask cumsum, or a
+        # range after the cache length); past_key_values per layer; pixel_values (bsz, n_images, 3, H, W) or
+        # image_embeddings (bsz, n_images, img_seq, dim), not both (ValueError); image_attention_mask (bsz,
+        # seq, n_images) 1/0 telling which images each text token may see; use_cache, output_attentions,
+        # output_hidden_states, return_dict (defaults from config). Steps: if no images are given, builds one
+        # dummy black image per sample with an all-zero image mask (text-only mode; keeps the DeepSpeed graph
+        # static). Encodes images with vision_model (last_hidden_state), optionally resamples, reshapes to
+        # (bsz, n_images*img_seq, dim), expands the image mask to every image token and inverts it to an
+        # additive mask. Embeds tokens, builds the decoder mask, then for each layer runs (optionally under
+        # gradient checkpointing, which disables the cache) the nested vblock: gated cross-attention when idx
+        # % interval == 0, then the decoder layer. Applies the final norm. Returns
+        # BaseModelOutputWithPast(last_hidden_state, past_key_values, hidden_states, attentions) or the tuple
+        # of non-None values.
+        # KNOWN ISSUE: text-only mode and the image path use input_ids for device/size, so inputs_embeds-only
+        # calls fail; the image path also requires image_attention_mask (the "is None" fallback is unreachable
+        # after .size() is called on it).
         device = input_ids.device if input_ids is not None else inputs_embeds.device
 
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -936,6 +1073,10 @@ class IdeficsModel(IdeficsPreTrainedModel):
                 cross_layer_interval,
                 gated_cross_attn_layers,
             ):
+                # [FUNCTION DOC] HELPER: one decoder step (closure used for gradient checkpointing): if
+                # layer_idx is a multiple of cross_layer_interval, apply gated_cross_attn_layers[layer_idx //
+                # interval] to hidden_states with the image states and mask (no cache); then run main_block
+                # (the decoder layer) and return its output tuple.
                 # TODO(ls): Add cross attention values to respective lists
                 if layer_idx % cross_layer_interval == 0:
                     xblock = gated_cross_attn_layers[layer_idx // cross_layer_interval]
@@ -1026,9 +1167,14 @@ class IdeficsModel(IdeficsPreTrainedModel):
 
 
 class IdeficsForCausalLM(IdeficsPreTrainedModel):
+    # [CLASS DOC] IDEFICS with a causal LM head: lm_head is a bias-free DecoupledLinear (vocab_size outputs,
+    # frozen if freeze_lm_head, plus additional_vocab_size trainable outputs). Provides loss, generation
+    # hooks, weight tying and a TFLOPs estimate.
     _keys_to_ignore_on_load_missing = [r"lm_head.weight"]
 
     def __init__(self, config, vision_model=None):
+        # [FUNCTION DOC] Build the IdeficsModel backbone (optional injected vision_model) and lm_head, then
+        # post_init.
         super().__init__(config)
         self.model = IdeficsModel(config, vision_model=vision_model)
 
@@ -1044,24 +1190,34 @@ class IdeficsForCausalLM(IdeficsPreTrainedModel):
         self.post_init()
 
     def get_input_embeddings(self):
+        # [FUNCTION DOC] Return model.embed_tokens.
         return self.model.embed_tokens
 
     def set_input_embeddings(self, value):
+        # [FUNCTION DOC] Replace model.embed_tokens.
         self.model.embed_tokens = value
 
     def get_output_embeddings(self):
+        # [FUNCTION DOC] Return lm_head.
         return self.lm_head
 
     def set_output_embeddings(self, new_embeddings):
+        # [FUNCTION DOC] Replace lm_head.
         self.lm_head = new_embeddings
 
     def set_decoder(self, decoder):
+        # [FUNCTION DOC] Replace the backbone (self.model).
         self.model = decoder
 
     def get_decoder(self):
+        # [FUNCTION DOC] Return the backbone (self.model).
         return self.model
 
     def tie_weights(self):
+        # [FUNCTION DOC] Tie decoupled weights: if config.tie_word_embeddings (default True when missing),
+        # share lm_head.weight with the embedding weight and, when extra vocab exists, additional_fc.weight
+        # with additional_embedding.weight (AssertionError if their sizes differ). Then sync
+        # lm_head.out_features / out_additional_features with the embedding sizes.
         """
         Overwrite `transformers.modeling_utils.PreTrainedModel.tie_weights` to handle the case of DecoupledLinear and DecoupledEmbedding.
         """
@@ -1099,6 +1255,11 @@ class IdeficsForCausalLM(IdeficsPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
+        # [FUNCTION DOC] Run the backbone (same inputs as IdeficsModel.forward) and lm_head to get logits
+        # (bsz, seq, vocab + additional_vocab). With labels, computes next-token cross-entropy: logits[:, :-1]
+        # vs labels[:, 1:], keeping only positions where the shifted attention_mask is non-zero (when given);
+        # -100 labels are ignored. Returns CausalLMOutputWithPast(loss, logits, past_key_values,
+        # hidden_states, attentions) or a tuple (loss first when present).
         r"""
         Args:
             labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -1177,6 +1338,8 @@ class IdeficsForCausalLM(IdeficsPreTrainedModel):
         )
 
     def prepare_inputs_for_generation(self, input_ids, past=None, **kwargs):
+        # [FUNCTION DOC] Generation hook: delegate to m4.models.common.prepare_inputs_for_generation (requires
+        # pixel_values) and drop token_type_ids. Note image_attention_mask is not forwarded by that helper.
         inputs = prepare_inputs_for_generation(input_ids, past=past, **kwargs)
         unwanted_kwargs = ["token_type_ids"]
         for kwarg in unwanted_kwargs:
@@ -1188,20 +1351,32 @@ class IdeficsForCausalLM(IdeficsPreTrainedModel):
         *args,
         **model_kwargs,
     ):
+        # [FUNCTION DOC] Generation hook: delegate to m4.models.common.expand_inputs_for_generation.
         return expand_inputs_for_generation(*args, **model_kwargs)
 
     @staticmethod
     def _update_model_kwargs_for_generation(outputs, model_kwargs, is_encoder_decoder=False):
+        # [FUNCTION DOC] Generation hook: delegate to m4.models.common.update_model_kwargs_for_generation.
         return update_model_kwargs_for_generation(outputs, model_kwargs, is_encoder_decoder=is_encoder_decoder)
 
     @staticmethod
     def _reorder_cache(past, beam_idx):
+        # [FUNCTION DOC] Reorder every cached tensor of every layer along the batch dim with beam_idx (beam
+        # search); returns a new tuple of tuples.
         reordered_past = ()
         for layer_past in past:
             reordered_past += (tuple(past_state.index_select(0, beam_idx) for past_state in layer_past),)
         return reordered_past
 
     def get_model_tflops_per_batch_per_gpu(self, hparams, data_param, tokenizer, max_num_images):
+        # [FUNCTION DOC] Estimate training TFLOPs per batch per GPU. Inputs: hparams (batch_size_per_gpu,
+        # grad_acc_size, gradient_checkpointing, model_config["freeze_vision_layers"]), data_param
+        # (max_seq_len), tokenizer (vocab_size), max_num_images. Sums compute_tflops_per_batch_per_gpu for:
+        # language layers (SwiGLU, with vocab projection, backward counted), cross-attention layers (keys =
+        # resampler latents or (image_size/patch)^2 + 1 tokens per image, times max_num_images), vision
+        # encoder layers (backward only if not frozen) and, if use_resampler,
+        # compute_perceiver_tflops_per_batch_per_gpu. Reads the vision model's (nested) config for
+        # patch/hidden/intermediate sizes. Returns the total.
         config_vl_model = self.config
 
         language_embed_size = config_vl_model.hidden_size

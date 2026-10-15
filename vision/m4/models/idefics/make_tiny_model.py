@@ -1,4 +1,15 @@
 #!/usr/bin/env python
+# [MODULE DOC] Script (run directly; all work happens at import time) that builds a tiny random IDEFICS model
+# ("tiny-random-idefics-m4") for tests. Creates the output dir in the CWD, builds IdeficsConfig and updates it
+# with tiny sizes, resampler settings and a tiny CLIP vision model name, instantiates
+# IdeficsForCausalLM.from_config, builds the tokenizer via m4.training.get_tokenizer (HuggingFaceM4/huggy-
+# llama-tokenizer-7b plus the <fake_token_around_image> and <image> added tokens; asserts <image> is in the
+# vocab), runs a one-image (30x30 black image) generate() smoke test, saves the fp16 model and tokenizer,
+# reloads the model, and prints a reminder. Requires network access to the hub.
+# KNOWN ISSUE: config.update sets flat keys (vision_model_name, vision_embed_dim, vision_image_size,
+# resampler_*, ffn_dim, word_embed_proj_dim) that IdeficsConfig reads from its nested vision_config /
+# perceiver_config, so they have no effect on the built model (default CLIP-ViT-H vision config is used).
+# KNOWN ISSUE: the input dict lists "pixel_values" twice (harmless duplicate key).
 
 # This script creates a super tiny model that is useful inside tests, when we just want to test that
 # the machinery works, without needing to check the quality of the outcomes.

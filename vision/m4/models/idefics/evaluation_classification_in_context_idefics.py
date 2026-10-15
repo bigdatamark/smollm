@@ -1,3 +1,16 @@
+# [MODULE DOC] IDEFICS registrations of in-context image classification evaluation tasks. Each class is purely
+# declarative: it sets dataset name/config, query and support split names, label / image / context column
+# names, metrics, label-to-prompt-name mappings and prompt templates; all logic (few-shot prompt building,
+# scoring each candidate class name by (optionally length-normalized) log-likelihood, metric computation)
+# lives in Vgpt2ClassificationInContext. Classes are discovered by name by the m4 evaluation registry.
+# Conventions: unless stated otherwise tasks use the UnfoldedClassificationMetrics with metrics accuracy, KL
+# and entropy (distribution + mean), no length normalization and label column "label". Prompt templates map an
+# id to {"prefix", "example"} format strings using placeholders such as {bos_token}, {token_around_image},
+# {image_token}, {class_name} and context column names; prompt_templates_dict_instruct holds chat-style
+# (User:/Assistant: with <end_of_utterance>) variants; selected_prompt_template_id picks the template.
+# "Sample"/"Dummy" variants only swap in small datasets; "NewSplits" variants use *_support_query_sets
+# datasets with explicit validation/test query and support splits; "PartN" variants are shards of those
+# datasets.
 from typing import List
 
 from m4.evaluation.custom_metrics.unfolded_classification_metrics import ClassifMetrics
@@ -5,11 +18,15 @@ from m4.models.vgpt2.evaluation_classification_in_context_vgpt2 import Vgpt2Clas
 
 
 class IdeficsClassificationInContext(Vgpt2ClassificationInContext):
+    # [CLASS DOC] Base classification task for IDEFICS: model_class "IdeficsForCausalLM",
+    # tokenizer_max_seq_len 2048.
     model_class: str = "IdeficsForCausalLM"
     tokenizer_max_seq_len = 2048
 
 
 class Food101IdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] Food-101 (hub "food101"): validation queries, train support, image column "image", single
+    # template "a photo of a {class_name}." after the image tokens.
     dataset_name: str = "food101"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -37,10 +54,12 @@ class Food101IdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassifica
 class Food101SampleIdeficsClassificationInContextAccWithKLAndEntropy(
     Food101IdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/food101-Sample (for quick runs).
     dataset_name: str = "HuggingFaceM4/food101-Sample"
 
 
 class Cifar10IdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] CIFAR-10 (hub "cifar10"): test queries, train support, image column "img".
     dataset_name: str = "cifar10"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -68,16 +87,21 @@ class Cifar10IdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassifica
 class Cifar10SampleIdeficsClassificationInContextAccWithKLAndEntropy(
     Cifar10IdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/cifar10-Sample (for quick runs).
     dataset_name: str = "HuggingFaceM4/cifar10-Sample"
 
 
 class Cifar10DummyIdeficsClassificationInContextAccWithKLAndEntropy(
     Cifar10IdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/cifar10-Dummy (tiny, debugging) (for
+    # quick runs).
     dataset_name: str = "HuggingFaceM4/cifar10-Dummy"
 
 
 class Cifar100IdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] CIFAR-100 (hub "cifar100"): test queries, train support, label column "fine_label", image
+    # column "img".
     dataset_name: str = "cifar100"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -105,10 +129,12 @@ class Cifar100IdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassific
 class Cifar100SampleIdeficsClassificationInContextAccWithKLAndEntropy(
     Cifar100IdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/cifar100-Sample (for quick runs).
     dataset_name: str = "HuggingFaceM4/cifar100-Sample"
 
 
 class StanfordCarsIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] Stanford Cars (HuggingFaceM4/Stanford-Cars): test queries, train support.
     dataset_name: str = "HuggingFaceM4/Stanford-Cars"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -136,10 +162,13 @@ class StanfordCarsIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClass
 class StanfordCarsSampleIdeficsClassificationInContextAccWithKLAndEntropy(
     StanfordCarsIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/Stanford-Cars-Sample (for quick runs).
     dataset_name: str = "HuggingFaceM4/Stanford-Cars-Sample"
 
 
 class DTDIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] Describable Textures (HuggingFaceM4/DTD_Describable-Textures-Dataset, config partition_1):
+    # test queries, train support.
     dataset_name: str = "HuggingFaceM4/DTD_Describable-Textures-Dataset"
     dataset_config = "partition_1"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -166,10 +195,14 @@ class DTDIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassification
 
 
 class DTDSampleIdeficsClassificationInContextAccWithKLAndEntropy(DTDIdeficsClassificationInContextAccWithKLAndEntropy):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/DTD_Describable-Textures-Dataset-
+    # partition_1-Sample (for quick runs).
     dataset_name: str = "HuggingFaceM4/DTD_Describable-Textures-Dataset-partition_1-Sample"
 
 
 class RenderedSST2IdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] Rendered SST-2 (movie review sentiment rendered as an image; HuggingFaceM4/RenderedSST2):
+    # test queries, train support.
     dataset_name: str = "HuggingFaceM4/RenderedSST2"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -197,10 +230,15 @@ class RenderedSST2IdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClass
 class RenderedSST2SampleIdeficsClassificationInContextAccWithKLAndEntropy(
     RenderedSST2IdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/RenderedSST2-Sample (for quick runs).
     dataset_name: str = "HuggingFaceM4/RenderedSST2-Sample"
 
 
 class RenderedSST2NewSplitsIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] Rendered SST-2 support/query-set version (HuggingFaceM4/RenderedSST2_support_query_sets):
+    # validation_query_set / validation_support_set (defaults) and test_query_set / test_support_set splits.
+    # Five templates (0-4) from a bare "a {class_name} review of a movie." to instruction/task prefixes with
+    # "Sentiment: {class_name}." examples; template 2 selected.
     dataset_name: str = "HuggingFaceM4/RenderedSST2_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -258,6 +296,8 @@ class RenderedSST2NewSplitsIdeficsClassificationInContextAccWithKLAndEntropy(Ide
 
 
 class SUN397IdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] SUN397 scenes (HuggingFaceM4/sun397, config standard-part1-120k): test queries, train
+    # support.
     dataset_name: str = "HuggingFaceM4/sun397"
     dataset_config = "standard-part1-120k"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -286,11 +326,15 @@ class SUN397IdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificat
 class SUN397SampleIdeficsClassificationInContextAccWithKLAndEntropy(
     SUN397IdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/sun397-standard-part1-120k-Sample (no
+    # config) (for quick runs).
     dataset_name: str = "HuggingFaceM4/sun397-standard-part1-120k-Sample"
     dataset_config = None
 
 
 class OxfordPetsIdeficsClassificationInContextMeanPerClassAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] Oxford-IIIT Pets (HuggingFaceM4/Oxford-IIIT-Pet): test queries, train support; adds mean-
+    # per-class accuracy to the standard metrics.
     dataset_name: str = "HuggingFaceM4/Oxford-IIIT-Pet"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -320,11 +364,15 @@ class OxfordPetsIdeficsClassificationInContextMeanPerClassAccWithKLAndEntropy(Id
 class OxfordPetsSampleIdeficsClassificationInContextMeanPerClassAccWithKLAndEntropy(
     OxfordPetsIdeficsClassificationInContextMeanPerClassAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/Oxford-IIIT-Pet-Sample (no config) (for
+    # quick runs).
     dataset_name: str = "HuggingFaceM4/Oxford-IIIT-Pet-Sample"
     dataset_config = None
 
 
 class Caltech101IdeficsClassificationInContextMeanPerClassAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] Caltech-101 (HuggingFaceM4/Caltech-101, config with_background_category): test queries,
+    # train support, plus mean-per-class accuracy.
     dataset_name: str = "HuggingFaceM4/Caltech-101"
     dataset_config = "with_background_category"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -353,11 +401,17 @@ class Caltech101IdeficsClassificationInContextMeanPerClassAccWithKLAndEntropy(Id
 class Caltech101SampleIdeficsClassificationInContextMeanPerClassAccWithKLAndEntropy(
     Caltech101IdeficsClassificationInContextMeanPerClassAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/Caltech-101-with_background_category-
+    # Sample (no config) (for quick runs).
     dataset_name: str = "HuggingFaceM4/Caltech-101-with_background_category-Sample"
     dataset_config = None
 
 
 class ImageNet1kIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] ImageNet-1k (hub "imagenet-1k"): validation queries, train support.
+    # mapping_class_names_to_prompt_names turns the 1000 synonym-list class names (e.g. "tench, Tinca tinca")
+    # into short prompt names ("tench"). Template 0: "a photo of a {class_name}."; instruct template 0: User
+    # asks what is represented, Assistant answers "This is a photo of a {class_name}.".
     dataset_name: str = "imagenet-1k"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -1409,6 +1463,9 @@ class ImageNet1kIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassif
 class ImageNet1kNewSplits1kSupportIdeficsClassificationInContextAccWithKLAndEntropy(
     ImageNet1kIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] ImageNet-1k support/query-set version (HuggingFaceM4/imagenet1k_support_1k_query_sets,
+    # 1k-example support sets): validation_query_set / validation_support_set (defaults) and test_query_set /
+    # test_support_set splits, template 0.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -1422,42 +1479,57 @@ class ImageNet1kNewSplits1kSupportIdeficsClassificationInContextAccWithKLAndEntr
 class ImageNet1kPart0NewSplits1kSupportIdeficsClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 0 of the ImageNet-1k 1k-support new-splits task
+    # (HuggingFaceM4/imagenet1k_support_1k_query_sets_part_0).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_0"
 
 
 class ImageNet1kPart1NewSplits1kSupportIdeficsClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 1 of the ImageNet-1k 1k-support new-splits task
+    # (HuggingFaceM4/imagenet1k_support_1k_query_sets_part_1).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_1"
 
 
 class ImageNet1kPart2NewSplits1kSupportIdeficsClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 2 of the ImageNet-1k 1k-support new-splits task
+    # (HuggingFaceM4/imagenet1k_support_1k_query_sets_part_2).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_2"
 
 
 class ImageNet1kPart3NewSplits1kSupportIdeficsClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 3 of the ImageNet-1k 1k-support new-splits task
+    # (HuggingFaceM4/imagenet1k_support_1k_query_sets_part_3).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_3"
 
 
 class ImageNet1kPart4NewSplits1kSupportIdeficsClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 4 of the ImageNet-1k 1k-support new-splits task
+    # (HuggingFaceM4/imagenet1k_support_1k_query_sets_part_4).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_4"
 
 
 class ImageNet1kPart5NewSplits1kSupportIdeficsClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits1kSupportIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 5 of the ImageNet-1k 1k-support new-splits task
+    # (HuggingFaceM4/imagenet1k_support_1k_query_sets_part_5).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_1k_query_sets_part_5"
 
 
 class ImageNet1kNewSplits5kSupportIdeficsClassificationInContextAccWithKLAndEntropy(
     ImageNet1kIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] ImageNet-1k support/query-set version (HuggingFaceM4/imagenet1k_support_5k_query_sets,
+    # 5k-example support sets): validation_query_set / validation_support_set (defaults) and test_query_set /
+    # test_support_set splits, template 0.
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -1471,46 +1543,65 @@ class ImageNet1kNewSplits5kSupportIdeficsClassificationInContextAccWithKLAndEntr
 class ImageNet1kPart0NewSplits5kSupportIdeficsClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 0 of the ImageNet-1k 5k-support new-splits task
+    # (HuggingFaceM4/imagenet1k_support_5k_query_sets_part_0).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_0"
 
 
 class ImageNet1kPart1NewSplits5kSupportIdeficsClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 1 of the ImageNet-1k 5k-support new-splits task
+    # (HuggingFaceM4/imagenet1k_support_5k_query_sets_part_1).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_1"
 
 
 class ImageNet1kPart2NewSplits5kSupportIdeficsClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 2 of the ImageNet-1k 5k-support new-splits task
+    # (HuggingFaceM4/imagenet1k_support_5k_query_sets_part_2).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_2"
 
 
 class ImageNet1kPart3NewSplits5kSupportIdeficsClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 3 of the ImageNet-1k 5k-support new-splits task
+    # (HuggingFaceM4/imagenet1k_support_5k_query_sets_part_3).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_3"
 
 
 class ImageNet1kPart4NewSplits5kSupportIdeficsClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 4 of the ImageNet-1k 5k-support new-splits task
+    # (HuggingFaceM4/imagenet1k_support_5k_query_sets_part_4).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_4"
 
 
 class ImageNet1kPart5NewSplits5kSupportIdeficsClassificationInContextAccWithKLAndEntropy(
     ImageNet1kNewSplits5kSupportIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Shard 5 of the ImageNet-1k 5k-support new-splits task
+    # (HuggingFaceM4/imagenet1k_support_5k_query_sets_part_5).
     dataset_name: str = "HuggingFaceM4/imagenet1k_support_5k_query_sets_part_5"
 
 
 class ImageNet1kSampleIdeficsClassificationInContextAccWithKLAndEntropy(
     ImageNet1kIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/imagenet-1k-Sample (for quick runs).
     dataset_name: str = "HuggingFaceM4/imagenet-1k-Sample"
 
 
 class HatefulMemesIdeficsClassificationInContextAccWithKLAndEntropyROCAUC(IdeficsClassificationInContext):
+    # [CLASS DOC] Hateful Memes (HuggingFaceM4/Hateful-Memes, config "seen"): test queries, train support,
+    # context column "text" (meme transcription); standard metrics plus ROC-AUC. 28 prompt templates (0-27);
+    # mapping_class_prompt_name_id_to_prompt_template_id says which label naming each template uses: naming 0
+    # (not-hateful -> "no", hateful -> "yes") or naming 1 ("not hateful"/"hateful"), as given in
+    # mapping_class_names_to_prompt_names. Instruct template 22 (selected) is a chat prompt asking whether the
+    # meme is hateful.
     dataset_name: str = "HuggingFaceM4/Hateful-Memes"
     dataset_config: str = "seen"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -1805,6 +1896,8 @@ class HatefulMemesIdeficsClassificationInContextAccWithKLAndEntropyROCAUC(Idefic
 class HatefulMemesNewSplitsIdeficsClassificationInContextAccWithKLAndEntropyROCAUC(
     HatefulMemesIdeficsClassificationInContextAccWithKLAndEntropyROCAUC
 ):
+    # [CLASS DOC] Hateful Memes support/query-set version (HuggingFaceM4/HatefulMemes_support_query_sets):
+    # validation_query_set / validation_support_set (defaults) and test_query_set / test_support_set splits.
     dataset_name: str = "HuggingFaceM4/HatefulMemes_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -1815,6 +1908,8 @@ class HatefulMemesNewSplitsIdeficsClassificationInContextAccWithKLAndEntropyROCA
 
 
 class ClevrIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] CLEVR as classification (HuggingFaceM4/clevr, config classification): the answer column is
+    # the label, the question is context; validation queries, train support.
     dataset_name: str = "HuggingFaceM4/clevr"
     dataset_config: str = "classification"
     metric_name: str = "UnfoldedClassificationMetrics"
@@ -1846,10 +1941,14 @@ class ClevrIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificati
 class ClevrSampleIdeficsClassificationInContextAccWithKLAndEntropy(
     ClevrIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/clevr-Sample (for quick runs).
     dataset_name: str = "HuggingFaceM4/clevr-Sample"
 
 
 class ClevrNewSplitsIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] CLEVR support/query-set version (HuggingFaceM4/Clevr_support_query_sets):
+    # validation_query_set / validation_support_set (defaults) and test_query_set / test_support_set splits;
+    # adds DEFAULT_TO_SERVER_RESULTS metric and instruct templates; template 3 selected.
     dataset_name: str = "HuggingFaceM4/Clevr_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -1941,6 +2040,9 @@ class ClevrNewSplitsIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsCla
 
 
 class SNLIVEImageOnlySampleIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] SNLI-VE visual entailment sample (HuggingFaceM4/SNLI-VE-Sample): image as premise,
+    # "hypothesis" as context, labels mapped to prompt words; adds mean-per-class accuracy; test queries,
+    # train support.
     dataset_name: str = "HuggingFaceM4/SNLI-VE-Sample"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -1976,6 +2078,8 @@ class SNLIVEImageOnlySampleIdeficsClassificationInContextAccWithKLAndEntropy(Ide
 
 
 class SNLIVEImagePremiseSampleIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] SNLI-VE sample variant where a text premise+hypothesis "context" column accompanies the
+    # image (HuggingFaceM4/SNLI-VE_modif_premise_hypothesis-Sample); adds mean-per-class accuracy.
     dataset_name: str = "HuggingFaceM4/SNLI-VE_modif_premise_hypothesis-Sample"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2013,6 +2117,9 @@ class SNLIVEImagePremiseSampleIdeficsClassificationInContextAccWithKLAndEntropy(
 
 
 class FairFaceAgeIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] FairFace age-bucket prediction (HuggingFaceM4/FairFace, label "age"): validation queries,
+    # train support; adds per-bucket accuracy over buckets_keys gender and race (fairness analysis); age
+    # ranges mapped to prompt names.
     dataset_name: str = "HuggingFaceM4/FairFace"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2053,10 +2160,14 @@ class FairFaceAgeIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassi
 class FairFaceAgeSampleIdeficsClassificationInContextAccWithKLAndEntropy(
     FairFaceAgeIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/FairFace-Sample (for quick runs).
     dataset_name: str = "HuggingFaceM4/FairFace-Sample"
 
 
 class FairFaceAgeNewSplitsIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] FairFace age support/query-set version (HuggingFaceM4/FairFace_support_query_sets):
+    # validation_query_set / validation_support_set (defaults) and test_query_set / test_support_set splits;
+    # per-bucket accuracy, instruct templates, template 5 selected.
     dataset_name: str = "HuggingFaceM4/FairFace_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2130,6 +2241,7 @@ class FairFaceAgeNewSplitsIdeficsClassificationInContextAccWithKLAndEntropy(Idef
 
 
 class FairFaceGenderIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] FairFace gender prediction (label "gender") with per-bucket accuracy over gender and race.
     dataset_name: str = "HuggingFaceM4/FairFace"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2163,10 +2275,14 @@ class FairFaceGenderIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsCla
 class FairFaceGenderSampleIdeficsClassificationInContextAccWithKLAndEntropy(
     FairFaceGenderIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/FairFace-Sample (for quick runs).
     dataset_name: str = "HuggingFaceM4/FairFace-Sample"
 
 
 class FairFaceGenderNewSplitsIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] FairFace gender support/query-set version (HuggingFaceM4/FairFace_support_query_sets):
+    # validation_query_set / validation_support_set (defaults) and test_query_set / test_support_set splits;
+    # template 0.
     dataset_name: str = "HuggingFaceM4/FairFace_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2233,6 +2349,7 @@ class FairFaceGenderNewSplitsIdeficsClassificationInContextAccWithKLAndEntropy(I
 
 
 class FairFaceRaceIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] FairFace race prediction (label "race") with per-bucket accuracy over gender and race.
     dataset_name: str = "HuggingFaceM4/FairFace"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2271,10 +2388,14 @@ class FairFaceRaceIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClass
 class FairFaceRaceSampleIdeficsClassificationInContextAccWithKLAndEntropy(
     FairFaceRaceIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/FairFace-Sample (for quick runs).
     dataset_name: str = "HuggingFaceM4/FairFace-Sample"
 
 
 class FairFaceRaceNewSplitsIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] FairFace race support/query-set version (HuggingFaceM4/FairFace_support_query_sets):
+    # validation_query_set / validation_support_set (defaults) and test_query_set / test_support_set splits;
+    # template 0.
     dataset_name: str = "HuggingFaceM4/FairFace_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2346,6 +2467,8 @@ class FairFaceRaceNewSplitsIdeficsClassificationInContextAccWithKLAndEntropy(Ide
 
 
 class NLVR2SampleIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] NLVR2 sample (HuggingFaceM4/NLVR2-Sample): two images (left_image, right_image) and a
+    # "sentence" context; predict whether the sentence is true; labels mapped to prompt words.
     dataset_name: str = "HuggingFaceM4/NLVR2-Sample"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2379,6 +2502,9 @@ class NLVR2SampleIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassi
 
 
 class NLVR2NewSplitsIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] NLVR2 support/query-set version (HuggingFaceM4/NLVR2_support_query_sets):
+    # validation_query_set / validation_support_set (defaults) and test_query_set / test_support_set splits;
+    # two images per example; template 3.
     dataset_name: str = "HuggingFaceM4/NLVR2_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2498,6 +2624,8 @@ class NLVR2NewSplitsIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsCla
 
 
 class ScienceQAIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] ScienceQA (HuggingFaceM4/ScienceQA_modif): image + "context" column, answer choice as class;
+    # test queries, train support.
     dataset_name: str = "HuggingFaceM4/ScienceQA_modif"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2527,6 +2655,10 @@ class ScienceQAIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassifi
 
 
 class ScienceQANewSplitsOldSetupIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] ScienceQA support/query-set version (HuggingFaceM4/ScienceQA_support_query_sets_old_setup):
+    # validation_query_set / validation_support_set (defaults) and test_query_set / test_support_set splits;
+    # contexts "context" and "solution", the solution being shown only for support examples
+    # (tested_ex_excluded_context_columns); template 1.
     dataset_name: str = "HuggingFaceM4/ScienceQA_support_query_sets_old_setup"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2608,6 +2740,9 @@ class ScienceQANewSplitsOldSetupIdeficsClassificationInContextAccWithKLAndEntrop
 
 
 class ScienceQANewSplitsIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] ScienceQA support/query-set version (HuggingFaceM4/ScienceQA_support_query_sets):
+    # validation_query_set / validation_support_set (defaults) and test_query_set / test_support_set splits;
+    # contexts question, hint, context and solution (solution excluded for the tested example).
     dataset_name: str = "HuggingFaceM4/ScienceQA_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -2779,10 +2914,14 @@ class ScienceQANewSplitsIdeficsClassificationInContextAccWithKLAndEntropy(Idefic
 class ScienceQASampleIdeficsClassificationInContextAccWithKLAndEntropy(
     ScienceQAIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/ScienceQA_modif-Sample (for quick runs).
     dataset_name: str = "HuggingFaceM4/ScienceQA_modif-Sample"
 
 
 class IIIT5KIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] IIIT-5K word recognition as classification (HuggingFaceM4/IIIT-5K-classif): candidates per
+    # example come from the "small_lexicon" column (tested_labels_column_name); test queries, train support;
+    # template 0.
     dataset_name: str = "HuggingFaceM4/IIIT-5K-classif"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2814,12 +2953,15 @@ class IIIT5KIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificat
 class IIIT5KSampleIdeficsClassificationInContextAccWithKLAndEntropy(
     IIIT5KIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/IIIT-5K-classif-Sample (for quick runs).
     dataset_name: str = "HuggingFaceM4/IIIT-5K-classif-Sample"
 
 
 class SimpleImageNet1kIdeficsClassificationInContextAccWithKLAndEntropy(
     ImageNet1kIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Simplified ImageNet-1k (HuggingFaceM4/simple-imagenet-1k) inheriting the ImageNet setup, but
+    # each example is scored only against its own candidate list in the "lexicon" column.
     dataset_name: str = "HuggingFaceM4/simple-imagenet-1k"
     metric_kwargs = {
         "metrics": [
@@ -2836,10 +2978,16 @@ class SimpleImageNet1kIdeficsClassificationInContextAccWithKLAndEntropy(
 class SimpleImageNet1kSampleIdeficsClassificationInContextAccWithKLAndEntropy(
     SimpleImageNet1kIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] Same task on the small sample dataset HuggingFaceM4/simple-imagenet-1k-Sample (for quick
+    # runs).
     dataset_name: str = "HuggingFaceM4/simple-imagenet-1k-Sample"
 
 
 class VisDialNewSplitsIdeficsClassificationInContextNDCG(IdeficsClassificationInContext):
+    # [CLASS DOC] VisDial support/query-set version (HuggingFaceM4/VisDial_modif_support_query_sets):
+    # validation_query_set / validation_support_set (defaults) and test_query_set / test_support_set splits;
+    # ranks the per-example "answer_options" given dialog "context" and "caption", evaluated with NDCG against
+    # the "relevance_scores" column; template 1.
     dataset_name: str = "HuggingFaceM4/VisDial_modif_support_query_sets"
     metric_name: str = "UnfoldedClassificationMetrics"
     metric_kwargs = {
@@ -2995,6 +3143,8 @@ class VisDialNewSplitsIdeficsClassificationInContextNDCG(IdeficsClassificationIn
 
 
 class MMBenchNewSplitsIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] MMBench multiple-choice (HuggingFaceM4/mmbench_support_query_sets): only validation
+    # query/support splits, "context" column holds the question and options; template 0.
     dataset_name: str = "HuggingFaceM4/mmbench_support_query_sets"
     default_query_split_name: str = "validation_query_set"
     default_support_split_name: str = "validation_support_set"
@@ -3036,6 +3186,9 @@ class MMBenchNewSplitsIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsC
 
 
 class SEEDAllIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] SEED-Bench (HuggingFaceM4/SEED, test split used for both queries and support): multiple-
+    # choice with question and choice_a..choice_d contexts, label column "answer" (A-D). One chat template
+    # listing the choices and answering "Correct answer: {class_name}.".
     dataset_name: str = "HuggingFaceM4/SEED"
 
     default_query_split_name: str = "test"
@@ -3075,58 +3228,79 @@ class SEEDAllIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassifica
 class SEEDSceneUnderstandingIdeficsClassificationInContextAccWithKLAndEntropy(
     SEEDAllIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to one dimension via its dataset config (category named in the
+    # dataset_config attribute).
     dataset_config = "Scene_Understanding"
 
 
 class SEEDInstanceIdentityIdeficsClassificationInContextAccWithKLAndEntropy(
     SEEDAllIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to one dimension via its dataset config (category named in the
+    # dataset_config attribute).
     dataset_config = "Instance_Identity"
 
 
 class SEEDInstanceAttributesIdeficsClassificationInContextAccWithKLAndEntropy(
     SEEDAllIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to one dimension via its dataset config (category named in the
+    # dataset_config attribute).
     dataset_config = "Instance_Attributes"
 
 
 class SEEDInstanceLocationIdeficsClassificationInContextAccWithKLAndEntropy(
     SEEDAllIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to one dimension via its dataset config (category named in the
+    # dataset_config attribute).
     dataset_config = "Instance_Location"
 
 
 class SEEDInstancesCountingIdeficsClassificationInContextAccWithKLAndEntropy(
     SEEDAllIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to one dimension via its dataset config (category named in the
+    # dataset_config attribute).
     dataset_config = "Instances_Counting"
 
 
 class SEEDSpatialRelationIdeficsClassificationInContextAccWithKLAndEntropy(
     SEEDAllIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to one dimension via its dataset config (category named in the
+    # dataset_config attribute).
     dataset_config = "Spatial_Relation"
 
 
 class SEEDInstanceInteractionIdeficsClassificationInContextAccWithKLAndEntropy(
     SEEDAllIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to one dimension via its dataset config (category named in the
+    # dataset_config attribute).
     dataset_config = "Instance_Interaction"
 
 
 class SEEDVisualReasoningIdeficsClassificationInContextAccWithKLAndEntropy(
     SEEDAllIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to one dimension via its dataset config (category named in the
+    # dataset_config attribute).
     dataset_config = "Visual_Reasoning"
 
 
 class SEEDTextUnderstandingIdeficsClassificationInContextAccWithKLAndEntropy(
     SEEDAllIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SEED-Bench restricted to one dimension via its dataset config (category named in the
+    # dataset_config attribute).
     dataset_config = "Text_Understanding"
 
 
 class SugarCrepeSwapObjIdeficsClassificationInContextAccWithKLAndEntropy(IdeficsClassificationInContext):
+    # [CLASS DOC] SugarCrepe compositionality, swap-object subset (HuggingFaceM4/SugarCrepe_swap_obj, test
+    # split only): choose the correct caption among "tested_labels" (true caption in "true_label") by scoring
+    # a chat prompt "Describe this image." -> "{class_name}.".
     dataset_name: str = "HuggingFaceM4/SugarCrepe_swap_obj"
     default_query_split_name: str = "test"
     default_support_split_name: str = "test"
@@ -3162,34 +3336,46 @@ class SugarCrepeSwapObjIdeficsClassificationInContextAccWithKLAndEntropy(Idefics
 class SugarCrepeSwapAttIdeficsClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SugarCrepe swap_att subset (HuggingFaceM4/SugarCrepe_swap_att); otherwise identical to the
+    # swap_obj task.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_swap_att"
 
 
 class SugarCrepeReplaceRelIdeficsClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SugarCrepe replace_rel subset (HuggingFaceM4/SugarCrepe_replace_rel); otherwise identical to
+    # the swap_obj task.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_replace_rel"
 
 
 class SugarCrepeReplaceObjIdeficsClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SugarCrepe replace_obj subset (HuggingFaceM4/SugarCrepe_replace_obj); otherwise identical to
+    # the swap_obj task.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_replace_obj"
 
 
 class SugarCrepeReplaceAttIdeficsClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SugarCrepe replace_att subset (HuggingFaceM4/SugarCrepe_replace_att); otherwise identical to
+    # the swap_obj task.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_replace_att"
 
 
 class SugarCrepeAddObjIdeficsClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SugarCrepe add_obj subset (HuggingFaceM4/SugarCrepe_add_obj); otherwise identical to the
+    # swap_obj task.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_add_obj"
 
 
 class SugarCrepeAddAttIdeficsClassificationInContextAccWithKLAndEntropy(
     SugarCrepeSwapObjIdeficsClassificationInContextAccWithKLAndEntropy
 ):
+    # [CLASS DOC] SugarCrepe add_att subset (HuggingFaceM4/SugarCrepe_add_att); otherwise identical to the
+    # swap_obj task.
     dataset_name: str = "HuggingFaceM4/SugarCrepe_add_att"

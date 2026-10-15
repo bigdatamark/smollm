@@ -1,4 +1,16 @@
 #!/usr/bin/env python
+# [MODULE DOC] Standalone script that builds a tiny random-weight VLlama3ForCausalLM ("tiny-random-vllama3-m4") for tests.
+# Steps: creates directory "tiny-random-vllama3-m4" in the current working directory; builds a VLlama3Config
+# with hidden_size 16, intermediate_size 64, 128 max positions, 4 heads, 1 KV head, 2 layers, the
+# "HuggingFaceM4/tiny-random-siglip" vision tower, a perceiver resampler (depth 2, head_dim 8, 2 heads, 16
+# latents), vocab_size 128256 plus 2 additional vocab entries and flash-attention-2 enabled; instantiates the
+# model; builds the tokenizer with m4.training.utils.get_tokenizer adding "<fake_token_around_image>" and
+# "<image>" tokens (asserts "<image>" is in the vocab); constructs a query with one image wrapped in fake
+# tokens, with as many "<image>" tokens as the image sequence length (resampler latents, or (image_size /
+# patch_size)^2 without resampler); creates a random 30x30 RGB image as pixel_values of shape (1, 1, 3, 30,
+# 30) in bfloat16; moves model and inputs to "cuda:0" (requires a GPU) and runs generate as a smoke test;
+# saves model and tokenizer; reloads the model; prints an upload message. Network access to the Hub is
+# required. No functions or classes; everything runs at import time.
 
 # This script creates a super tiny model that is useful inside tests, when we just want to test that
 # the machinery works, without needing to check the quality of the outcomes.

@@ -1,3 +1,6 @@
+# [MODULE DOC] IDEFICS registrations of the image-caption matching evaluation (Winoground-style). Logic is
+# inherited from Vgpt2ImageCaptionMatching; classes only set attributes (model, dataset, columns, metrics,
+# prompts).
 from typing import List
 
 from m4.evaluation.custom_metrics.image_caption_matching_metrics import MetricsImageCaptionMatching
@@ -5,11 +8,17 @@ from m4.models.vgpt2.evaluation_image_caption_matching_vgpt2 import Vgpt2ImageCa
 
 
 class IdeficsImageCaptionMatching(Vgpt2ImageCaptionMatching):
+    # [CLASS DOC] Base task for IDEFICS: model_class "IdeficsForCausalLM", tokenizer_max_seq_len 2048.
     model_class: str = "IdeficsForCausalLM"
     tokenizer_max_seq_len = 2048
 
 
 class WinogroundIdeficsImageCaptionMatchingAccWithKLAndEntropy(IdeficsImageCaptionMatching):
+    # [CLASS DOC] Winoground (facebook/winoground, test split only) task: two images (image_0/1) and two
+    # captions (caption_0/1) per id; metrics text/image/group score; length-normalized caption log-
+    # likelihoods. Defines seven prompt templates (0-6) wrapping the image tokens and caption; template 0
+    # ("Description of the image: {caption}") is selected. Name mentions KL/entropy but only the three score
+    # metrics are configured.
     dataset_name: str = "facebook/winoground"
     metric_name: str = "ImageCaptionMatchingMetrics"
     metric_kwargs = {

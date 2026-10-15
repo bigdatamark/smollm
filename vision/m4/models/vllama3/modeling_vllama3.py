@@ -1,4 +1,13 @@
 # coding=utf-8
+# [MODULE DOC] PyTorch implementation of VLlama3, a vision-language causal LM: a Llama-3 style text decoder (copied/adapted
+# from transformers' modeling_llama: RMSNorm, RoPE, GQA attention in eager / flash-attention-2 / SDPA
+# flavours, SwiGLU MLP) plus a vision encoder (built from config.vision_config.vision_model_name via
+# AutoModel), a pixel-shuffle step that trades sequence length for channel width, a linear modality projection
+# into the text embedding space, and an optional perceiver resampler. Image features replace the embeddings of
+# <image> placeholder tokens (image_token_id) in the text sequence. Also defines output dataclasses, input
+# docstrings, LLAMA_ATTENTION_CLASSES (implementation name -> attention class) and registers LlamaRMSNorm in
+# transformers' ALL_LAYERNORM_LAYERS (global side effect at import). Imports flash_attn functions only when
+# flash-attention-2 is available.
 # Copyright 2023 Meta and the HuggingFace Inc. team. All rights reserved.
 #
 # This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
@@ -70,6 +79,10 @@ _CONFIG_FOR_DOC = "VLlama3Config"
 
 @dataclass
 class VLlama3BaseModelOutputWithPast(ModelOutput):
+    # [CLASS DOC] Dataclass (transformers ModelOutput) returned by VLlama3Model.forward: last_hidden_state,
+    # past_key_values, hidden_states (per-layer tuple), attentions (per-layer tuple), image_hidden_states
+    # (processed image features fed into the LM, shape (num_real_images, image_seq_len, hidden_size)). All
+    # fields default to None.
     """
     Base class for VLlama3 model's outputs that may also contain a past key/values (to speed up sequential decoding).
 
@@ -115,6 +128,9 @@ class VLlama3BaseModelOutputWithPast(ModelOutput):
 
 @dataclass
 class VLlama3CausalLMOutputWithPast(ModelOutput):
+    # [CLASS DOC] Dataclass returned by VLlama3ForCausalLM.forward: loss (scalar, only when labels given), logits (batch,
+    # seq, vocab_size + additional_vocab_size, float32), past_key_values, hidden_states, attentions,
+    # image_hidden_states.
     """
     Base class for VLlama3 causal language model (or autoregressive) outputs.
 
@@ -156,6 +172,9 @@ class VLlama3CausalLMOutputWithPast(ModelOutput):
 
 
 def _get_unpad_data(attention_mask):
+    # [FUNCTION DOC] HELPER for flash-attention varlen calls. Input: attention_mask (batch, seq) of 0/1. Returns a tuple:
+    # indices of non-padding tokens in the flattened (batch*seq) layout, cumulative sequence lengths (int32,
+    # length batch+1, starting at 0), and the maximum sequence length in the batch (Python int).
     seqlens_in_batch = attention_mask.sum(dim=-1, dtype=torch.int32)
     indices = torch.nonzero(attention_mask.flatten(), as_tuple=False).flatten()
     max_seqlen_in_batch = seqlens_in_batch.max().item()
@@ -168,7 +187,10 @@ def _get_unpad_data(attention_mask):
 
 
 class LlamaRMSNorm(nn.Module):
+    # [CLASS DOC] Root-mean-square layer norm (as T5LayerNorm): no mean subtraction and no bias.
     def __init__(self, hidden_size, eps=1e-6):
+        # [FUNCTION DOC] hidden_size: size of the normalized last dim; eps (default 1e-6). Creates a learnable weight
+        # initialized to ones.
         """
         LlamaRMSNorm is equivalent to T5LayerNorm
         """
@@ -177,6 +199,9 @@ class LlamaRMSNorm(nn.Module):
         self.variance_epsilon = eps
 
     def forward(self, hidden_states):
+        # [FUNCTION DOC] Computes in float32: x * 1/sqrt(mean(x^2 over last dim) + eps), casts back to the input dtype, then
+        # multiplies by weight (result dtype follows weight/input promotion). Returns a tensor with the same
+        # shape as the input.
         input_dtype = hidden_states.dtype
         hidden_states = hidden_states.to(torch.float32)
         variance = hidden_states.pow(2).mean(-1, keepdim=True)
@@ -188,6 +213,8 @@ ALL_LAYERNORM_LAYERS.append(LlamaRMSNorm)
 
 
 class LlamaRotaryEmbedding(nn.Module):
+    # [CLASS DOC] Rotary position embedding (RoPE) generator returning cos/sin tables for given positions. Supports all
+    # transformers rope types (default, linear, dynamic, yarn, llama3, ...) through ROPE_INIT_FUNCTIONS.
     def __init__(
         self,
         dim=None,
@@ -198,6 +225,12 @@ class LlamaRotaryEmbedding(nn.Module):
         rope_type="default",
         config: Optional[VLlama3Config] = None,
     ):
+        # [FUNCTION DOC] Args: dim, max_position_embeddings (2048), base (10000), device, scaling_factor (1.0), rope_type
+        # ("default") are legacy arguments used only when config is None (a deprecation warning is logged);
+        # otherwise the rope type is read from config.rope_scaling ("rope_type" or legacy "type" key,
+        # "default" if no scaling) and max lengths from config.max_position_embeddings. Computes inverse
+        # frequencies and attention_scaling with the matching init function and registers inv_freq as a
+        # non-persistent buffer (also kept as original_inv_freq).
         super().__init__()
         # TODO (joao): remove the `if` below, only used for BC
         self.rope_kwargs = {}
@@ -233,6 +266,9 @@ class LlamaRotaryEmbedding(nn.Module):
         self.original_inv_freq = self.inv_freq
 
     def _dynamic_frequency_update(self, position_ids, device):
+        # [FUNCTION DOC] HELPER for "dynamic" rope types. seq_len = max(position_ids)+1. If it exceeds the cached length,
+        # recomputes inv_freq for that length and updates the cache length; if it is back below the original
+        # max length while the cache was grown, restores the original inv_freq. Mutates buffers/attributes.
         """
         dynamic RoPE layers should recompute `inv_freq` in the following situations:
         1 - growing beyond the cached sequence length (allow scaling)
@@ -252,6 +288,10 @@ class LlamaRotaryEmbedding(nn.Module):
 
     @torch.no_grad()
     def forward(self, x, position_ids):
+        # [FUNCTION DOC] No-grad. Inputs: x (only used for device/dtype), position_ids (batch, seq). Updates dynamic
+        # frequencies when needed, then computes freqs = inv_freq outer position_ids in float32 with autocast
+        # disabled, duplicates them to full head_dim, takes cos and sin, multiplies by attention_scaling.
+        # Returns (cos, sin), each (batch, seq, head_dim) in x's dtype.
         if "dynamic" in self.rope_type:
             self._dynamic_frequency_update(position_ids, device=x.device)
 
@@ -275,9 +315,12 @@ class LlamaRotaryEmbedding(nn.Module):
 
 
 class LlamaLinearScalingRotaryEmbedding(LlamaRotaryEmbedding):
+    # [CLASS DOC] Deprecated alias of LlamaRotaryEmbedding forcing rope_type "linear" (position interpolation).
     """LlamaRotaryEmbedding extended with linear scaling. Credits to the Reddit user /u/kaiokendev"""
 
     def __init__(self, *args, **kwargs):
+        # [FUNCTION DOC] Logs a deprecation warning once, sets rope_type="linear" in kwargs and delegates to the parent
+        # constructor.
         logger.warning_once(
             "`LlamaLinearScalingRotaryEmbedding` is deprecated an will be removed in v4.45. Please use "
             "`LlamaRotaryEmbedding`, which now also does linear scaling (simply pass the model config to __init__)."
@@ -287,9 +330,11 @@ class LlamaLinearScalingRotaryEmbedding(LlamaRotaryEmbedding):
 
 
 class LlamaDynamicNTKScalingRotaryEmbedding(LlamaRotaryEmbedding):
+    # [CLASS DOC] Deprecated alias of LlamaRotaryEmbedding forcing rope_type "dynamic" (dynamic NTK scaling).
     """LlamaRotaryEmbedding extended with Dynamic NTK scaling. Credits to the Reddit users /u/bloc97 and /u/emozilla"""
 
     def __init__(self, *args, **kwargs):
+        # [FUNCTION DOC] Logs a deprecation warning once, sets rope_type="dynamic" and delegates to the parent constructor.
         logger.warning_once(
             "`LlamaDynamicNTKScalingRotaryEmbedding` is deprecated an will be removed in v4.45. Please use "
             "`LlamaRotaryEmbedding`, which now also does dynamic ntk scaling (simply pass the model config to "
@@ -300,6 +345,7 @@ class LlamaDynamicNTKScalingRotaryEmbedding(LlamaRotaryEmbedding):
 
 
 def rotate_half(x):
+    # [FUNCTION DOC] HELPER: splits the last dim into halves (x1, x2) and returns the concatenation (-x2, x1).
     """Rotates half the hidden dims of the input."""
     x1 = x[..., : x.shape[-1] // 2]
     x2 = x[..., x.shape[-1] // 2 :]
@@ -307,6 +353,9 @@ def rotate_half(x):
 
 
 def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
+    # [FUNCTION DOC] Applies RoPE: unsqueezes cos/sin at unsqueeze_dim (default 1, for (batch, heads, seq, head_dim) layouts)
+    # and returns (q*cos + rotate_half(q)*sin, k*cos + rotate_half(k)*sin). position_ids is accepted but
+    # unused.
     """Applies Rotary Position Embedding to the query and key tensors.
 
     Args:
@@ -334,7 +383,10 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
 
 
 class LlamaMLP(nn.Module):
+    # [CLASS DOC] SwiGLU feed-forward block: down_proj(act(gate_proj(x)) * up_proj(x)).
     def __init__(self, config):
+        # [FUNCTION DOC] Builds gate_proj and up_proj (hidden_size -> intermediate_size) and down_proj (intermediate ->
+        # hidden), with bias = config.mlp_bias, and act_fn from config.hidden_act via ACT2FN.
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
@@ -345,6 +397,9 @@ class LlamaMLP(nn.Module):
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(self, x):
+        # [FUNCTION DOC] Returns the SwiGLU output for x (..., hidden_size). When config.pretraining_tp > 1, emulates
+        # tensor-parallel pretraining numerics by splitting the weight matrices into pretraining_tp slices,
+        # applying them separately and concatenating/summing the partial results (mathematically equivalent).
         if self.config.pretraining_tp > 1:
             slice = self.intermediate_size // self.config.pretraining_tp
             gate_proj_slices = self.gate_proj.weight.split(slice, dim=0)
@@ -368,6 +423,9 @@ class LlamaMLP(nn.Module):
 
 
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    # [FUNCTION DOC] HELPER for grouped-query attention: expands (batch, num_kv_heads, seq, head_dim) to (batch,
+    # num_kv_heads*n_rep, seq, head_dim) by repeating each KV head n_rep times consecutively; returns the
+    # input unchanged if n_rep == 1.
     """
     This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
     num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
@@ -380,9 +438,16 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
 
 
 class LlamaAttention(nn.Module):
+    # [CLASS DOC] Eager multi-head self-attention with grouped-query KV heads and RoPE; base class of the flash and SDPA
+    # variants.
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
     def __init__(self, config: VLlama3Config, layer_idx: Optional[int] = None):
+        # [FUNCTION DOC] config: VLlama3Config; layer_idx: index used for KV-cache updates (warning logged if None). Reads
+        # hidden_size, num_attention_heads, num_key_value_heads, attention_dropout, max_position_embeddings,
+        # rope_theta; head_dim = hidden_size / num_heads (ValueError if not divisible). Creates q/k/v/o linear
+        # projections (bias = config.attention_bias) and a per-layer LlamaRotaryEmbedding (legacy fallback).
+        # is_causal is True.
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
@@ -429,6 +494,15 @@ class LlamaAttention(nn.Module):
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # will become mandatory in v4.45
         **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+        # [FUNCTION DOC] Inputs: hidden_states (batch, q_len, hidden_size); attention_mask (additive 4D float mask (batch, 1,
+        # q_len, kv_len) or None); position_ids (only used to compute RoPE when position_embeddings is None,
+        # with a deprecation warning); past_key_value (transformers Cache, updated in place with this layer's
+        # new keys/values, passing sin/cos/cache_position); output_attentions; use_cache (unused here);
+        # cache_position; position_embeddings ((cos, sin) tuple from the model). Projects to q/k/v, reshapes
+        # to heads, applies RoPE, updates the cache, repeats KV heads, computes softmax(QK^T / sqrt(head_dim)
+        # + mask sliced to kv length) in float32, applies dropout in training, multiplies by V, merges heads
+        # and applies o_proj. Raises ValueError on an unexpected output shape. Returns (attn_output (batch,
+        # q_len, hidden), attention weights or None unless output_attentions, past_key_value).
         bsz, q_len, _ = hidden_states.size()
 
         query_states = self.q_proj(hidden_states)
@@ -489,6 +563,8 @@ class LlamaAttention(nn.Module):
 
 
 class LlamaFlashAttention2(LlamaAttention):
+    # [CLASS DOC] Attention variant calling flash-attention-2 kernels (same weights as LlamaAttention); handles padding by
+    # unpadding to variable-length sequences.
     """
     Llama flash attention module. This module inherits from `LlamaAttention` as the weights of the module stays
     untouched. The only required change would be on the forward pass where it needs to correctly call the public API of
@@ -496,6 +572,8 @@ class LlamaFlashAttention2(LlamaAttention):
     """
 
     def __init__(self, *args, **kwargs):
+        # [FUNCTION DOC] Delegates to LlamaAttention and records whether the installed flash_attn (< 2.1) uses a top-left
+        # aligned causal mask (_flash_attn_uses_top_left_mask).
         super().__init__(*args, **kwargs)
 
         # TODO: Should be removed once Flash Attention for RoCm is bumped to 2.1.
@@ -514,6 +592,17 @@ class LlamaFlashAttention2(LlamaAttention):
         cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # will become mandatory in v4.45
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+        # [FUNCTION DOC] Inputs: hidden_states (batch, q_len, hidden_size); attention_mask (additive 4D float mask (batch, 1,
+        # q_len, kv_len) or None); position_ids (only used to compute RoPE when position_embeddings is None,
+        # with a deprecation warning); past_key_value (transformers Cache, updated in place with this layer's
+        # new keys/values, passing sin/cos/cache_position); output_attentions; use_cache (unused here);
+        # cache_position; position_embeddings ((cos, sin) tuple from the model). Here attention_mask is the 2D
+        # (batch, seq) padding mask or None. Raises ValueError for a StaticCache. Projects q/k/v, applies
+        # RoPE, updates the cache, transposes to (batch, seq, heads, head_dim), and if the states are float32
+        # (e.g. upcast layer norms) casts them to the autocast dtype, the pre-quantization dtype or q_proj's
+        # weight dtype (warning logged). Runs _flash_attention_forward with dropout only in training, reshapes
+        # and applies o_proj. Always returns (attn_output, None, past_key_value) since output_attentions is
+        # forced to False.
         if isinstance(past_key_value, StaticCache):
             raise ValueError(
                 "`static` cache implementation is not compatible with `attn_implementation==flash_attention_2` make"
@@ -602,6 +691,12 @@ class LlamaFlashAttention2(LlamaAttention):
     def _flash_attention_forward(
         self, query_states, key_states, value_states, attention_mask, query_length, dropout=0.0, softmax_scale=None
     ):
+        # [FUNCTION DOC] HELPER. Inputs: q/k/v in (batch, seq, heads, head_dim), 2D padding attention_mask or None,
+        # query_length, dropout, softmax_scale (default 1/sqrt(head_dim)). Causal flag is is_causal, except
+        # with old top-left-mask flash_attn where single-token queries are non-causal. With a mask: unpads
+        # inputs (_upad_input), calls flash_attn_varlen_func with cumulative lengths, and re-pads the output
+        # to (batch, query_length, heads, head_dim); without a mask calls flash_attn_func directly. Returns
+        # the attention output.
         """
         Calls the forward method of Flash Attention - if the input hidden states contain at least one padding token
         first unpad the input, then computes the attention scores and pad the final attention scores.
@@ -659,6 +754,11 @@ class LlamaFlashAttention2(LlamaAttention):
         return attn_output
 
     def _upad_input(self, query_layer, key_layer, value_layer, attention_mask, query_length):
+        # [FUNCTION DOC] HELPER: removes padding tokens for varlen flash attention. Keys/values are gathered with the mask
+        # indices. Queries: same indices when query_length equals kv length; for query_length 1 (decoding)
+        # each batch row is one token with cu_seqlens 0..batch; otherwise the mask's last query_length columns
+        # are used to unpad (assumes left padding). Returns (query, key, value, query indices, (cu_seqlens_q,
+        # cu_seqlens_k), (max_len_q, max_len_k)).
         indices_k, cu_seqlens_k, max_seqlen_in_batch_k = _get_unpad_data(attention_mask)
         batch_size, kv_seq_len, num_key_value_heads, head_dim = key_layer.shape
 
@@ -698,6 +798,8 @@ class LlamaFlashAttention2(LlamaAttention):
 
 
 class LlamaSdpaAttention(LlamaAttention):
+    # [CLASS DOC] Attention variant using torch.nn.functional.scaled_dot_product_attention (same weights as
+    # LlamaAttention).
     """
     Llama attention module using torch.nn.functional.scaled_dot_product_attention. This module inherits from
     `LlamaAttention` as the weights of the module stays untouched. The only changes are on the forward pass to adapt to
@@ -717,6 +819,15 @@ class LlamaSdpaAttention(LlamaAttention):
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # will become mandatory in v4.45
         **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+        # [FUNCTION DOC] Inputs: hidden_states (batch, q_len, hidden_size); attention_mask (additive 4D float mask (batch, 1,
+        # q_len, kv_len) or None); position_ids (only used to compute RoPE when position_embeddings is None,
+        # with a deprecation warning); past_key_value (transformers Cache, updated in place with this layer's
+        # new keys/values, passing sin/cos/cache_position); output_attentions; use_cache (unused here);
+        # cache_position; position_embeddings ((cos, sin) tuple from the model). If output_attentions is
+        # requested, logs a warning and falls back to the eager LlamaAttention.forward. Otherwise
+        # projects/rotates/caches as eager, repeats KV heads, slices the 4D mask to kv length, makes tensors
+        # contiguous on CUDA with a custom mask (torch bug workaround), and calls SDPA with is_causal True
+        # only when no mask is given and q_len > 1. Returns (attn_output, None, past_key_value).
         if output_attentions:
             # TODO: Improve this warning with e.g. `model.config.attn_implementation = "manual"` once this is implemented.
             logger.warning_once(
@@ -806,7 +917,10 @@ LLAMA_ATTENTION_CLASSES = {
 
 
 class LlamaDecoderLayer(nn.Module):
+    # [CLASS DOC] Pre-norm transformer decoder block: x + SelfAttn(RMSNorm(x)), then x + MLP(RMSNorm(x)).
     def __init__(self, config: VLlama3Config, layer_idx: int):
+        # [FUNCTION DOC] Builds self_attn from LLAMA_ATTENTION_CLASSES[config._attn_implementation] with the given layer_idx,
+        # a LlamaMLP, and input / post-attention LlamaRMSNorm layers (eps = config.rms_norm_eps).
         super().__init__()
         self.hidden_size = config.hidden_size
 
@@ -828,6 +942,9 @@ class LlamaDecoderLayer(nn.Module):
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # will become mandatory in v4.45
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
+        # [FUNCTION DOC] Runs the block on hidden_states (batch, seq, hidden), forwarding mask, position ids, cache,
+        # cache_position and position_embeddings (and extra kwargs) to the attention. Returns a tuple:
+        # (hidden_states,) plus attention weights if output_attentions, plus the present cache if use_cache.
         """
         Args:
             hidden_states (`torch.FloatTensor`): input to the layer of shape `(batch, seq_len, embed_dim)`
@@ -899,6 +1016,9 @@ LLAMA_START_DOCSTRING = r"""
     LLAMA_START_DOCSTRING,
 )
 class VLlama3PreTrainedModel(VLOOMPreTrainedModelBase):
+    # [CLASS DOC] Shared base for VLlama3 models (extends VLOOMPreTrainedModelBase): sets config_class VLlama3Config, base
+    # prefix "model", gradient checkpointing / flash-attn-2 / SDPA / cache-class support flags, and no-split
+    # module LlamaDecoderLayer; implements weight initialization and vision-model overriding.
     config_class = VLlama3Config
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
@@ -911,7 +1031,23 @@ class VLlama3PreTrainedModel(VLOOMPreTrainedModelBase):
     _supports_static_cache = True
 
     def _init_weights(self, module):
+        # [FUNCTION DOC] Called by post_init for every submodule (under DeepSpeed ZeRO-3 parameters are gathered for
+        # modification):
+        # - MLP / SimpleMLP: every inner nn.Linear gets normal(0, sqrt(0.4/(hidden_size*factor))), factor 2
+        # for "down_proj".
+        # - PerceiverResampler: latents ~ normal(0, sqrt(1/hidden_size)); inner linears like above with factor
+        # 2*resampler_depth for "o_proj".
+        # - nn.Embedding (incl. DecoupledEmbedding): normal(0, sqrt(1/hidden_size)), padding row zeroed.
+        # - other nn.Linear: only a layer whose out_features equals self.out_additional_features (the
+        # additional_fc head) is re-initialized with std sqrt(1/in_features); all other linears keep PyTorch's
+        # default init.
+        # KNOWN ISSUE: out_additional_features is only defined on VLlama3ForCausalLM; when VLlama3Model runs
+        # post_init on itself (including inside VLlama3ForCausalLM.__init__) any plain nn.Linear reaches this
+        # branch and should raise AttributeError unless weight init is disabled (e.g. from_pretrained's
+        # no_init_weights context).
         def init_a_linear(module, mean=0.0, std=self.config.initializer_range):
+            # [FUNCTION DOC] HELPER: re-initializes a linear module's weight from normal(mean, std) (defaults 0 and
+            # config.initializer_range) and zeroes its bias, inside DeepSpeed gathered-parameter contexts.
             with ContextManagers(deepspeed_gathered_parameters_context_manager(module.weight, modify=True)):
                 module.weight.data.normal_(mean=mean, std=std)
                 if module.bias is not None:
@@ -960,6 +1096,10 @@ class VLlama3PreTrainedModel(VLOOMPreTrainedModelBase):
     @classmethod
     def override_vision_model_wrapper(cls, model, config, vision_model_name, vision_model_params, torch_dtype):
         # this can be called via from_pretrained from a class w/ head or w/o head so we extract the beheaded model version
+        # [FUNCTION DOC] Classmethod used during from_pretrained: takes the bare model (model.model if a head wrapper is
+        # given), replaces its vision tower with pretrained weights via
+        # cls.override_vision_model(vision_model_name, vision_model_params, torch_dtype), then re-applies
+        # freezing with freeze_relevant_params(config).
         beheaded_model = model.model if hasattr(model, "model") else model
         cls.override_vision_model(beheaded_model, vision_model_name, vision_model_params, torch_dtype)
         beheaded_model.freeze_relevant_params(config)
@@ -1044,6 +1184,8 @@ LLAMA_INPUTS_DOCSTRING = r"""
     LLAMA_START_DOCSTRING,
 )
 class VLlama3Model(VLlama3PreTrainedModel):
+    # [CLASS DOC] Bare VLlama3 model (no LM head): decoupled token embeddings, vision encoder, pixel shuffle, modality
+    # projection, optional perceiver resampler, decoder layers, final RMSNorm, shared rotary embedding.
     """
     Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`LlamaDecoderLayer`]
 
@@ -1052,6 +1194,21 @@ class VLlama3Model(VLlama3PreTrainedModel):
     """
 
     def __init__(self, config: VLlama3Config, vision_model=None):
+        # [FUNCTION DOC] config: VLlama3Config; vision_model: accepted but unused (the vision model is always rebuilt from
+        # config).
+        # - padding_idx hard-coded to 2; forces config._attn_implementation to "flash_attention_2" if
+        # config._flash_attn_2_enabled else "eager" (SDPA is never selected).
+        # - embed_tokens: DecoupledEmbedding with vocab_size regular + additional_vocab_size always-trainable
+        # rows, partially frozen when freeze_text_layers.
+        # - vision_model: loads the Hub config of vision_config.vision_model_name (network/cache,
+        # trust_remote_code), overrides its image_size with config.vision_config.image_size, instantiates it
+        # uninitialized (AutoModel.from_config) and wraps it with vision_model_name_to_model (weights come
+        # later from from_pretrained / override_vision_model).
+        # - modality_projection: SimpleMLP from embed_dim * pixel_shuffle_factor^2 to hidden_size.
+        # - perceiver_resampler when use_resampler; image_seq_len = resampler_n_latents, or
+        # (image_size/patch_size)^2 / pixel_shuffle_factor^2 without resampler.
+        # - num_hidden_layers LlamaDecoderLayer, norm, rotary_emb; then post_init() and
+        # freeze_relevant_params(config).
         super().__init__(config)
         self.config = config
         self.padding_idx = 2
@@ -1123,12 +1280,17 @@ class VLlama3Model(VLlama3PreTrainedModel):
         self.freeze_relevant_params(config)
 
     def enable_input_require_grads(self):
+        # [FUNCTION DOC] Registers forward hooks making the outputs of the input embeddings and of the vision model's first
+        # leaf module require gradients (needed for gradient checkpointing / adapters with frozen weights).
+        # Stores hook handles as _text_require_grads_hook and _vision_require_grads_hook.
         """
         Enables the gradients for the input embeddings. This is useful for fine-tuning adapter weights while keeping
         the model weights fixed.
         """
 
         def get_lowest_module(module):
+            # [FUNCTION DOC] HELPER: return the first leaf module found by repeatedly descending into the first child of
+            # `module` (recursive); the module itself if it has no children.
             if len(list(module.children())) == 0:
                 # If the module has no children, it is a leaf module (e.g., Linear, Conv2d, etc.)
                 return module
@@ -1137,6 +1299,8 @@ class VLlama3Model(VLlama3PreTrainedModel):
                 return get_lowest_module(list(module.children())[0])
 
         def make_inputs_require_grads(module, input, output):
+            # [FUNCTION DOC] HELPER: forward hook that marks the hooked module's output tensor as requiring gradients (in
+            # place).
             output.requires_grad_(True)
 
         self._text_require_grads_hook = self.get_input_embeddings().register_forward_hook(make_inputs_require_grads)
@@ -1145,6 +1309,10 @@ class VLlama3Model(VLlama3PreTrainedModel):
         )
 
     def freeze_relevant_params(self, config=None):
+        # [FUNCTION DOC] Freezes parameters according to config (default self.config): text layers (decoder layers + norm)
+        # when freeze_text_layers, except freeze_text_module_exceptions; vision model when
+        # freeze_vision_layers, except freeze_vision_module_exceptions (via m4.training.utils.freeze_model).
+        # Mutates requires_grad.
         if config is None:
             config = self.config
 
@@ -1155,13 +1323,17 @@ class VLlama3Model(VLlama3PreTrainedModel):
             freeze_model(self.vision_model, module_exceptions=config.freeze_vision_module_exceptions)
 
     def freeze_text_layers(self, module_exceptions):
+        # [FUNCTION DOC] Freezes self.layers and self.norm with freeze_model, keeping modules matching module_exceptions
+        # trainable.
         for module in [self.layers, self.norm]:
             freeze_model(module, module_exceptions=module_exceptions)
 
     def get_input_embeddings(self):
+        # [FUNCTION DOC] Returns embed_tokens (the DecoupledEmbedding).
         return self.embed_tokens
 
     def set_input_embeddings(self, value):
+        # [FUNCTION DOC] Replaces embed_tokens with value.
         self.embed_tokens = value
 
     def inputs_merger(
@@ -1170,6 +1342,11 @@ class VLlama3Model(VLlama3PreTrainedModel):
         inputs_embeds: Optional[torch.Tensor] = None,
         image_hidden_states: Optional[torch.Tensor] = None,
     ):
+        # [FUNCTION DOC] Writes image features into the text embeddings: every position where input_ids == image_token_id
+        # receives, in order, the next row of image_hidden_states flattened to (num_images*image_seq_len,
+        # hidden). Works on a clone of inputs_embeds and returns it. The number of <image> tokens must equal
+        # the total number of image feature vectors (otherwise the masked assignment raises). Docstring's
+        # mention of adapting attention_mask is not done here.
         """
         This method aims at merging the token embeddings with the image hidden states into one single sequence of vectors that are fed to the transformer LM.
         The merging happens as follows:
@@ -1203,6 +1380,30 @@ class VLlama3Model(VLlama3PreTrainedModel):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
     ) -> Union[Tuple, VLlama3BaseModelOutputWithPast]:
+        # [FUNCTION DOC] Inputs: input_ids (batch, seq) - required (see issue below); attention_mask (batch, seq);
+        # position_ids (default cache_position); past_key_values (Cache or legacy tuple, converted to
+        # DynamicCache when use_cache); inputs_embeds; pixel_values (batch, num_images, 3, H, W);
+        # pixel_attention_mask (batch, num_images, H, W); image_hidden_states (precomputed features, mutually
+        # exclusive with pixel_values -> ValueError); use_cache / output_attentions / output_hidden_states /
+        # return_dict (default from config); cache_position (default 0..seq-1). Steps: embed tokens; if
+        # pixel_values given, flatten images, drop all-zero padding images, build/flatten the pixel mask, run
+        # the vision model, pixel-shuffle, project with modality_projection, optionally resample with the
+        # perceiver; merge image features into embeddings (skipped when input_ids has length 1, i.e. decoding
+        # steps). In training mode adds uniform noise U(-5/sqrt(seq*hidden), +) to the embeddings in place
+        # (NEFTune-style). Builds the causal mask, computes shared RoPE (cos, sin), runs decoder layers (with
+        # gradient checkpointing when enabled in training; use_cache is then turned off with a warning),
+        # applies the final norm. Returns VLlama3BaseModelOutputWithPast (with image_hidden_states) or a tuple
+        # of the non-None (hidden, cache, all_hidden, attentions); legacy cache format is returned if one was
+        # given.
+        # KNOWN ISSUE: with use_resampler=True the perceiver call uses patch_attention_mask, whose computation
+        # is commented out, so this path raises NameError.
+        # KNOWN ISSUE: the XOR check rejects input_ids+inputs_embeds together and the later "input_ids should
+        # not be None" check rejects inputs_embeds alone, so inputs_embeds can never actually be used despite
+        # being a documented input.
+        # KNOWN ISSUE: pixel_attention_mask is computed but never given to the vision model or perceiver
+        # (padded pixels are attended to).
+        # KNOWN ISSUE: training noise uses a hard-coded alpha of 5 and ignores config.neftune_noise_alpha; it
+        # is also applied whenever the module is in train mode.
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -1279,6 +1480,9 @@ class VLlama3Model(VLlama3PreTrainedModel):
 
             # Pixel shuffle
             def pixel_shuffle(x, scale_factor):
+                # [FUNCTION DOC] HELPER (space-to-depth): x (batch, seq, dim) with seq a perfect square h*w; regroups each
+                # scale_factor x scale_factor block of patches into one token, returning (batch,
+                # seq/scale_factor^2, dim*scale_factor^2).
                 bsz, seq, embed_dim = x.size()
                 height = width = int(seq**0.5)
                 x = x.view(bsz, height, width, embed_dim)
@@ -1400,6 +1604,13 @@ class VLlama3Model(VLlama3PreTrainedModel):
         # (`recording cudagraph tree for symint key 13`, etc.), which is VERY slow. A workaround is `@torch.compiler.disable`, but this prevents using
         # `fullgraph=True`. See more context in https://github.com/huggingface/transformers/pull/29114
 
+        # [FUNCTION DOC] Builds the attention mask for the decoder layers. Flash-attention-2: returns the 2D attention_mask
+        # only if it contains padding (a 0), else None. SDPA (no static cache, no output_attentions): returns
+        # None when transformers says the causal mask can be ignored. Otherwise builds a (batch, 1, seq,
+        # target_len) additive float mask with dtype min for future positions (relative to cache_position) and
+        # for padded key positions, target_len being the static cache size, the 2D mask length, or past+seq+1.
+        # A provided 4D mask is used as is (ValueError if its max is not 0). For SDPA on CUDA fully-masked
+        # rows are unmasked (memory-efficient kernel requirement).
         if self.config._attn_implementation == "flash_attention_2":
             if attention_mask is not None and 0.0 in attention_mask:
                 return attention_mask
@@ -1434,6 +1645,8 @@ class VLlama3Model(VLlama3PreTrainedModel):
             )
 
         def custom_triu(input_tensor):
+            # [FUNCTION DOC] HELPER replacing torch.triu(x, diagonal=1) (which lacks bfloat16 support): returns a copy of the
+            # 2D tensor with entries on and below the diagonal set to 0.
             rows, cols = input_tensor.shape
             row_indices = torch.arange(rows).unsqueeze(1).expand(rows, cols)
             col_indices = torch.arange(cols).unsqueeze(0).expand(rows, cols)
@@ -1481,9 +1694,16 @@ class VLlama3Model(VLlama3PreTrainedModel):
 
 
 class VLlama3ForCausalLM(VLlama3PreTrainedModel):
+    # [CLASS DOC] VLlama3Model plus language-modeling head(s): lm_head over the regular vocabulary and, when
+    # additional_vocab_size > 0, a separate additional_fc producing logits for the extra (image/special)
+    # tokens; logits are concatenated.
     _tied_weights_keys = ["lm_head.weight"]
 
     def __init__(self, config, vision_model=None):
+        # [FUNCTION DOC] config: VLlama3Config; vision_model forwarded (unused) to VLlama3Model. Builds self.model, stores
+        # vocab sizes and image_token_id, creates additional_fc (hidden -> additional_vocab_size, no bias)
+        # when needed and lm_head (hidden -> vocab_size, no bias), freezes lm_head if config.freeze_lm_head,
+        # then post_init() (weight init + tying).
         super().__init__(config)
         self.model = VLlama3Model(config, vision_model=vision_model)
 
@@ -1509,12 +1729,15 @@ class VLlama3ForCausalLM(VLlama3PreTrainedModel):
         self.post_init()
 
     def enable_input_require_grads(self):
+        # [FUNCTION DOC] Same as VLlama3Model.enable_input_require_grads but on self.model's embeddings and vision model.
         """
         Enables the gradients for the input embeddings. This is useful for fine-tuning adapter weights while keeping
         the model weights fixed.
         """
 
         def get_lowest_module(module):
+            # [FUNCTION DOC] HELPER: return the first leaf module found by repeatedly descending into the first child of
+            # `module` (recursive); the module itself if it has no children.
             if len(list(module.children())) == 0:
                 # If the module has no children, it is a leaf module (e.g., Linear, Conv2d, etc.)
                 return module
@@ -1523,6 +1746,8 @@ class VLlama3ForCausalLM(VLlama3PreTrainedModel):
                 return get_lowest_module(list(module.children())[0])
 
         def make_inputs_require_grads(module, input, output):
+            # [FUNCTION DOC] HELPER: forward hook that marks the hooked module's output tensor as requiring gradients (in
+            # place).
             output.requires_grad_(True)
 
         self._text_require_grads_hook = self.get_input_embeddings().register_forward_hook(make_inputs_require_grads)
@@ -1531,27 +1756,39 @@ class VLlama3ForCausalLM(VLlama3PreTrainedModel):
         )
 
     def get_input_embeddings(self):
+        # [FUNCTION DOC] Returns model.embed_tokens.
         return self.model.embed_tokens
 
     def set_input_embeddings(self, value):
+        # [FUNCTION DOC] Sets model.embed_tokens to value.
         self.model.embed_tokens = value
 
     def get_output_embeddings(self):
+        # [FUNCTION DOC] Returns the tuple (lm_head, additional_fc or None).
+        # KNOWN ISSUE: returns a tuple, unlike the transformers contract (a single module), which may break
+        # generic utilities such as resize_token_embeddings.
         if self.out_additional_features > 0:
             return self.lm_head, self.additional_fc
         else:
             return self.lm_head, None
 
     def set_output_embeddings(self, new_embeddings):
+        # [FUNCTION DOC] Replaces lm_head with new_embeddings (additional_fc untouched).
         self.lm_head = new_embeddings
 
     def set_decoder(self, decoder):
+        # [FUNCTION DOC] Replaces self.model with decoder.
         self.model = decoder
 
     def get_decoder(self):
+        # [FUNCTION DOC] Returns self.model.
         return self.model
 
     def tie_weights(self):
+        # [FUNCTION DOC] Ties output and input embeddings when config.tie_word_embeddings (default True if missing):
+        # lm_head.weight shares the embedding weight and additional_fc.weight shares the DecoupledEmbedding's
+        # additional_embedding weight (asserting matching sizes). Then syncs lm_head.out_features /
+        # additional_fc.out_features with the embedding sizes.
         """
         Overwrite `transformers.modeling_utils.PreTrainedModel.tie_weights` to handle the case of DecoupledLinear and DecoupledEmbedding.
         """
@@ -1589,6 +1826,14 @@ class VLlama3ForCausalLM(VLlama3PreTrainedModel):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
     ) -> Union[Tuple, VLlama3CausalLMOutputWithPast]:
+        # [FUNCTION DOC] Same inputs as VLlama3Model.forward plus labels (batch, seq). Runs the model, computes logits =
+        # lm_head(hidden) concatenated with additional_fc(hidden) when present, cast to float32. If labels are
+        # given, computes next-token cross-entropy on shifted logits/labels, keeping only positions where the
+        # shifted attention_mask is non-zero (when a mask is given), ignoring label positions equal to
+        # image_token_id. Returns VLlama3CausalLMOutputWithPast or a tuple (loss?, logits, *model outputs).
+        # KNOWN ISSUE: the loss uses ignore_index=image_token_id, so labels of -100 (documented as ignored)
+        # are not ignored and would make CrossEntropyLoss fail / count; callers must mask with image_token_id
+        # instead.
         r"""
         Args:
             labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -1682,6 +1927,13 @@ class VLlama3ForCausalLM(VLlama3PreTrainedModel):
         use_cache=True,
         **kwargs,
     ):
+        # [FUNCTION DOC] Generation hook. With a cache, trims input_ids to the not-yet-processed tokens (based on
+        # attention_mask length or past length) and crops attention_mask to a bounded cache's max length.
+        # Creates position_ids from the cumulative attention_mask (padding positions set to 1) and keeps only
+        # the last positions when a cache exists. Uses inputs_embeds only on the first step without cache,
+        # otherwise contiguous input_ids. Computes cache_position if missing (or keeps its last input_length
+        # entries). If image_hidden_states is in kwargs (set after the first step), pixel_values /
+        # pixel_attention_mask are dropped so images are not re-encoded. Returns the model input mapping.
         past_length = 0
         if past_key_values is not None:
             if isinstance(past_key_values, Cache):
@@ -1758,6 +2010,8 @@ class VLlama3ForCausalLM(VLlama3PreTrainedModel):
         return model_inputs
 
     def _update_model_kwargs_for_generation(self, outputs, model_kwargs, is_encoder_decoder, **kwargs):
+        # [FUNCTION DOC] Calls the transformers implementation, then stores outputs.image_hidden_states in model_kwargs so
+        # later decoding steps reuse the encoded images. Returns the updated kwargs.
         model_kwargs = super()._update_model_kwargs_for_generation(
             outputs=outputs,
             model_kwargs=model_kwargs,
@@ -1771,6 +2025,8 @@ class VLlama3ForCausalLM(VLlama3PreTrainedModel):
     @staticmethod
     # Copied from transformers.models.llama.modeling_llama.LlamaForCausalLM._reorder_cache
     def _reorder_cache(past_key_values, beam_idx):
+        # [FUNCTION DOC] Staticmethod for beam search with legacy tuple caches: reorders every layer's past states along the
+        # batch dim according to beam_idx; returns the new tuple.
         reordered_past = ()
         for layer_past in past_key_values:
             reordered_past += (
@@ -1779,6 +2035,16 @@ class VLlama3ForCausalLM(VLlama3PreTrainedModel):
         return reordered_past
 
     def get_model_tflops_per_batch_per_gpu(self, hparams, data_param, tokenizer, max_num_images, max_num_tokens=None):
+        # [FUNCTION DOC] Estimates training TFLOPs per batch per GPU (for throughput logging). Inputs: hparams
+        # (batch_size_per_gpu, grad_acc_size, gradient_checkpointing, model_config["freeze_vision_layers"]),
+        # data_param (max_seq_len), tokenizer (vocab_size), max_num_images, max_num_tokens (overrides
+        # max_seq_len). Sums: language decoder (swiglu, counts backward), modality projection (linear), vision
+        # encoder (backward only if not frozen) and, when use_resampler, the perceiver, using
+        # m4.training.utils compute_* helpers. Returns the total.
+        # KNOWN ISSUE: the vision encoder sequence length is divided by pixel_shuffle_factor^2 although the
+        # encoder runs on the full patch sequence, and the projection is counted with in_features=embed_dim
+        # instead of embed_dim*pixel_shuffle_factor^2, so the estimate is off; the "+1 for CLS" comment is
+        # stale.
         config_vl_model = self.config
 
         language_embed_size = config_vl_model.hidden_size
