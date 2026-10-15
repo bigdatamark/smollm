@@ -1,3 +1,7 @@
+# [MODULE DOC] In-context (zero/few-shot) evaluator: loads a task's support (shots) and query datasets, optionally embeds
+# images with a CLIP encoder for RICES shot retrieval, builds a distributed DataLoader with the task's collator
+# (which assembles prompts with shots), runs the task's add_batch_metric over mini-batches and computes the
+# task metric across processes. Sets PIL ImageFile.LOAD_TRUNCATED_IMAGES = True at import.
 import logging
 import os
 import uuid
@@ -28,11 +32,14 @@ logger = logging.getLogger(__name__)
 
 
 def show_gpu_mem_util(args):
+    # [FUNCTION DOC] HELPER: print GPU utilisation with GPUtil when args.hparams.show_gpu_mem_util is set.
     if args.hparams.show_gpu_mem_util:
         GPUtil.showUtilization(all=True)
 
 
 def load_vision_encoder(args):
+    # [FUNCTION DOC] HELPER: load the CLIPModel (in the requested precision, eval mode, moved to args.hparams.device) and its
+    # CLIPProcessor named by args.tasks.in_context_params.vision_encoder_name. Returns (model, processor).
     vision_encoder = CLIPModel.from_pretrained(
         args.tasks.in_context_params.vision_encoder_name, torch_dtype=args.tasks.model_precision.value
     )
@@ -43,6 +50,11 @@ def load_vision_encoder(args):
 
 
 def load_query_and_support_datasets(task, args):
+    # [FUNCTION DOC] Resolve split names from task attributes "<split>_support_split_name" / "<split>_query_split_name" where split
+    # is args.tasks.dataset_split.value; load both from args.hparams.dir_path_load_from_disk/<dataset_name>/<split>
+    # with load_from_disk if set, else from the Hub (task.dataset_name, config task.dataset_config). Calls
+    # task.get_info_from_dataset(query_dataset), optionally truncates both to the first select_n_examples rows, and
+    # returns (support_dataset, query_dataset).
     support_split_name = getattr(task, f"{args.tasks.dataset_split.value}_support_split_name")
     query_split_name = getattr(task, f"{args.tasks.dataset_split.value}_query_split_name")
 
@@ -74,9 +86,16 @@ def load_query_and_support_datasets(task, args):
 def add_vision_encoder_embeddings_query_and_support_datasets(
     task, args, support_dataset, query_dataset, vision_encoder, vision_encoder_processor
 ):
+    # [FUNCTION DOC] When shots are used (num_shots != 0) with a non-random selection mode, add a "vision_encoder_embeddings"
+    # column (L2-normalised CLIP image features, float32) to both datasets via batched map (cached through a
+    # fingerprint including the encoder name) and also return the support embeddings as a numpy array.
+    # Returns (support_dataset, query_dataset, support_embeddings or None).
     rng = np.random.default_rng(seed=args.hparams.seed)
 
     def compute_vision_embds(examples: Dict) -> Dict:
+        # [FUNCTION DOC] HELPER: batched map function. Converts images to RGB (for multi-image tasks, one image column is picked at
+        # random per example with a seeded numpy generator), runs the CLIP processor and get_image_features without
+        # gradients, L2-normalises and stores the embeddings in examples["vision_encoder_embeddings"]. Returns the batch.
         with torch.no_grad():
             if hasattr(task, "image_column_names"):
                 images = []
@@ -128,6 +147,9 @@ def add_vision_encoder_embeddings_query_and_support_datasets(
 def build_dataloader(
     task, model, args, support_dataset, query_dataset, support_dataset_vision_encoder_embeddings, accelerator
 ):
+    # [FUNCTION DOC] Create the task's data collator (support set, support embeddings, num_shots, shot selection mode, prompt
+    # template id, model) and a DataLoader over the query dataset with a non-shuffling DistributedSampler
+    # (per-process shard; padded with repeats so all ranks get equal counts) and batch size batch_size_per_gpu_dl.
     prompt_template_id = get_prompt_template_id(args, task)
     data_collator = task.get_data_collator(
         support_dataset=support_dataset,
@@ -156,6 +178,9 @@ def build_dataloader(
 
 
 def _get_datasets(task, args, vision_encoder, vision_encoder_processor):
+    # [FUNCTION DOC] HELPER: load datasets, add vision-encoder embeddings, then make sure the query dataset has a string "id"
+    # column (rename task.id_column_name to "id", or add a 0..N-1 range column when no id column is declared).
+    # Returns (support_dataset, query_dataset, support_embeddings).
     support_dataset, query_dataset = load_query_and_support_datasets(task, args)
     (
         support_dataset,
@@ -173,6 +198,15 @@ def _get_datasets(task, args, vision_encoder, vision_encoder_processor):
 
 
 def in_contexter(task, accelerator, model, args):
+    # [FUNCTION DOC] Evaluate one task with the in-context protocol. Inputs: task instance, accelerator, model (prepared) and the
+    # Parameters args. Loads the CLIP encoder (through a throw-away Accelerator) only when RICES-like shots are
+    # needed; the main process prepares datasets first (filling the datasets cache), then the other ranks.
+    # Returns None early if args.hparams.only_load_datasets. Otherwise instantiates the metric class
+    # custom_metrics.<task.metric_name> with a shared random experiment_id, process info, save_generations and
+    # task.metric_kwargs; for each DataLoader batch, split into mini-batches of batch_size_per_gpu and call
+    # task.add_batch_metric with the model (plus generation params for open-ended VQA/captioning tasks). Raises
+    # ValueError for unsupported task class names. Non-main ranks compute first, then the main rank; returns the
+    # main process's score dict (None on other ranks).
     vision_encoder, vision_encoder_processor, dummy_accelerator = None, None, None
     if (args.tasks.in_context_params.shot_selection_mode != ShotSelectionMode.random) and (
         args.tasks.in_context_params.num_shots != 0

@@ -1,3 +1,5 @@
+# [MODULE DOC] Deprecated companion script: reads a generation dump JSON (--gen_file) produced by launch_generation.py and
+# logs a W&B table (image + one text column per model), then deletes the dump.
 import json
 import logging
 import os
@@ -16,12 +18,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Parameters(Serializable):
+    # [CLASS DOC] CLI options: gen_file (path to the JSON dump).
     """base options."""
 
     gen_file: str = ""
 
     @classmethod
     def parse(cls):
+        # [FUNCTION DOC] Classmethod: parse sys.argv into Parameters.
         parser = ArgumentParser()
         parser.add_arguments(cls, dest="parameters")
         args = parser.parse_args()
@@ -32,6 +36,8 @@ class Parameters(Serializable):
 def log_generation(
     wandb_config, wandb_name, wandb_project, wandb_entity, all_texts, image_paths, model_names, image_size=224
 ):
+    # [FUNCTION DOC] Resize every image to image_size x image_size (bicubic, RGB), start a W&B run (config, project, entity, name),
+    # fill a table with the image and repr of each model's text for that image, and log it. Network side effects.
     image_size = image_size
     image_transform = transforms.Compose(
         [
@@ -60,6 +66,9 @@ def log_generation(
 
 
 def main():
+    # [FUNCTION DOC] Parse args, load the JSON dump, call log_generation with its fields, then remove the dump file and log.
+    # KNOWN ISSUE: os.remove is given the loaded dict instead of args.gen_file (TypeError), and the final log message
+    # lacks the f-string prefix.
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",

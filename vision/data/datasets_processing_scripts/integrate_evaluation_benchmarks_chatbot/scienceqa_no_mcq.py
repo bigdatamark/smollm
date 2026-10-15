@@ -1,3 +1,8 @@
+# [MODULE DOC] Builds the image subset of ScienceQA in "no MCQ" format (answers scored as texts instead of letters) and
+# pushes train/validation/test to HuggingFaceM4/ScienceQAImg_Modif_NoMCQ. Columns: image, context (lecture,
+# question and hint, stripped), label (correct choice text as ClassLabel over all choice texts plus WRONG_LABEL),
+# tested_labels (choices padded with WRONG_LABEL to the global max number of choices). Rows without image are
+# dropped. Runs at import time.
 from copy import deepcopy
 
 import datasets
@@ -14,6 +19,8 @@ WRONG_LABEL = "cfghjvkljhgjffxghckjvlbknlmjghfdfgfghggdfxsdgfg"
 
 
 def find_max_num_choices_and_all_tested_labels(all_splits):
+    # [FUNCTION DOC] HELPER: loads every split in all_splits and returns (max number of choices over all questions, unordered
+    # de-duplicated list of all choice texts plus WRONG_LABEL). Downloads the dataset if needed.
     max_num_choices = []
     all_tested_labels = []
     for split in all_splits:
@@ -27,11 +34,17 @@ def find_max_num_choices_and_all_tested_labels(all_splits):
 
 
 def create_ds_scienceqa(split, max_num_choices, all_tested_labels):
+    # [FUNCTION DOC] Build one split. Inputs: split name, max_num_choices (padding length), all_tested_labels (ClassLabel names).
+    # Maps map_transform_scienceqa with the new features, keeps image/context/label/tested_labels, filters out rows
+    # without image and returns the Dataset.
     """`split` is "train", "validation" or "test"."""
     ds_scienceqa = load_dataset(DS_NAME, split=split)
 
     #
     def map_transform_scienceqa(example):
+        # [FUNCTION DOC] dataset.map function: context = optional "Lecture: ...\n" + "Question: ...\n" + optional "Hint: ...", stripped;
+        # tested_labels = choices padded with WRONG_LABEL to max_num_choices; label = choice text at the answer index.
+        # Returns the mutated example.
         question = example["question"]
         lecture = example["lecture"]
         hint = example["hint"]
@@ -51,6 +64,7 @@ def create_ds_scienceqa(split, max_num_choices, all_tested_labels):
 
     #
     def filter_no_image_scienceqa(example):
+        # [FUNCTION DOC] HELPER: dataset.filter predicate returning False when example["image"] is None, True otherwise.
         if example["image"] is None:
             return False
         return True

@@ -1,3 +1,8 @@
+# [MODULE DOC] One-off script that builds the English-Wikipedia (enwiki-v2) validation sets and uploads them to the Hub.
+# Side effects at import time: `s5cmd sync` of s3://m4-datasets/enwiki/enwiki-v2/valid/* into
+# /scratch/enwiki/validation; loads shard_0 and pushes it (split "valid", private) to
+# HuggingFaceM4/enwiki-v2_valid-Sample; then loads shard_0..shard_9, concatenates them and pushes the result
+# (split "valid", private) to HuggingFaceM4/enwiki-v2_valid. Prints each dataset. No functions.
 import os
 
 from datasets import concatenate_datasets, load_from_disk

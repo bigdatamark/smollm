@@ -1,3 +1,9 @@
+# [MODULE DOC] Builds a "no multiple-choice-letters" MMBench variant and pushes it to HuggingFaceM4/MMBench_modif_chatbot_NoMCQ.
+# Instead of letters, the model is scored on the answer texts: each example has "context" (question plus
+# optional hint), "tested_labels" (the choice texts, padded to 4 with the dummy WRONG_LABEL string) and "label"
+# (the correct choice text, ClassLabel over every choice text seen in both splits plus WRONG_LABEL; None for
+# test). Splits: validation (dev TSV) and test. Re-loads the pushed repo at the end as a smoke check.
+# Runs at import time.
 """
 srun --pty --cpus-per-task=96 --mem-per-cpu=20G --partition=hopper-prod bash -i
 conda activate shared-m4
@@ -26,6 +32,9 @@ REPO_ID = "HuggingFaceM4/MMBench_modif_chatbot_NoMCQ"
 
 
 def find_max_num_choices_and_all_tested_labels(all_splits):
+    # [FUNCTION DOC] HELPER: read the TSV of each split in all_splits and collect the unique set of non-empty choice texts from
+    # columns A-D plus WRONG_LABEL. Returns (max_num_choices, all_tested_labels) where max_num_choices is hard-coded
+    # to 4 and all_tested_labels is an unordered de-duplicated list (order varies between runs).
     all_tested_labels = []
     for split in all_splits:
         data_frame_mmbench = pd.read_csv(PATH_MMBENCH_DATA[split], sep="\t", header=0)
@@ -39,6 +48,9 @@ def find_max_num_choices_and_all_tested_labels(all_splits):
 
 
 def create_ds_mmbench(split, max_num_choices, all_tested_labels):
+    # [FUNCTION DOC] Build one split. Inputs: split ("validation"/"test"), max_num_choices (int, pad length), all_tested_labels
+    # (class names for the label ClassLabel). Reads the TSV, maps map_transform_mmbench (48 processes) with features
+    # image/context/label/tested_labels, keeps only those columns and returns the Dataset.
     """`split` is "validation" or "test"."""
     #
     data_frame_mmbench = pd.read_csv(PATH_MMBENCH_DATA[split], sep="\t", header=0)
@@ -46,6 +58,9 @@ def create_ds_mmbench(split, max_num_choices, all_tested_labels):
 
     #
     def map_transform_mmbench(example):
+        # [FUNCTION DOC] dataset.map function: decode the base64 image; context = "Question: q\nHint: h" when a hint exists else the
+        # bare question; tested_labels = non-empty choices A-D padded with WRONG_LABEL up to max_num_choices; label =
+        # text of the choice named by the "answer" letter on validation, None on test. Returns the mutated example.
         example["image"] = Image.open(BytesIO(base64.b64decode(example["image"])))
         #
         question = example["question"]

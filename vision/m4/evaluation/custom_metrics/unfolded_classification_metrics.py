@@ -1,3 +1,7 @@
+# [MODULE DOC] evaluate.Metric for classification evaluated in "unfolded" form: one input row per (example, candidate class)
+# with the model score of that class; predictions are aggregated per example (argmax). Supports accuracy,
+# mean per-class accuracy, per-bucket accuracy, F1, NDCG, ROC-AUC, cross-entropy ("KL") and entropy, plus a
+# server-results dump when labels are hidden (-1).
 import logging
 from enum import Enum
 from typing import List
@@ -16,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class ClassifMetrics(Enum):
+    # [CLASS DOC] Enum of supported metric names (values are the result keys, except ROC_AUC -> roc_auc_score).
     KL_DISTRIBUTION = "kl_distribution"
     KL_MEAN = "kl_mean"
     ENTROPY_DISTRIBUTION = "entropy_distribution"
@@ -30,6 +35,7 @@ class ClassifMetrics(Enum):
 
 
 class UnfoldedClassificationMetrics(evaluate.Metric):
+    # [CLASS DOC] Metric object built with metrics (list of ClassifMetrics). See the existing docstring for the row layout.
     """
     For each example, there are N classes. One line is the pair (example,class) which means
     there are N lines for each example.
@@ -40,6 +46,7 @@ class UnfoldedClassificationMetrics(evaluate.Metric):
     """
 
     def __init__(self, metrics: List[ClassifMetrics], **kwargs):
+        # [FUNCTION DOC] Store metrics; raises ValueError if metrics is None.
         super().__init__(**kwargs)
         self.metrics = metrics
 
@@ -47,6 +54,7 @@ class UnfoldedClassificationMetrics(evaluate.Metric):
             raise ValueError("`metrics` must be specified")
 
     def _info(self):
+        # [FUNCTION DOC] HELPER: evaluate.Metric hook returning MetricInfo (empty description/citation) with the input features: predictions (float), example_ids (str), true_labels (int), tested_labels (int), relevance_scores (float), buckets (str).
         return evaluate.MetricInfo(
             description=_DESCRIPTION,
             citation=_CITATION,
@@ -76,6 +84,19 @@ class UnfoldedClassificationMetrics(evaluate.Metric):
         sample_weight=None,
         tol=0.001,
     ):
+        # [FUNCTION DOC] Group rows by example id into lists of scores, tested labels and relevance scores plus the true label and
+        # bucket (a repeated tested label is a distributed duplicate: warning, asserts same true label and bucket).
+        # If true_labels[0] == -1 and DEFAULT_TO_SERVER_RESULTS is requested, return {"server_results": list of
+        # {"id", "label": argmax tested label}}. Otherwise compute top-1 predictions and:
+        # accuracy (sklearn accuracy_score with normalize/sample_weight), mean_per_class_accuracy (mean of per-true-class
+        # accuracies), per_bucket_accuracy (dict bucket -> accuracy) and std_per_bucket_accuracy, f1_score (sklearn
+        # default binary average), NDCG (sklearn ndcg_score of relevance scores vs prediction scores), kl_distribution /
+        # kl_mean (actually -log softmax probability of the true label, i.e. cross-entropy), entropy_distribution /
+        # entropy_mean (entropy of softmaxed scores), roc_auc_score (sklearn macro ROC-AUC). tol is unused.
+        # Returns the results dict.
+        # KNOWN ISSUE: requesting F1_SCORE without one of ACCURACY/MEAN_PER_CLASS/ROC_AUC/PER_BUCKET/NDCG raises
+        # NameError since references/top1_predictions are only built for those metrics.
+        # KNOWN ISSUE: ROC_AUC is computed from hard top-1 labels instead of scores, so it is not a real ROC-AUC.
         data_per_id = {}
         if buckets is None:
             buckets = [None] * len(example_ids)
@@ -244,5 +265,6 @@ class UnfoldedClassificationMetrics(evaluate.Metric):
 
 
 def find_positions(array_to_check, item_to_find):
+    # [FUNCTION DOC] HELPER: return the indices (numpy array) where array_to_check equals item_to_find.
     indices = np.where(array_to_check == item_to_find)[0]
     return indices

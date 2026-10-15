@@ -1,3 +1,8 @@
+# [MODULE DOC] evaluate.Metric for open-ended (generative) VQA: VQA soft accuracy (with in-house or official GT-Vision-Lab
+# normalisation, on full answer or first word), MMMU-style accuracy (answer extraction from free text, optionally
+# bucketed by sub-category), relaxed accuracy (5% numeric tolerance, ChartQA style), and server-format dumps of
+# generations (generic, MM-Vet, LLaVA-in-the-wild). MCQ_POSSIBLE_CHOICES lists the letters A-I that identify
+# multiple-choice answers.
 import logging
 from enum import Enum
 from typing import List
@@ -29,6 +34,10 @@ MCQ_POSSIBLE_CHOICES = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
 
 
 class OEVQAMetrics(Enum):
+    # [CLASS DOC] Enum of metric names (values are result keys): FIRST_WORD_VQA_ACCURACY, OE_VQA_ACCURACY,
+    # OE_MMMU_STYLE_VQA_ACCURACY, OE_MMMU_STYLE_PER_BUCKET_ACCURACY, OE_ONLY_MMMU_STYLE_VQA_ACCURACY (MCQ letters not
+    # special-cased), OE_ONLY_MMMU_STYLE_PER_BUCKET_ACCURACY, OE_RELAXED_VQA_ACCURACY, GT_VISION_LAB_FIRST_WORD_*,
+    # GT_VISION_LAB_OE_VQA_ACCURACY, and DEFAULT_TO_SERVER_RESULTS(_MMVET/_LLAVA_WILD) dump modes.
     FIRST_WORD_VQA_ACCURACY = "first_word_vqa_accuracy"
     OE_VQA_ACCURACY = "oe_vqa_accuracy"
     OE_MMMU_STYLE_VQA_ACCURACY = "oe_mmmu_style_vqa_accuracy"
@@ -44,9 +53,12 @@ class OEVQAMetrics(Enum):
 
 
 class OpenEndedVQAMetrics(evaluate.Metric):
+    # [CLASS DOC] Metric object built with metrics (list of OEVQAMetrics) and save_generations (bool). One input row per
+    # question: example id, generated text, list of reference answers and a bucket string.
     """This class takes care of computing the metrics listed in `metrics`."""
 
     def __init__(self, metrics: List[OEVQAMetrics], save_generations: bool, **kwargs):
+        # [FUNCTION DOC] Store metrics/save_generations and create a VQANormalizationGtVisionLab; raises ValueError if metrics is None.
         super().__init__(**kwargs)
         self.metrics = metrics
         self.save_generations = save_generations
@@ -56,6 +68,7 @@ class OpenEndedVQAMetrics(evaluate.Metric):
             raise ValueError("`metrics` must be specified")
 
     def _info(self):
+        # [FUNCTION DOC] HELPER: evaluate.Metric hook returning MetricInfo (empty description/citation) with the input features: example_ids (str), generated_texts (str), answers (list of str), buckets (str).
         return evaluate.MetricInfo(
             description=_DESCRIPTION,
             citation=_CITATION,
@@ -71,6 +84,10 @@ class OpenEndedVQAMetrics(evaluate.Metric):
         )
 
     def _compute_vqa_accuracy(self, generated_texts_unique, answers_unique, normalize_text_fn):
+        # [FUNCTION DOC] HELPER: VQA soft accuracy. For each (generation, answers) pair, both are normalised with normalize_text_fn.
+        # With a single answer (e.g. GQA): exact-match 0/1 for the full text and for its first word. Otherwise the
+        # standard leave-one-out formula: mean over held-out answers of min(1, matches among the others / 3).
+        # Returns (first_word_scores, full_text_scores), lists of floats.
         first_word_vqa_accuracy_scores = []
         oe_accuracy_scores = []
         for generated_text, answers_ in zip(generated_texts_unique, answers_unique):
@@ -107,6 +124,11 @@ class OpenEndedVQAMetrics(evaluate.Metric):
         return first_word_vqa_accuracy_scores, oe_accuracy_scores
 
     def _compute_mmmu_style_vqa_accuracy(self, generated_texts_unique, answers_unique, normalize_text_fn, accept_mcq):
+        # [FUNCTION DOC] HELPER: MMMU-style 0/1 accuracy per question. If accept_mcq and the first answer is a letter in
+        # MCQ_POSSIBLE_CHOICES, the whole normalised generation is the only candidate and must equal an answer exactly;
+        # otherwise candidates come from parse_open_response_mmmu. Answers are normalised with normalize_text_fn
+        # (normalize_str_mmmu: numbers become floats rounded to 2 decimals). Correct if, for any answer, a string answer
+        # is a substring of a string candidate, or a float answer equals a float candidate. Returns list of 0/1.
         oe_accuracy_scores = []
         for generated_text, answers in zip(generated_texts_unique, answers_unique):
             is_mcq = answers[0] in MCQ_POSSIBLE_CHOICES and accept_mcq
@@ -145,6 +167,12 @@ class OpenEndedVQAMetrics(evaluate.Metric):
         return oe_accuracy_scores
 
     def _compute_relaxed_vqa_accuracy(self, generated_texts_unique, answers_unique, normalize_text_fn):
+        # [FUNCTION DOC] HELPER: relaxed accuracy (Pix2Struct/ChartQA paper): after normalize_text_fn, a numeric answer is matched if the
+        # numeric generation is within 5% relative error (exact equality when the answer is 0); non-numeric answers need
+        # an exact string match. Stops at the first numeric answer when the generation is numeric. Returns list of
+        # bool/0/1 scores.
+        # KNOWN ISSUE: the relative error is divided by the signed answer, so for a negative gold answer the ratio is
+        # negative and every numeric prediction counts as correct.
         """
         From https://aclanthology.org/2022.findings-acl.177.pdf
         We use a relaxed accuracy measure for the numeric answers to allow a minor inaccuracy that may result from the automatic data extraction process. We consider an answer to be correct if it is within 5% of the gold answer. For non-numeric answers, we still need an exact match to consider an answer to be correct.
@@ -170,6 +198,17 @@ class OpenEndedVQAMetrics(evaluate.Metric):
         return oe_accuracy_scores
 
     def _compute(self, example_ids, generated_texts, answers, buckets):
+        # [FUNCTION DOC] De-duplicate rows by example id (Rows repeated by distributed padding (same example id) are kept once; differences are only logged.) and build per-unique-id lists of generations, answers and
+        # buckets (iteration order of set(example_ids)).
+        # Server dumps: if save_generations, or the first answers are None/[""] with DEFAULT_TO_SERVER_RESULTS,
+        # results["server_results"] = list of {"question_id", "answer"} (raw generation for MMMU-style metrics, otherwise
+        # GT-Vision-Lab-normalised); return early in the latter case. DEFAULT_TO_SERVER_RESULTS_MMVET returns a mapping
+        # id -> generation; DEFAULT_TO_SERVER_RESULTS_LLAVA_WILD returns the list form; both return early.
+        # Then, for each requested metric: GT-Vision-Lab VQA accuracy (first word / full, plus std and 95% margin of
+        # error for the full one), MMMU-style per-bucket accuracy (bucket strings "col=a/col2=b"; each (column, value)
+        # gets accuracy and std; raises ValueError if both per-bucket variants are requested), MMMU-style accuracy with
+        # and without MCQ handling, relaxed accuracy (normalisation = strip dots), and in-house VQA accuracy
+        # (first word / full). Returns the results dict with keys equal to the enum values.
         data_per_id = {}
         for ex_id, gen_text, ans, bucket in zip(example_ids, generated_texts, answers, buckets):
             # If condition is a dirty trick to handle the case of distributed evaluation where some instances can be

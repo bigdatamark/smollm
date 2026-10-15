@@ -1,3 +1,7 @@
+# [MODULE DOC] Builds the MM-Vet evaluation dataset and pushes it to HuggingFaceM4/MM_VET_modif.
+# Reads mm-vet.json (mapping question_id -> {imagename, question, answer}) from /fsx/hugo/MMVET, stores
+# images re-encoded as PNG bytes, and pushes a DatasetDict with one "test" split
+# (columns image, question, answer, question_id). Runs at import time with a tqdm progress bar.
 """
 srun --pty --cpus-per-task=96 --mem-per-cpu=20G --partition=hopper-prod bash -i
 conda activate shared-m4
@@ -32,6 +36,8 @@ REPO_ID = "HuggingFaceM4/MM_VET_modif"
 
 
 def convert_img_to_bytes(img_path, format):
+    # [FUNCTION DOC] HELPER: open the image at img_path with PIL, re-encode it in the given PIL format name (here png) into an
+    # in-memory buffer and return the encoded bytes.
     img = Image.open(img_path)
     buffer = BytesIO()
     img.save(buffer, format=format)

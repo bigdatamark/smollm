@@ -1,3 +1,5 @@
+# [MODULE DOC] Deprecated VGPT2-era generation helper: generates text for a list of images with several checkpoints and
+# returns data meant to be logged to Weights & Biases. DEVICE is cuda if available.
 import logging
 import os
 from pathlib import Path
@@ -14,6 +16,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def get_model(model_path):
+    # [FUNCTION DOC] HELPER: load VGPT2LMHeadModel from <model_path>/unwrapped_model/pytorch_model.bin with its config.json.
     opt_step_dir = Path(model_path)
     model_file = opt_step_dir / "unwrapped_model/pytorch_model.bin"
     model_config_file = opt_step_dir / "unwrapped_model/config.json"
@@ -32,6 +35,11 @@ def generate_image_conditioned_text_from_pretrained(
     image_size=224,
     num_images_per_ex=1,
 ):
+    # [FUNCTION DOC] For each checkpoint path (name derived from its last two path components), load the model and a tokenizer
+    # built from tokenizer_infos (name, added tokens, special tokens, params) and generate from the same prompt for
+    # each image (transformed to image_size, repeated num_images_per_ex times), banning EOS and stopping at the last
+    # additional special token, up to max_len total tokens. Returns (wandb_config dict, wandb run name,
+    # {model_name: list of decoded text lists per image}, image paths as strings, model names).
     logger.info(f"DEVICE: {DEVICE}")
     # Model names are gathered based on the paths fed. Therefore your model path needs to have
     # the following structure for this to make sense: .../model_name/opt_step-xxxx

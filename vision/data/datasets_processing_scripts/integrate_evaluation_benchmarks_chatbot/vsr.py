@@ -1,3 +1,7 @@
+# [MODULE DOC] Builds a chatbot-style VSR (Visual Spatial Reasoning, zero-shot split of cambridgeltl/vsr_zeroshot) dataset and
+# pushes train/validation/test (private) to HuggingFaceM4/VSR_chatbot. Questions are random templates from
+# prompts_vsr (imported from the SFT builder) filled with the caption plus "\nAnswer yes or no."; answers are
+# ClassLabel ["No.", "Yes."]. Images come from local /fsx/hugo/coco/train2017. Runs at import time (96 procs).
 import os
 import random
 
@@ -19,6 +23,9 @@ FEATURES = datasets.Features(
 
 
 def map_transform_vsr(example):
+    # [FUNCTION DOC] dataset.map function: load the COCO image as JPEG bytes, build the question from a random prompt template and
+    # the caption, and set answer "Yes." if label == 1 else "No.". On any exception (e.g. missing image file) sets
+    # image, question and answer to None so the row is later filtered out. Returns the mutated example.
     try:
         path_image = os.path.join("/fsx/hugo/coco/train2017/", os.path.basename(example["image"]))
         image_bytes = convert_img_to_bytes(img_path=path_image, format="JPEG")
@@ -36,6 +43,8 @@ def map_transform_vsr(example):
 
 
 def load_vsr(split):
+    # [FUNCTION DOC] Load one split of cambridgeltl/vsr_zeroshot, map map_transform_vsr (keeping only image/question/answer,
+    # casting to FEATURES), drop rows whose image is None, and return the Dataset.
     ds_vsr = load_dataset("cambridgeltl/vsr_zeroshot", split=split)
     columns_to_keep = ["image", "question", "answer"]
     columns_to_remove = [c_n for c_n in ds_vsr.column_names if c_n not in columns_to_keep]

@@ -1,3 +1,8 @@
+# [MODULE DOC] Script creating small class-balanced "-Sample" versions of the VGPT2 classification evaluation datasets and
+# pushing them (private) to HuggingFaceM4/<name>[-<config>]-Sample on the Hub, skipping repos listed in
+# ALREADY_PUSHED_DATASETS.
+# KNOWN ISSUE: tasks no longer define test_split_name/train_split_name (they use
+# default_query_split_name/default_support_split_name etc.), so this raises AttributeError with current tasks.
 import random
 
 from datasets import concatenate_datasets, load_dataset
@@ -33,6 +38,10 @@ ALREADY_PUSHED_DATASETS = {
 
 
 def main():
+    # [FUNCTION DOC] For each VGPT2 in-context task: derive the Sample repo id (NotImplementedError for non-HuggingFaceM4 namespaced
+    # datasets), and unless already pushed, build and push the sampled test split and train split.
+    # KNOWN ISSUE: the task list includes open-ended VQA and captioning tasks, which have no label_column_name /
+    # ClassLabel and would fail in create_sample_single_label_dataset.
     model_name = "gpt2"  # Not used but necessary to load the task
     tokenizer_name = "t5-base"  # Not used but necessary to load the task
 
@@ -69,6 +78,11 @@ def main():
 
 
 def create_sample_single_label_dataset(task, split):
+    # [FUNCTION DOC] Load the split; if larger than 50,000 rows, subsample 50,000 indices (random.choices, i.e. with replacement,
+    # unseeded); then keep the first num_ex_per_class examples of each class of the label ClassLabel, where
+    # num_ex_per_class = 3, or MIN_DATASET_SIZE / num_classes when 3 per class would give < 100 examples (warns when a
+    # class has fewer). Returns the concatenation (grouped by class). Prints diagnostics.
+    # KNOWN ISSUE: sampling with replacement can duplicate rows in the sample.
     dataset_split = load_dataset(task.dataset_name, name=task.dataset_config, split=split, use_auth_token=True)
     print("********************************************************")
     print(task.__class__.__name__)

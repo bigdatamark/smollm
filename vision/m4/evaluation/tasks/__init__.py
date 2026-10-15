@@ -1,3 +1,9 @@
+# [PACKAGE DOC] Registry of evaluation task classes. Re-exports the base task classes and Predictor, and imports every concrete
+# task class (captioning, classification, classification-VQA, image-caption matching, open-ended VQA, perplexity
+# ...) from the per-model evaluation modules (idefics, vgpt2, vllama3, vmistral, ...) so they can be looked up by
+# name with getattr (see launch.py). Also defines VGPT2_TASKS and VGPT2_SAMPLE_TASKS: mappings
+# Predictor.in_contexter -> list of VGPT2 task classes (full and "Sample" subsets), used by tests, by
+# launch.py for do_tasks == ["all"], and by the sample-dataset scripts.
 from m4.evaluation.tasks.base import (
     BaseTask,
     BaseTaskClassification,

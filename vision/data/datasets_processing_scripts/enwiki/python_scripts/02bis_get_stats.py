@@ -1,3 +1,7 @@
+# [MODULE DOC] Diagnostic script comparing, per shard (0..67 except 34), the number of complete examples in the v1 dataset
+# (...-with-images-full-v1) against the v2 re-extraction (...-full-v1-v2, optional). Prints a line when shard 36
+# is reached, when v1 has more examples than a non-empty v2, when v2 has fewer than 19,000 examples, and when no
+# v2 exists. Configures logging but only prints. Loads datasets from DATA_DIR on local disk; no functions.
 import logging
 from pathlib import Path
 

@@ -1,3 +1,9 @@
+# [MODULE DOC] Builds the Q-Bench (LLVisionQA, low-level visual perception) dataset and pushes it (private) to
+# HuggingFaceM4/QBench_Modif with validation (dev) and test splits. Each example has image (JPEG bytes),
+# question, label (the correct answer text; None for test) and tested_labels (candidate answer texts). Since the
+# number of candidates varies, every tested_labels list is padded with the nonsense WRONG_LABEL string up to the
+# maximum candidate count; label is a ClassLabel over the union of all candidate texts plus WRONG_LABEL.
+# Runs at import time.
 """
 srun --pty --cpus-per-task=96 --mem-per-cpu=20G --partition=hopper-prod bash -i
 conda activate shared-m4
@@ -28,6 +34,8 @@ REPO_ID = "HuggingFaceM4/QBench_Modif"
 
 
 def convert_img_to_bytes(img_path, format):
+    # [FUNCTION DOC] HELPER: open the image at img_path with PIL, re-encode it in the given PIL format name (here JPEG) into an
+    # in-memory buffer and return the encoded bytes.
     img = Image.open(img_path)
     buffer = BytesIO()
     img.save(buffer, format=format)
@@ -37,6 +45,11 @@ def convert_img_to_bytes(img_path, format):
 
 
 def create_dict_qbench(split):
+    # [FUNCTION DOC] Read the Q-Bench JSON for split and return a column dict {"image", "question", "label", "tested_labels"}:
+    # question text, correct_ans (validation) or None (test), candidates list, and image as {"bytes", "path": None}
+    # loaded from COMMON_PATH_IMAGES/img_path. Raises ValueError for any other split.
+    # KNOWN ISSUE: the docstring lists "train" as a valid split, but PATHS_JSON_QBENCH has no "train" entry
+    # (KeyError) and the code would raise ValueError for it anyway.
     """`split` is "train", "validation" or "test"."""
     dict_qbench = {"image": [], "question": [], "label": [], "tested_labels": []}
     #

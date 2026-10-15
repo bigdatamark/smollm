@@ -1,3 +1,8 @@
+# [MODULE DOC] Step 04 of the enwiki pipeline: collects the URLs of images that could not be found in WIT.
+# For each shard 0..67 (except EXCLUDE_SHARD_IDS = [1, 34]), loads the incomplete-examples dataset, maps
+# get_remaining_urls in batches of 100 with NUM_PROC=16 processes, and accumulates the unique URLs in a set;
+# writes them newline-separated (unordered) to DATA_DIR/remaining_urls_v2.txt. Logs progress at INFO.
+# KNOWN ISSUE: the comment on EXCLUDE_SHARD_IDS says a single corrupted shard, but shard 1 is also excluded.
 import logging
 from pathlib import Path
 
@@ -34,6 +39,9 @@ logger.setLevel(logging.INFO)
 
 
 def get_remaining_urls(examples):
+    # [FUNCTION DOC] HELPER: batched dataset.map function. Input: batch with "images_urls" and "images" (lists of per-example
+    # lists). Returns {"remaining_urls": flat list of every URL whose paired image is None}; the caller removes all
+    # original columns, so the output dataset has one row per missing URL.
     remaining_urls = [
         img_url
         for img_urls, imgs in zip(examples["images_urls"], examples["images"])

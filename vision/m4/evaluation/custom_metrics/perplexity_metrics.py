@@ -1,3 +1,4 @@
+# [MODULE DOC] evaluate.Metric averaging per-example perplexities computed by the evaluator.
 import logging
 from enum import Enum
 from typing import List
@@ -14,13 +15,16 @@ logger = logging.getLogger(__name__)
 
 
 class MetricsPerplexity(Enum):
+    # [CLASS DOC] Enum with the single metric PERPLEXITY.
     PERPLEXITY = "perplexity"
 
 
 class PerplexityMetrics(evaluate.Metric):
+    # [CLASS DOC] Metric object built with metrics (list of MetricsPerplexity).
     """This class takes care of computing the metrics listed in `metrics`."""
 
     def __init__(self, metrics: List[MetricsPerplexity], **kwargs):
+        # [FUNCTION DOC] Store metrics; raises ValueError if metrics is None.
         super().__init__(**kwargs)
         self.metrics = metrics
 
@@ -28,6 +32,7 @@ class PerplexityMetrics(evaluate.Metric):
             raise ValueError("`metrics` must be specified")
 
     def _info(self):
+        # [FUNCTION DOC] HELPER: evaluate.Metric hook returning MetricInfo (empty description/citation) with the input features: example_ids (str), perplexities (float32).
         return evaluate.MetricInfo(
             description=_DESCRIPTION,
             citation=_CITATION,
@@ -41,6 +46,8 @@ class PerplexityMetrics(evaluate.Metric):
         )
 
     def _compute(self, example_ids, perplexities):
+        # [FUNCTION DOC] De-duplicate by example id (Rows repeated by distributed padding (same example id) are kept once; differences are only logged.) and, if PERPLEXITY is requested, return
+        # {"perplexity": arithmetic mean of the per-example perplexities}; otherwise an empty dict.
         data_per_id = {}
         for ex_id, perplexity in zip(example_ids, perplexities):
             # If condition is a dirty trick to handle the case of distributed evaluation where some instances can be

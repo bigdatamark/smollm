@@ -1,3 +1,8 @@
+# [MODULE DOC] Step 07: fills still-missing images of the incomplete enwiki examples from the downloaded-images dataset.
+# Loads the image dataset and the URL -> index JSON mapping produced by step 06; then for every shard 0..67 except
+# 34, loads the incomplete examples (v1-v2), keeps those with num_not_found > 0, calls m4's urls_to_images
+# (some_urls_are_already_retrieved=True) and saves complete (num_not_found == 0) and still-incomplete examples to
+# the "...-full-v2-v3" / "...-incomplete-v2-v3" datasets in the shard dir. Logs and prints counts. No functions.
 import json
 import logging
 from pathlib import Path

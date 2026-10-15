@@ -1,3 +1,6 @@
+# [MODULE DOC] Script converting saved MMBench test-set evaluation results (server_results from the evaluation JSONL) into
+# the Excel file expected by the MMBench evaluation server (columns index, A-D, question, prediction letter).
+# Paths and the dataset (HuggingFaceM4/MMBench, split test, id column "index") are hard-coded constants.
 import json
 import re
 
@@ -18,6 +21,7 @@ LABEL_TO_LETTER = {0: "A", 1: "B", 2: "C", 3: "D"}
 
 
 def list_of_dicts_to_dict_of_lists(list_of_dicts):
+    # [FUNCTION DOC] HELPER (unused here): turn a list of dicts into a dict of value lists per key.
     dict_of_lists = {}
     for item in list_of_dicts:
         for key, value in item.items():
@@ -28,6 +32,11 @@ def list_of_dicts_to_dict_of_lists(list_of_dicts):
 
 
 def load_annotations(path_to_generation_data):
+    # [FUNCTION DOC] Read the evaluation JSONL and take the first line whose task is the MMBench chatbot VMistral classification
+    # task; parse its "score" string with eval and keep "server_results", with model name ("<run>: <opt_step dir>")
+    # and opt step. Returns {"model_name", "data", "opt_step"} lists sorted by opt step (descending; one entry).
+    # KNOWN ISSUE: uses eval on file content (arbitrary code execution); raises IndexError if the path has no
+    # opt_step-N.
     annotations = []
     with open(path_to_generation_data, "r", encoding="utf-8") as file:
         for line in file:
@@ -60,7 +69,14 @@ def load_annotations(path_to_generation_data):
 
 
 def main():
+    # [FUNCTION DOC] Load the dataset and generations, map each predicted {"id", "label"} to its dataset row via the id column, and
+    # write a DataFrame with index, choices, question and prediction (label int -> letter) to output_path (needs
+    # openpyxl).
     def load_datasets_and_generations(dataset_name, path_to_test_eval_data, id_column_name=None):
+        # [FUNCTION DOC] HELPER: load the dataset split and generations and build a mapping str(id) -> row index (row number if no id
+        # column). Returns (dataset, generation_data, mapping).
+        # KNOWN ISSUE: any exception is swallowed and None is returned, which the caller then fails to unpack
+        # (TypeError hiding the real error).
         try:
             dataset = load_dataset(dataset_name, split=dataset_split)
 

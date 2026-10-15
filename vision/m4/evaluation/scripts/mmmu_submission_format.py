@@ -1,3 +1,6 @@
+# [MODULE DOC] Script building the MMMU test-server submission JSON (mapping question id -> answer) from saved evaluation
+# results: multiple-choice results (label index -> letter A-J) of the MMMU MCQ task and open-ended answers of the
+# MMMU open-ended task, merged and written to mmmu_test_results.json. Paths are hard-coded.
 import json
 
 
@@ -8,6 +11,8 @@ LABEL_TO_LETTER = {0: "A", 1: "B", 2: "C", 3: "D", 4: "E", 5: "F", 6: "G", 7: "H
 
 
 def list_of_dicts_to_single_dict(list_of_dicts):
+    # [FUNCTION DOC] HELPER: merge a list of dicts into one dict (later keys overwrite earlier ones). Despite the variable name, the
+    # values are not lists.
     dict_of_lists = {}
     for item in list_of_dicts:
         for key, value in item.items():
@@ -18,6 +23,9 @@ def list_of_dicts_to_single_dict(list_of_dicts):
 
 
 def load_annotations(path_to_generation_data, target_task):
+    # [FUNCTION DOC] Return {"task", "data"} for the first JSONL line whose task equals target_task, where data is the
+    # "server_results" entry of eval(score); empty dict if not found (caller then raises KeyError).
+    # KNOWN ISSUE: uses eval on file content.
     annotations = []
     with open(path_to_generation_data, "r", encoding="utf-8") as file:
         for line in file:
@@ -34,6 +42,7 @@ def load_annotations(path_to_generation_data, target_task):
 
 
 def main():
+    # [FUNCTION DOC] Build MCQ and open-ended {id: answer} dicts, merge them and dump them as JSON to output_path.
     mcq_server_results = load_annotations(
         path_to_test_eval_data, "MMMUMCQChatbotVMistralClassificationInContextAccWithKLAndEntropy"
     )

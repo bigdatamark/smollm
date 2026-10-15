@@ -1,3 +1,5 @@
+# [MODULE DOC] Linear-probe evaluator: projects images to features with a transformers model, fits the task's classifier
+# (scikit-learn based, implemented by the task) on the support split and scores predictions on the query split.
 import logging
 from functools import partial
 
@@ -15,6 +17,15 @@ logger = logging.getLogger(__name__)
 
 # NOTE: Accelerator is not used because linear probing is using scikit learn's logistic regression
 def linear_prober(task, accelerator, args):
+    # [FUNCTION DOC] Inputs: task, accelerator (unused), args. Loads transformers.<task.model_class> from args.tasks.model_name onto
+    # args.hparams.device; metric = custom_metrics.<metric_name>() if it exists else evaluate.load(metric_name). Only
+    # DatasetSplit.default is supported (ValueError otherwise). Loads the support split (optionally a random subset
+    # of select_n_examples, unseeded), maps task.project to add "features", and calls task.fit unless
+    # only_load_datasets (then returns None after loading the query split). Projects the query split (first
+    # select_n_examples), predicts with task.predict and returns metric.compute() on the labels.
+    # KNOWN ISSUE: launch.main calls every evaluator as evaluator(task, accelerator, model, args), which does not match
+    # this 3-argument signature (TypeError). It also maps with batch_size=hparams.mini_batch_size, a deprecated option
+    # that defaults to None (whole dataset as one batch).
     model_name = args.tasks.model_name
 
     model_class = getattr(transformers, task.model_class)

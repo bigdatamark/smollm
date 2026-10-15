@@ -1,3 +1,7 @@
+# [MODULE DOC] Static list of the VQA answer vocabulary (from Pythia's answers_vqa.txt): string_list is one newline-separated
+# string (first entry "<unk>") and _VQA_ANSWERS is derived from it; used by vgpt2 VQA in-context evaluation.
+# KNOWN ISSUE: _VQA_ANSWERS uses split() on any whitespace, so multi-word answers (e.g. "1 foot") are broken
+# into separate words and duplicates appear; splitting on newlines was presumably intended.
 # Very very dirty hack to get the answers for the VQA dataset
 # List is from https://dl.fbaipublicfiles.com/pythia/data/answers_vqa.txt
 # Ideally, we should put these answers inside `dataset.features` as labels of the vqa datasets (if that's actually possible, need to double check...)

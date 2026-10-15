@@ -1,3 +1,7 @@
+# [MODULE DOC] Step 06: gathers every *.tar under each subdirectory of enwiki-v2-downloaded-images and calls m4's
+# create_dataset_images_from_tar to build an images dataset (saved to enwiki-v2-ds-images, with temporary
+# datasets in enwiki-v2-ds-images-tmp) plus a JSON mapping URL -> row index (enwiki-v2-map-url-idx.json),
+# using 16 processes. No functions.
 import glob
 import os
 from pathlib import Path

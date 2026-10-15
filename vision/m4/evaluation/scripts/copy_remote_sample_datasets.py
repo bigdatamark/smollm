@@ -1,3 +1,9 @@
+# [MODULE DOC] Script that downloads the test and train splits of every VGPT2 "Sample" task dataset from the Hub and saves
+# them with save_to_disk under /gpfsscratch/rech/cnw/commun/local_datasets/<dataset_name>/<split> (for offline
+# evaluation via hparams.dir_path_load_from_disk). Tasks are instantiated with dummy model/tokenizer settings.
+# MIN_DATASET_SIZE, DEFAULT_NUM_EX_PER_CLASS and ALREADY_COPIED_DATASETS are unused.
+# KNOWN ISSUE: tasks no longer define test_split_name/train_split_name (they use
+# default_query_split_name/default_support_split_name etc.), so this raises AttributeError with current tasks.
 from pathlib import Path
 
 from datasets import load_dataset
@@ -20,6 +26,8 @@ save_dir = Path("/gpfsscratch/rech/cnw/commun/local_datasets")
 
 
 def load_and_save_dataset(task, split, save_dir):
+    # [FUNCTION DOC] Load task.dataset_name (config task.dataset_config) split split from the Hub with auth, print task/size info,
+    # and save it to save_dir/<dataset_name>/<split>.
     dataset_split = load_dataset(task.dataset_name, name=task.dataset_config, split=split, use_auth_token=True)
     print("********************************************************")
     print(task.__class__.__name__)

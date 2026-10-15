@@ -1,3 +1,7 @@
+# [MODULE DOC] CLI script that merges a training run's W&B history with evaluation results from JSONL files and logs the
+# combined per-opt-step rows into a run of the same name in the evaluation W&B project (creating or resuming it).
+# Args: --wandb_entity (huggingfacem4), --wandb_training_project (VLOOM), --wandb_eval_project (VLOOM-evals),
+# --evaluation_jsonl_files (one or more paths, required), --run_name_to_log (required). Network side effects.
 import argparse
 import json
 import logging
@@ -16,6 +20,7 @@ WANDB_TIMEOUT = 30
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: build and parse the argparse options described in the module doc; returns the Namespace.
     parser = argparse.ArgumentParser()
     parser.add_argument("--wandb_entity", type=str, default="huggingfacem4")
     parser.add_argument("--wandb_training_project", type=str, default="VLOOM")
@@ -34,6 +39,13 @@ def get_args():
 
 
 def main():
+    # [FUNCTION DOC] Fetch the unique (tag-filtered) training run and the optional existing eval run by name; read already logged
+    # eval rows by opt step; parse all JSONL evaluations (opt step from "opt_step-N" in model_name_or_path, metrics
+    # from eval(score), keys "<task>-<metric>", "_distribution" lists as wandb.Histogram, numbers as is, ValueError
+    # otherwise); merge them into the training history rows (filtered of gradients/parameters/private columns),
+    # adding rows for opt steps without training logs; check consistency with already logged values (ValueError on
+    # mismatch); then wandb.init the eval run and log every row.
+    # KNOWN ISSUE: scores are parsed with eval on file contents (arbitrary code execution).
     logging.basicConfig(
         level=logging.INFO,
         format=" - %(process)d - %(name)s - %(message)s",
@@ -46,6 +58,7 @@ def main():
     api = wandb.Api(timeout=WANDB_TIMEOUT)
 
     def filter_out_tags(tags):
+        # [FUNCTION DOC] HELPER: False if tags contain debug/failed/killed or any tag containing "job_id", else True.
         if "debug" in tags or "failed" in tags or "killed" in tags:
             return False
         for t in tags:
@@ -54,6 +67,8 @@ def main():
         return True
 
     def fetch_training_run(training_run_name):
+        # [FUNCTION DOC] HELPER: return the single run named training_run_name in the training project after tag filtering; asserts
+        # exactly one match.
         """
         Fetch training run. There can only be one corresponding training run.
         If not, double check the tags (killed, failed, etc.)
@@ -71,6 +86,8 @@ def main():
         return matching_runs[0]
 
     def fetch_evaluation_run(evaluation_run_name):
+        # [FUNCTION DOC] HELPER: return the run named evaluation_run_name in the eval project after tag filtering, or None; asserts at
+        # most one match.
         """
         Fetch evaluation run. There can only be one corresponding evaluation run at most.
         If not, double check the tags (killed, failed, etc.)
@@ -96,6 +113,7 @@ def main():
     logger.info("Successfully fetched the (potentially `None`) evaluation run.")
 
     def get_logged_eval_values(evaluation_run):
+        # [FUNCTION DOC] HELPER: mapping opt step -> full history row of the existing eval run (empty if evaluation_run is None).
         """
         If `evaluation_run` already exists, get the already logged values into a dictionary.
         """
@@ -111,6 +129,7 @@ def main():
     logger.info(f"LOGGED_VALUES: {already_logged_eval_values}")
 
     def get_evaluations_values_from_json():
+        # [FUNCTION DOC] HELPER: parse all evaluation JSONL files into a nested mapping opt step -> {"<task>-<metric>": value} (see main).
         """
         Load all values from the json file
         """
@@ -141,6 +160,7 @@ def main():
     logger.info(f"Evaluation values: {evaluation_metrics}")
 
     def filter_out_columns(row):
+        # [FUNCTION DOC] HELPER: drop keys containing "gradients/" or "parameters/" or starting with "_" from a history row.
         return {
             k: v
             for k, v in row.items()
@@ -148,6 +168,7 @@ def main():
         }
 
     def convert_training_run_to_dict(training_run):
+        # [FUNCTION DOC] HELPER: mapping opt step -> filtered history row for rows having num_opt_steps; asserts one row per opt step.
         """
         Get all the logged values from the training into a dictionary.
         """
@@ -213,6 +234,8 @@ def main():
                         raise ValueError("YOU SHOULD CHECK!!")
 
     def get_wandb_logger(evaluation_run):
+        # [FUNCTION DOC] HELPER: wandb.init in the eval project with the run name, reusing evaluation_run.id if it exists or a freshly
+        # generated id otherwise (resume=None, allow_val_change). Returns the run.
         """
         Init the wandb logger.
         """

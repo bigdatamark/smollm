@@ -1,3 +1,6 @@
+# [MODULE DOC] evaluate.Metric for image captioning (and short exact-match generation tasks): wraps the pycocoevalcap scorers
+# (BLEU-1..4, CIDEr, METEOR, ROUGE-L, SPICE; METEOR and SPICE need Java) after PTB tokenisation, plus an
+# in-house ExactMatch on the first generated word. Can also dump generations in COCO server format.
 import logging
 import string
 from enum import Enum
@@ -25,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 class ImageCaptioningMetrics(Enum):
+    # [CLASS DOC] Enum of metrics; value is the result key, except BLEU_4 whose value is the list of the four BLEU keys.
     BLEU_4 = ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4"]
     CIDER = "CIDEr"
     METEOR = "METEOR"
@@ -35,7 +39,10 @@ class ImageCaptioningMetrics(Enum):
 
 
 class ExactMatch:
+    # [CLASS DOC] Exact-match scorer comparing the first word of each generation with its references.
     def process_text(self, text, keep_only_first_word=False):
+        # [FUNCTION DOC] Lower-case and standardise whitespace; if keep_only_first_word, return only the first word after stripping
+        # punctuation/whitespace/special characters from words ("" if none).
         # For our case, we are stripping the punctuations to simplify the comparison as in generative settings we only want the last word without any `.` for example.
         # Note that this is not a fair comparison setting to the prior work which would predict the punctuations along with the word as the exact match is critical for OCR applications.
         text = text.lower()
@@ -54,6 +61,8 @@ class ExactMatch:
         return text
 
     def compute_score(self, generated_captions, reference_captions):
+        # [FUNCTION DOC] Fraction of generations whose processed first word equals one of the (lower-cased, whitespace-normalised)
+        # references; 0 for an empty input. Note references keep their punctuation.
         score = 0
         for gen_cap, ref_caps in zip(generated_captions, reference_captions):
             gen_cap = self.process_text(text=gen_cap, keep_only_first_word=True)
@@ -81,6 +90,8 @@ OTHER_SCORERS_MAP = {
 
 
 def instantiate_scorers(metrics, scorers_map):
+    # [FUNCTION DOC] HELPER: for each metric that is a key of scorers_map (metric -> (class, kwargs)), instantiate the class with
+    # its kwargs; returns a list of (scorer instance, metric.value) pairs.
     scorers = [
         (scorers_map[metric][0](**scorers_map[metric][1]), metric.value) for metric in metrics if metric in scorers_map
     ]
@@ -88,9 +99,13 @@ def instantiate_scorers(metrics, scorers_map):
 
 
 class UnfoldedImageCaptioningMetrics(evaluate.Metric):
+    # [CLASS DOC] Metric object built with metrics (list of ImageCaptioningMetrics) and save_generations; instantiates the
+    # pycocoevalcap scorers and other scorers once at construction.
     """This class takes care of computing the metrics listed in `metrics`."""
 
     def __init__(self, metrics: List[ImageCaptioningMetrics], save_generations: bool, **kwargs):
+        # [FUNCTION DOC] Store metrics/save_generations and instantiate scorers; raises ValueError if metrics is None (but only after
+        # instantiate_scorers would already have failed on None with a TypeError).
         super().__init__(**kwargs)
         self.metrics = metrics
         self.save_generations = save_generations
@@ -102,6 +117,7 @@ class UnfoldedImageCaptioningMetrics(evaluate.Metric):
             raise ValueError("`metrics` must be specified")
 
     def _info(self):
+        # [FUNCTION DOC] HELPER: evaluate.Metric hook returning MetricInfo (empty description/citation) with the input features: example_ids (str), generated_captions (str), reference_captions (list of str).
         return evaluate.MetricInfo(
             description=_DESCRIPTION,
             citation=_CITATION,
@@ -116,6 +132,13 @@ class UnfoldedImageCaptioningMetrics(evaluate.Metric):
         )
 
     def _compute(self, example_ids, generated_captions, reference_captions):
+        # [FUNCTION DOC] De-duplicate by example id. If save_generations, or the first references are None/empty with
+        # DEFAULT_TO_SERVER_RESULTS, results["server_results"] = list of {"image_id", "caption"}; return early in the
+        # latter case. Otherwise build COCO-style gts/res dicts (unique caption ids), PTB-tokenise them, run every
+        # pycoco scorer storing the corpus score under its key and per-example scores under "<key>_all" (BLEU expands to
+        # four keys), then run other scorers (EXACT_MATCH) on the raw texts. Returns the results dict.
+        # KNOWN ISSUE: the duplicate-row warnings fire when the generations/references are equal (== instead of !=),
+        # i.e. the opposite of what the messages say.
         data_per_id = {}
 
         for ex_id, gen_cap, ref_caps in zip(example_ids, generated_captions, reference_captions):
@@ -201,6 +224,7 @@ class UnfoldedImageCaptioningMetrics(evaluate.Metric):
 
 
 def convert_to_list(obj):
+    # [FUNCTION DOC] HELPER: return a numpy array as a list, or a list unchanged; asserts any other type.
     if isinstance(obj, np.ndarray):
         return obj.tolist()
     assert isinstance(obj, list), f"Expected list or np.ndarray, got {type(obj)}"

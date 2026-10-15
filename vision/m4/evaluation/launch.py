@@ -1,3 +1,8 @@
+# [MODULE DOC] Entry point of the evaluation harness: python -m m4.evaluation.launch <Parameters CLI or --load_config>.
+# Configures Rich logging, loads the model once (get_model_from_config_file), prepares it with Accelerate
+# (DeepSpeed-aware), then for each task name in args.tasks.do_tasks ("all" = the VGPT2 in-context task list)
+# instantiates the task class from m4.evaluation.tasks, runs the evaluator chosen by task.predictor_class and
+# appends a JSON line with the score and run parameters to args.hparams.save_to_jsonl.
 # TODO LAUNCH EVALUATTION
 # evaluate --model clip --predictor linearprobe
 
@@ -41,6 +46,14 @@ EVALUATOR_MAPPING = {
 
 
 def main(args):
+    # [FUNCTION DOC] Run the evaluation described by args (Parameters). Seeds everything, creates the Accelerator with the process
+    # group timeout, sets args.hparams.device, computes the image sequence length (resampler latents, or
+    # (image_size / patch_size)^2 / 9 for pixel-shuffle models) and passes it with tokenizer/vision settings to each
+    # task constructor; checks the task tokenizer with check_valid_tokenizer. On the main process, writes one JSON
+    # object per task (model, task, stringified score, evaluator, shot/generation params, evaluation version, commit
+    # hash, prompt template id, split, image scaling) to save_to_jsonl. Logs total time. Returns None.
+    # KNOWN ISSUE: save_to_jsonl.parent is accessed unconditionally, so the documented None default crashes; and
+    # linear_prober cannot be called with the 4 arguments passed here.
     accelerate.utils.set_seed(args.hparams.seed)
     kwargs_handlers = [InitProcessGroupKwargs(timeout=timedelta(seconds=args.hparams.timeout))]
     rngs_types = ["torch", "cuda", "generator"] if torch.cuda.is_available() else ["torch", "generator"]

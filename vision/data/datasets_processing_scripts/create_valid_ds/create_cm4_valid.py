@@ -1,3 +1,9 @@
+# [MODULE DOC] One-off script that builds the CM4 (web documents) validation set and uploads it to the Hugging Face Hub.
+# Side effects at import time: runs `s5cmd sync` (via os.system) to copy big shard BIG_SHARD_ID (0) of the
+# final filtered web-document dataset from s3://m4-datasets into /scratch/m4/webdocs/..., loads it with
+# datasets.load_from_disk, pushes the first 10,000 rows as split "valid" of private repo
+# HuggingFaceM4/cm4_valid-Sample and the whole shard as split "valid" of private repo HuggingFaceM4/cm4_valid.
+# Requires s5cmd, AWS credentials and a logged-in Hub token. No functions; no CLI arguments.
 import os
 
 from datasets import load_from_disk

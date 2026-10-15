@@ -1,3 +1,6 @@
+# [MODULE DOC] CLI script that copies a slice of the wendlerc/RenderedText webdataset tar shards from the Hugging Face Hub to
+# S3 (bucket m4-datasets-us-east-1, prefix rendered_text/). Usage: --start_idx/--end_idx (ints, slice bounds over
+# the combined list of tar URLs; None means open-ended).
 import argparse
 import logging
 import os
@@ -12,6 +15,11 @@ logger = logging.getLogger(__name__)
 
 
 def load_rendered_text_into_s3(start_idx, end_idx):
+    # [FUNCTION DOC] List the .tar files at the repo root and in remaining/ via HfFileSystem (token from env HF_TOKEN, else the
+    # cached login), build their resolve/main download URLs (root files first), take the [start_idx:end_idx] slice,
+    # and process each with download_upload_tarfile on a 95-thread pool, re-raising any worker exception via
+    # future.result(). Returns None.
+    # KNOWN ISSUE: the comment says 5 worker threads but max_workers is 95.
     # Get list of tarfile URLs
     fs = HfFileSystem(token=os.getenv("HF_TOKEN", True))
     file_list_1 = fs.ls("datasets/wendlerc/RenderedText", detail=False)
@@ -31,6 +39,11 @@ def load_rendered_text_into_s3(start_idx, end_idx):
 
     # Function to download and upload tarfile
     def download_upload_tarfile(tar_file_url):
+        # [FUNCTION DOC] HELPER: download one tar URL fully into memory with requests (no status check), write it to
+        # /scratch/m4data/<basename>, upload it to S3 as rendered_text/shard_<basename> with boto3, delete the local
+        # file and log an INFO line.
+        # KNOWN ISSUE: HTTP errors are not checked (an error page would be uploaded as a tar), and files with the same
+        # basename in the root and remaining/ folders would overwrite each other on S3.
         response = requests.get(tar_file_url)
         tar_file_name = "shard_" + os.path.basename(tar_file_url)
         tar_file_path = "/scratch/m4data/" + os.path.basename(tar_file_url)

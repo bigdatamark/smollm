@@ -1,3 +1,10 @@
+# [MODULE DOC] Script (runs at import) creating "-Sample" versions of several evaluation datasets without class balancing:
+# for each entry of name_datasets, load all splits (optional config/data_dir), shuffle with seed 42 and keep the
+# first num_examples rows of every split, push to HuggingFaceM4/<path>[-<config>]-Sample (private) and save to
+# the Jean Zay local datasets folder. For NoCaps (no train split) a train split is synthesised from COCO 2014
+# captions and Localized Narratives OpenImages captions mapped to the NoCaps schema.
+# KNOWN ISSUE: select(range(n)) fails on splits with fewer than n rows; the NoCaps train shuffle result is
+# discarded (so the first rows of COCO are kept, not a random sample).
 """
 Simplified as it does not care about class balanceness (as opposed to `create_sample_evaluation_datasets.py`)
 """
@@ -11,6 +18,7 @@ from datasets import concatenate_datasets, load_dataset
 
 
 def _split_to_single_caption(caption):
+    # [FUNCTION DOC] HELPER: split a paragraph on "." into non-empty stripped sentences, each re-terminated with "."; returns list.
     """This function is mainly used in Localized Narratives where a paragraph can contain
     multiple relevant captions to a single image. We split the paragraph into multiple
     captions and then return each as an individual sample.
@@ -25,6 +33,8 @@ def _split_to_single_caption(caption):
 
 
 def map_localized_narratives_to_nocaps(ex):
+    # [FUNCTION DOC] HELPER: map a Localized Narratives example to the NoCaps columns: keep image, split its captions into single
+    # sentences as annotations_captions with ids 0..n-1, fill all other NoCaps metadata with empty/zero values.
     annotations_captions = list(chain.from_iterable([_split_to_single_caption(caption) for caption in ex["captions"]]))
     return {
         "image": ex["image"],
@@ -42,6 +52,8 @@ def map_localized_narratives_to_nocaps(ex):
 
 
 def map_coco_to_nocaps(ex):
+    # [FUNCTION DOC] HELPER: map a COCO captions example to the NoCaps columns: image, sentences_raw as annotations_captions with
+    # ids 0..n-1, other metadata empty/zero.
     annotations_captions = ex["sentences_raw"]
     return {
         "image": ex["image"],

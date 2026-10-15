@@ -1,3 +1,7 @@
+# [MODULE DOC] Step 03 of the enwiki pipeline: concatenates, over shards 0..67 except 34, the complete-examples datasets
+# ("...-with-images-full-v1-v2"), drops the bookkeeping columns (metadata, images_urls, num_found, num_not_found,
+# mismatches), splits 95/5 without shuffling, renames the "test" split to "valid", and saves the DatasetDict to
+# SAVING_DIR (enwiki-v1). Trailing commented-out code is an older single-shard version. No functions.
 from pathlib import Path
 
 from datasets import concatenate_datasets, load_from_disk

@@ -1,3 +1,6 @@
+# [MODULE DOC] evaluate.Metric for image-caption matching benchmarks (Winoground-like): each example contains several
+# (caption, image) pairs with a model score each; pairs where caption_id == image_id are the correct ones.
+# Computes text, image and group scores.
 import logging
 from enum import Enum
 from typing import List
@@ -14,15 +17,19 @@ logger = logging.getLogger(__name__)
 
 
 class MetricsImageCaptionMatching(Enum):
+    # [CLASS DOC] Enum of computable scores: GROUP_SCORE, TEXT_SCORE, IMAGE_SCORE.
     GROUP_SCORE = "group_score"
     TEXT_SCORE = "text_score"
     IMAGE_SCORE = "image_score"
 
 
 class ImageCaptionMatchingMetrics(evaluate.Metric):
+    # [CLASS DOC] Metric object built with metrics (list of MetricsImageCaptionMatching). One input row per example, holding
+    # parallel sequences of example ids, caption ids, image ids and scores for all its pairs.
     """This class takes care of computing the metrics listed in `metrics`."""
 
     def __init__(self, metrics: List[MetricsImageCaptionMatching], **kwargs):
+        # [FUNCTION DOC] Store metrics; raises ValueError if metrics is None.
         super().__init__(**kwargs)
         self.metrics = metrics
 
@@ -30,6 +37,7 @@ class ImageCaptionMatchingMetrics(evaluate.Metric):
             raise ValueError("`metrics` must be specified")
 
     def _info(self):
+        # [FUNCTION DOC] HELPER: evaluate.Metric hook returning MetricInfo (empty description/citation) with the input features: example_ids, caption_ids, image_ids and splitted_scores_per_example, each a sequence.
         return evaluate.MetricInfo(
             description=_DESCRIPTION,
             citation=_CITATION,
@@ -45,6 +53,16 @@ class ImageCaptionMatchingMetrics(evaluate.Metric):
         )
 
     def _compute(self, example_ids, image_ids, caption_ids, splitted_scores_per_example):
+        # [FUNCTION DOC] Collect per example (asserting all ids inside a row are equal) its caption ids, image ids and scores keyed by
+        # int(example id). Then for every correct pair (c == i) and every incorrect pair: group score -> 0 if the
+        # correct pair scores below any incorrect pair; "image score" -> 0 if below an incorrect pair with a different
+        # caption; "text score" -> 0 if below an incorrect pair with a different image. Each requested score is the
+        # mean over examples (keys text_score, image_score, group_score); returns the results dict.
+        # KNOWN ISSUE: the duplicate check tests the raw (string) id while storing int(id), so duplicates are never
+        # detected and simply overwrite; per-example score lists are indexed by the id itself, so ids must be exactly
+        # 0..N-1 (IndexError otherwise).
+        # KNOWN ISSUE: the conditions look swapped with respect to the inline comments and the Winoground definitions
+        # (comparing against a different caption with the same image is the text score, not the image score).
         data_per_id = {}
 
         for ex_ids, ex_image_ids, ex_caption_ids, ex_scores in zip(

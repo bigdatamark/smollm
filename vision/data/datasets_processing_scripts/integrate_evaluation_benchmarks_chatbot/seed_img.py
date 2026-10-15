@@ -1,3 +1,7 @@
+# [MODULE DOC] Builds the image-only part of SEED-Bench and pushes it to HuggingFaceM4/SEED_Img_Modif (single "test" split).
+# Reads SEED-Bench.json "questions", skips non-image (video) entries, and for each builds a prompt
+# "Question: ...\nChoices:\nA. ...\n...D. ...\nAnswer with the letter.", label = answer letter (ClassLabel
+# A-D), question_id as string, and image (JPEG bytes from COMMON_PATH_IMAGES/data_id). Runs at import time.
 """
 srun --pty --cpus-per-task=96 --mem-per-cpu=20G --partition=hopper-prod bash -i
 conda activate shared-m4
@@ -32,6 +36,8 @@ REPO_ID = "HuggingFaceM4/SEED_Img_Modif"
 
 
 def convert_img_to_bytes(img_path, format):
+    # [FUNCTION DOC] HELPER: open the image at img_path with PIL, re-encode it in the given PIL format name (here JPEG) into an
+    # in-memory buffer and return the encoded bytes.
     img = Image.open(img_path)
     buffer = BytesIO()
     img.save(buffer, format=format)

@@ -1,3 +1,9 @@
+# [MODULE DOC] Step 08 (notebook-style, "# %%" cells): builds the final enwiki-v2 dataset. Merges train+valid of enwiki-v1 with
+# the concatenated per-shard "...-full-v2-v3" datasets (shards 0..67 except 34), drops images_urls/num_found/
+# num_not_found/mismatches, re-splits 95/5 without shuffling ("test" renamed "valid"), and writes it sharded
+# (SHARD_SIZE=20,000 rows) to /home/lucile/local_datasets/enwiki/enwiki-v2-full via
+# save_split_sharded_already_splitted_dataset. DS_FINAL_DS_PATH is unused. Bare expression lines are notebook
+# displays with no effect when run as a script. No functions.
 # %%
 from pathlib import Path
 

@@ -1,3 +1,7 @@
+# [MODULE DOC] Deprecated launcher for deprecated_generation/generate.py: runs the generation and dumps a JSON file
+# (gen_<job_id>.json in wandb_dump_dir) for later upload with log_generation.py.
+# KNOWN ISSUE: imports from a non-existent package path (repos.m4_1...), and reads hparams fields (model_paths,
+# prompt, tokenizer_infos, max_len, num_images_per_ex) that the current generation Hparams no longer defines.
 import json
 import logging
 from pathlib import Path
@@ -14,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 
 def main():
+    # [FUNCTION DOC] Configure logging, parse the generation config, collect files in image_dir, run
+    # generate_image_conditioned_text_from_pretrained and, if wandb_dump_dir is set, write wandb_config/name/project/
+    # entity, texts, image paths and model names to wandb_dump_dir/gen_<job_id or 0>.json (warning if not set).
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",

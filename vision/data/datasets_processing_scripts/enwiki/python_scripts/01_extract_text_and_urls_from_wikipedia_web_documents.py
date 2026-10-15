@@ -1,3 +1,9 @@
+# [MODULE DOC] Step 01 of the enwiki pipeline: converts one shard of the Wikipedia HTML Enterprise dump into "web documents"
+# (interleaved lists of texts and image URLs) and saves them with save_to_disk.
+# Uses the m4 data_collection processors: DOMTreeSimplificator (Wikipedia-specific cleaning, drops everything
+# after Notes/References/See_also/Further_reading/External_links and nodes matching some CSS rules),
+# PreExtractionSimplificator, and html_to_web_documents. Configures INFO-level logging at import.
+# Run as a script: parses CLI args then calls main.
 import argparse
 import logging
 from multiprocessing import cpu_count
@@ -20,6 +26,10 @@ logger.setLevel(logging.INFO)
 
 
 def get_args():
+    # [FUNCTION DOC] HELPER: Build and parse the CLI arguments.
+    # Options: --wikipedia_html_enterprise_dir (Path, dataset data dir), --shard_id (int, shard to process),
+    # --extraction_dir (Path, output root), --num_proc (int, default cpu_count()). All others have no default (None).
+    # Returns the argparse Namespace.
     parser = argparse.ArgumentParser(description="Extract web documents.")
     # ---------------- Path args ----------------
     parser.add_argument(
@@ -49,6 +59,12 @@ def get_args():
 
 
 def main(args):
+    # [FUNCTION DOC] Run the extraction for one shard.
+    # Input: args Namespace from get_args. Loads dataset script "SaulLu/wikipedia_html_enterprise" (split "train",
+    # shard=args.shard_id, data_dir=args.wikipedia_html_enterprise_dir), builds the two simplificators with
+    # Wikipedia settings, calls html_to_web_documents with args.num_proc processes, and saves the resulting dataset
+    # to args.extraction_dir / args.dataset_name, logging start/end. Returns None.
+    # KNOWN ISSUE: args.dataset_name is never defined by get_args, so this raises AttributeError before saving.
     html_dataset = load_dataset(
         "SaulLu/wikipedia_html_enterprise",
         shard=args.shard_id,

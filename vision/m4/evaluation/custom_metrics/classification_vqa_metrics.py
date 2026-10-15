@@ -1,3 +1,6 @@
+# [MODULE DOC] evaluate.Metric for VQA evaluated as classification: the model scores each candidate answer (tested label) of
+# a question, the top-scoring candidate is the prediction, and the VQA soft accuracy is computed against the list
+# of human answers. Also offers prediction-entropy metrics.
 import logging
 from enum import Enum
 from typing import List
@@ -17,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 class ClassifVQAMetrics(Enum):
+    # [CLASS DOC] Enum of metrics this class can compute: ENTROPY_DISTRIBUTION (per-example entropies), ENTROPY_MEAN,
+    # VQA_ACCURACY. Values are the result keys.
     # The kl is ill defined, so not adding it
     ENTROPY_DISTRIBUTION = "entropy_distribution"
     ENTROPY_MEAN = "entropy_mean"
@@ -24,11 +29,14 @@ class ClassifVQAMetrics(Enum):
 
 
 class ClassificationVQAMetrics(evaluate.Metric):
+    # [CLASS DOC] Metric object; constructed with metrics (list of ClassifVQAMetrics) plus evaluate.Metric kwargs. One input row
+    # per (example, tested label) pair.
     """
     Adapted from `UnfoldedClassificationMetrics`.
     """
 
     def __init__(self, metrics: List[ClassifVQAMetrics], **kwargs):
+        # [FUNCTION DOC] Store metrics after evaluate.Metric initialisation; raises ValueError if metrics is None.
         super().__init__(**kwargs)
         self.metrics = metrics
 
@@ -36,6 +44,7 @@ class ClassificationVQAMetrics(evaluate.Metric):
             raise ValueError("`metrics` must be specified")
 
     def _info(self):
+        # [FUNCTION DOC] HELPER: evaluate.Metric hook returning MetricInfo (empty description/citation) with the input features: predictions (float score), example_ids (str), true_labels (list of str answers), tested_labels (str candidate).
         return evaluate.MetricInfo(
             description=_DESCRIPTION,
             citation=_CITATION,
@@ -51,6 +60,16 @@ class ClassificationVQAMetrics(evaluate.Metric):
         )
 
     def _compute(self, predictions, example_ids, true_labels, tested_labels, tol=0.001):
+        # [FUNCTION DOC] Group rows by example_id into lists of (score, tested label) plus the answer list; a tested label already seen
+        # for an example is treated as a distributed duplicate (warning logged, asserts the answers are identical).
+        # Top-1 prediction = tested label with highest score.
+        # VQA_ACCURACY: for each example, answers are normalised with vqa_normalize_text; for each held-out answer i the
+        # accuracy is min(1, #other answers equal to the prediction / 3), averaged over i, then averaged over examples ->
+        # results["vqa_accuracy"] (float).
+        # ENTROPY_*: softmax over each example's scores, entropy -sum(q log q); returned as list
+        # ("entropy_distribution") and/or mean ("entropy_mean"). Returns the results dict. tol is unused.
+        # KNOWN ISSUE: the answers are normalised but the predicted tested label is not, so candidates differing only in
+        # case/punctuation/articles from the answers never match.
         data_per_id = {}
         for example_id, prediction, true_label_l, tested_label in zip(
             example_ids, predictions, true_labels, tested_labels

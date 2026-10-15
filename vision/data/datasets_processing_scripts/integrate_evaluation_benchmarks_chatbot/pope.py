@@ -1,3 +1,8 @@
+# [MODULE DOC] Builds the POPE (object-hallucination yes/no) evaluation dataset and pushes it to HuggingFaceM4/POPE_modif.
+# Concatenates the random, popular and adversarial COCO question files (JSON lines: image, text, label) from a
+# local POPE checkout; images come from /fsx/hugo/coco/val2014 re-encoded as JPEG. Columns: image, context
+# (question text), label (ClassLabel ["No", "Yes"]). Raises ValueError on a label other than yes/no.
+# Single "test" split. Runs at import time.
 """
 srun --pty --cpus-per-task=96 --mem-per-cpu=20G --partition=hopper-prod bash -i
 conda activate shared-m4
@@ -35,6 +40,8 @@ REPO_ID = "HuggingFaceM4/POPE_modif"
 
 
 def convert_img_to_bytes(img_path, format):
+    # [FUNCTION DOC] HELPER: open the image at img_path with PIL, re-encode it in the given PIL format name (here JPEG) into an
+    # in-memory buffer and return the encoded bytes.
     img = Image.open(img_path)
     buffer = BytesIO()
     img.save(buffer, format=format)

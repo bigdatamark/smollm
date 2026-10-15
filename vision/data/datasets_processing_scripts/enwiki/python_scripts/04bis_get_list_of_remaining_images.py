@@ -1,3 +1,8 @@
+# [MODULE DOC] Step 04bis: after a first download round (webdataset .tar files in PATH_SAVE_DIR_DOWNLOADED_IMAGES), computes
+# which URLs of remaining_urls_v2.txt are still missing and writes them into NUM_SHARDS=12 roughly equal text
+# files remaining_urls_v2_shard_<i>.txt (the last shard takes the remainder). Tars are read in parallel with a
+# pathos ProcessingPool of 32 workers; tar index 82 (in sorted order) is skipped (hard-coded, presumably broken).
+# Prints a start message. No CLI.
 import glob
 import json
 import math
@@ -15,6 +20,11 @@ NUM_PROC = 32
 
 
 def process_one_tar(args):
+    # [FUNCTION DOC] HELPER: read one downloaded webdataset tar and return the list of URLs successfully downloaded in it.
+    # Input: tuple (tar_path, idx_tar); idx_tar is unused. Reads every .jpg member's bytes keyed by base name and
+    # every .json member's "url" when its "status" is "success", then maps url -> image bytes and returns the URL
+    # keys. Loads all image bytes into memory just to build that mapping.
+    # KNOWN ISSUE: raises KeyError if a successful .json has no matching .jpg (e.g. other image extension).
     (tar_path, idx_tar) = args
     with tarfile.open(tar_path) as tar_file:
         tar_members = tar_file.getmembers()

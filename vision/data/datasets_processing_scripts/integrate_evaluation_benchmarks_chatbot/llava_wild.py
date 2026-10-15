@@ -1,3 +1,7 @@
+# [MODULE DOC] Builds the LLaVA-Bench-in-the-Wild evaluation dataset and pushes it to HuggingFaceM4/LLaVA_Wild_Modif.
+# Reads questions.jsonl (image file name, text, question_id) and answers_gpt4.jsonl (reference GPT-4 answers)
+# from a local download under /fsx/hugo/llava_wild, pairs them by line order (asserts equal lengths), stores
+# images as RGB JPEG bytes, and pushes a DatasetDict with a single "test" split. Runs at import time.
 """
 srun --pty --cpus-per-task=96 --mem-per-cpu=20G --partition=hopper-prod bash -i
 conda activate shared-m4
@@ -32,6 +36,8 @@ REPO_ID = "HuggingFaceM4/LLaVA_Wild_Modif"
 
 
 def convert_img_to_bytes(img_path, format):
+    # [FUNCTION DOC] HELPER: open the image at img_path with PIL, re-encode it in the given PIL format name (here JPEG) into an
+    # in-memory buffer and return the encoded bytes. Converts to RGB first so JPEG encoding works.
     img = Image.open(img_path)
     img = img.convert("RGB")
     buffer = BytesIO()

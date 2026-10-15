@@ -1,3 +1,7 @@
+# [MODULE DOC] One-off script that builds the COCO validation set and uploads it to the Hugging Face Hub.
+# Side effects at import time: `s5cmd sync` of s3://m4-datasets/general_pmd/image/coco/validation/00000-00001/*
+# into /scratch/general_pmd/image/coco/validation, loads it with load_from_disk, prints it, and pushes it as
+# split "valid" of private Hub repo HuggingFaceM4/coco_valid. No functions; no CLI arguments.
 import os
 
 from datasets import load_from_disk

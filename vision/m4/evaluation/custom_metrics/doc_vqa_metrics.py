@@ -1,3 +1,5 @@
+# [MODULE DOC] evaluate.Metric for document VQA (DocVQA-style) generation tasks using ANLS (Average Normalized Levenshtein
+# Similarity, threshold tau=0.5), with an option to dump generations in a submission-server format.
 import logging
 from enum import Enum
 from typing import List
@@ -19,22 +21,30 @@ logger = logging.getLogger(__name__)
 
 
 class DVQAMetrics(Enum):
+    # [CLASS DOC] Enum: ANLS and DEFAULT_TO_SERVER_RESULTS (when references are missing, return the generations for the
+    # evaluation server instead of scores).
     ANLS = "average_normalized_levenshtein_similarity"
     DEFAULT_TO_SERVER_RESULTS = "default_to_server_results"
 
 
 def normalized_levenshtein(s1, s2):
+    # [FUNCTION DOC] HELPER: Levenshtein edit distance between strings s1 and s2 divided by the longer length (0..1).
+    # Raises ZeroDivisionError if both strings are empty.
     len_s1, len_s2 = len(s1), len(s2)
     distance = Levenshtein.distance(s1, s2)
     return distance / max(len_s1, len_s2)
 
 
 def similarity_score(a_ij, o_q_i, tau=0.5):
+    # [FUNCTION DOC] HELPER: 1 - normalized_levenshtein(a_ij, o_q_i) if that distance is below tau (default 0.5), else 0.
     nl = normalized_levenshtein(a_ij, o_q_i)
     return 1 - nl if nl < tau else 0
 
 
 def average_normalized_levenshtein_similarity(ground_truth, predicted_answers):
+    # [FUNCTION DOC] ANLS: for each question i, the max similarity_score between the prediction predicted_answers[i] and every
+    # ground-truth answer in ground_truth[i] (list of strings); empty predictions score 0 (warning logged). Returns
+    # the mean over questions. Asserts both lists have equal length.
     assert len(ground_truth) == len(predicted_answers), "Length of ground_truth and predicted_answers must match."
 
     N = len(ground_truth)
@@ -55,9 +65,13 @@ def average_normalized_levenshtein_similarity(ground_truth, predicted_answers):
 
 
 class DocVQAMetrics(evaluate.Metric):
+    # [CLASS DOC] Metric object built with metrics (list of DVQAMetrics) and save_generations (bool: also return generations
+    # as "server_results"). Holds an (unused) VQANormalizationGtVisionLab instance.
     """"""
 
     def __init__(self, metrics: List[DVQAMetrics], save_generations: bool, **kwargs):
+        # [FUNCTION DOC] Store metrics, save_generations and a GT-Vision-Lab normaliser; raises ValueError if metrics is None
+        # (checked after assignment).
         super().__init__(**kwargs)
         self.metrics = metrics
         self.save_generations = save_generations
@@ -67,6 +81,7 @@ class DocVQAMetrics(evaluate.Metric):
             raise ValueError("`metrics` must be specified")
 
     def _info(self):
+        # [FUNCTION DOC] HELPER: evaluate.Metric hook returning MetricInfo (empty description/citation) with the input features: example_ids (str), generated_texts (str), answers (list of str).
         return evaluate.MetricInfo(
             description=_DESCRIPTION,
             citation=_CITATION,
@@ -81,6 +96,12 @@ class DocVQAMetrics(evaluate.Metric):
         )
 
     def _compute(self, example_ids, generated_texts, answers):
+        # [FUNCTION DOC] Strip each generated text and de-duplicate by example id (Rows repeated by distributed padding (same example id) are kept once; differences are only logged.).
+        # If save_generations, or if the first answers entry is None and DEFAULT_TO_SERVER_RESULTS is requested,
+        # results["server_results"] = list of {"question_id": ex_id, "answer": generation without surrounding dots};
+        # in the latter case return immediately. Otherwise compute ANLS between lower-cased, dot-stripped generations
+        # and lower-cased answers -> results["anls"]. Returns the results dict (ANLS always computed, regardless of
+        # whether ANLS is in metrics).
         data_per_id = {}
         for ex_id, gen_text, ans in zip(example_ids, generated_texts, answers):
             gen_text = (

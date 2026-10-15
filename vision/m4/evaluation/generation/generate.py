@@ -1,3 +1,6 @@
+# [MODULE DOC] Script generating text from a trained checkpoint for every image in a directory and a list of prompts, run
+# under Accelerate/DeepSpeed (synced_gpus generation). Appends results as JSON lines {"image_path", "text"} to
+# hparams.generation_output_file and prints them.
 import json
 import logging
 import os
@@ -21,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 def load_tokenizer_model(opt_step_dir):
+    # [FUNCTION DOC] Load the left-padding tokenizer from <opt_step_dir>/tokenizer and the model from <opt_step_dir>/unwrapped_model
+    # (class chosen from config.json model_type via model_type_to_modeling_class; HF_TOKEN env used), load and enable
+    # a PEFT adapter from unwrapped_adapter if present, set eval mode, mark the class as a ZeRO-3 leaf module.
+    # Returns (tokenizer, model).
     model_name = Path(f"{opt_step_dir}/unwrapped_model")
     tokenizer_path = Path(f"{opt_step_dir}/tokenizer")
     adapter_path = Path(f"{opt_step_dir}/unwrapped_adapter")
@@ -46,6 +53,7 @@ def load_tokenizer_model(opt_step_dir):
 
 
 def fetch_images(images_paths):
+    # [FUNCTION DOC] HELPER: open every path with PIL and return the list of (lazy) images.
     images = []
     for image_path in images_paths:
         images.append(Image.open(image_path))
@@ -53,6 +61,9 @@ def fetch_images(images_paths):
 
 
 def prepare_model(model, accelerator):
+    # [FUNCTION DOC] HELPER: prepare the model with the accelerator (with a dummy dataloader under DeepSpeed); with ZeRO-3 weight
+    # partitioning, flag every submodule's parameters as in-forward so external parameters are gathered. Returns
+    # the unwrapped underlying model.
     if accelerator.distributed_type == DistributedType.DEEPSPEED:
         dummy_dataloader = torch.utils.data.DataLoader([0 for _ in range(10)], batch_size=1)
         # Deepspeed doesn't allow custom device placement
@@ -91,6 +102,12 @@ def model_generation(
     add_special_tokens,
     output_file,
 ):
+    # [FUNCTION DOC] For each image (paired with its path), build pixel values by applying the eval image transform (sizes from the
+    # model config unless image_size is given) to one copy of the image per prompt, and generate continuations of
+    # all prompts (left-padded, "<image>" expanded to the image sequence length, banned tokens as bad_words_ids,
+    # beam/length/repetition settings, early stopping, synced GPUs). On the main process: log ids/tokens/decodings,
+    # decode prompt + generation (optionally hiding special tokens), append JSON lines to output_file, and collect
+    # texts. Returns (list of texts, list of matching image paths); empty on non-main ranks.
     all_texts_gen = []
     all_image_paths_gen = []
     single_image_seq_len = (
@@ -180,6 +197,9 @@ def model_generation(
 
 
 def main():
+    # [FUNCTION DOC] Parse config, create the Accelerator (30 min timeout), load all images in image_dir, load tokenizer/model,
+    # prepare the model, run model_generation with the config values, and print "image name | Generated text" lines
+    # on the main process.
     config = get_config()
     kwargs_handlers = [InitProcessGroupKwargs(timeout=timedelta(seconds=1800))]
     rngs_types = ["torch", "cuda", "generator"] if torch.cuda.is_available() else ["torch", "generator"]

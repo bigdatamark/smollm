@@ -1,3 +1,8 @@
+# [MODULE DOC] Streamlit app (streamlit run visualize_generations.py) showing saved generations next to the dataset examples:
+# for each example, its image(s), question, reference answers and every model's answer coloured green if it
+# contains the most frequent reference answer (case-insensitive) else red. Datasets, splits, id columns and
+# generation JSONL paths are hard-coded lists (currently ChartQA "val"). Loads the first generations file at
+# import time.
 """
 To deploy: streamlit run viz_tool.py
 If on HFC, probably will need to do port forwarding to get it in your local browser.
@@ -20,6 +25,7 @@ paths_to_generation_data = [
 
 
 def list_of_dicts_to_dict_of_lists(list_of_dicts):
+    # [FUNCTION DOC] HELPER (unused): turn a list of dicts into a dict of value lists per key.
     dict_of_lists = {}
     for item in list_of_dicts:
         for key, value in item.items():
@@ -30,6 +36,9 @@ def list_of_dicts_to_dict_of_lists(list_of_dicts):
 
 
 def load_annotations(path_to_generation_data):
+    # [FUNCTION DOC] Read every line of the evaluation JSONL and return {"model_name", "data", "opt_step"} lists, one entry per line
+    # (data = eval(score)["server_results"]), sorted by opt step descending.
+    # KNOWN ISSUE: uses eval on file content; IndexError if the model path has no opt_step-N.
     annotations = []
     with open(path_to_generation_data, "r", encoding="utf-8") as file:
         for line in file:
@@ -63,6 +72,9 @@ ds = load_annotations(paths_to_generation_data[0])
 
 
 def display_examples(dataset, generation_data, dataset_question_id_index, multiple_images, num_examples=300):
+    # [FUNCTION DOC] Render the first num_examples examples (ordered as in the first model's generations) with st widgets: question
+    # id, dataset index, images (single "image" or non-None "images"), question/query text, answers/answer/label
+    # (ValueError if none), and each model's answer colour-coded against the dominant reference answer.
     st.header(f"Sample Examples - First {num_examples}")
 
     for idx in range(num_examples):
@@ -129,9 +141,15 @@ def display_examples(dataset, generation_data, dataset_question_id_index, multip
 
 
 def main():
+    # [FUNCTION DOC] Configure the page, let the user pick a dataset in the sidebar, load it with its generations, detect single vs
+    # multiple image column (ValueError otherwise), and display a slider-chosen number of examples (100-2000).
+    # KNOWN ISSUE: dataset.features is accessed before the "dataset is not None" check, and the loader returns a bare
+    # None on error which cannot be unpacked into three values.
     st.set_page_config(page_title="Prompted set viewer", layout="wide")
 
     def load_datasets_and_generations(dataset_idx, id_column_name=None):
+        # [FUNCTION DOC] HELPER: load dataset split and generations for dataset_idx and build str(id) -> row index mapping; returns None
+        # on any exception.
         try:
             dataset = load_dataset(dataset_names[dataset_idx], split=datasets_splits[dataset_idx])
 

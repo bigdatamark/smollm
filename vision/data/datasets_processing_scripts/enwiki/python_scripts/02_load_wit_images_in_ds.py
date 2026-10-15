@@ -1,3 +1,11 @@
+# [MODULE DOC] Step 02 of the enwiki pipeline: fills in the actual image bytes of extracted Wikipedia web documents by looking
+# images up by file name in the WIT dataset (wikimedia/wit_base) through an Elasticsearch index.
+# Side effects at import: loads wit_base "train", maps add_image_name over it (NUM_PROC=32), builds an
+# Elasticsearch index on "image_name" at localhost:9200 (requires a running ES server), then processes shards.
+# Per shard (DATA_DIR/shard_<id>/wikipedia_html_enterprise), it saves examples whose images were all found to
+# DATASET_NAME_COMPLETE_EXAMPLES and the rest to DATASET_NAME_INCOMPLETE_EXAMPLES. Shards in EXCLUDE_SHARD_IDS
+# (34) are skipped.
+# KNOWN ISSUE: the main loop only iterates range(1, 2), i.e. processes shard 1 only, although NUM_SHARDS is 68.
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -23,6 +31,8 @@ EXCLUDE_SHARD_IDS = [34]  # This shard is corrupted since the beginning
 
 
 def add_image_name(example):
+    # [FUNCTION DOC] HELPER: dataset.map function; sets example["image_name"] to the last path component of example["image_url"]
+    # (the URL-decoded-free file name) and returns the mutated example.
     example["image_name"] = urlparse(example["image_url"]).path.split("/")[-1]
     return example
 
@@ -44,6 +54,14 @@ print("Index created")
 
 
 def get_image_from_wit(example):
+    # [FUNCTION DOC] dataset.map function resolving each image URL of a web document into an image from WIT.
+    # Input: example with "images" (list of URL strings, "" meaning a text slot). For each non-empty URL, takes the
+    # second-to-last path component as the file name (Wikimedia thumbnail URLs end with a size-prefixed copy of the
+    # name) and queries the global wit_ds ES index for the nearest single match, retrying up to 10 times on any
+    # exception (printing errors). An exact name match appends the WIT image; otherwise None is appended and
+    # num_not_found is incremented (mismatches records (wanted, found) name pairs). Empty slots give None.
+    # Output (mutated example): "images_urls" = original URL list, "images" = list of images/None,
+    # "num_found", "num_not_found" (ints), "mismatches" (list of pairs).
     max_retries = 10
     num_found = 0
     num_not_found = 0
@@ -93,6 +111,12 @@ def get_image_from_wit(example):
 
 
 def process_shard(shard_id, data_dir):
+    # [FUNCTION DOC] Process one shard: load DATA_DIR/shard_<shard_id>/wikipedia_html_enterprise, map get_image_from_wit with an
+    # explicit Features schema (texts, images, metadata, images_urls, num_found, num_not_found, mismatches),
+    # print found/not-found totals, then save complete examples (num_not_found == 0 and num_found > 0) and incomplete
+    # examples to the two output dataset names in the shard dir. Returns None.
+    # KNOWN ISSUE: the incomplete filter uses bitwise ~ on a Python bool (giving -1 or -2, always truthy), so every
+    # example (including the complete ones) is saved to the "incomplete" dataset.
     shard_dir = data_dir / f"shard_{shard_id}"
     shard_ds = load_from_disk(shard_dir / "wikipedia_html_enterprise")
 

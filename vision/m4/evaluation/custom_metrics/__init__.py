@@ -1,3 +1,6 @@
+# [PACKAGE DOC] Custom `evaluate`-style metric classes used by evaluation tasks. Re-exports ClassificationVQAMetrics,
+# DocVQAMetrics, ImageCaptionMatchingMetrics, OpenEndedVQAMetrics, PerplexityMetrics,
+# UnfoldedClassificationMetrics and UnfoldedImageCaptioningMetrics from their modules.
 from m4.evaluation.custom_metrics.classification_vqa_metrics import ClassificationVQAMetrics
 from m4.evaluation.custom_metrics.doc_vqa_metrics import DocVQAMetrics
 from m4.evaluation.custom_metrics.image_caption_matching_metrics import ImageCaptionMatchingMetrics

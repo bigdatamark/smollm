@@ -1,3 +1,5 @@
+# [MODULE DOC] simple_parsing configuration for ad-hoc image-conditioned text generation (generation/generate.py):
+# Hparams, a --config/--save_config file layer, and get_config.
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +15,12 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Hparams:
+    # [CLASS DOC] Generation options: opt_step_dir (checkpoint dir with unwrapped_model/ and tokenizer/), generation_output_file
+    # (JSONL output), image_dir (folder of conditioning images), wandb_dump_dir, tokenizer_fast, num_beams (1),
+    # no_repeat_ngram_size, max_new_tokens (50), min_length, ban_tokens (strings never generated; default image
+    # tokens), add_special_tokens, hide_special_tokens, length_penalty, repetition_penalty, prompts (list; each
+    # "<image>" is expanded to the image sequence length), model_class/config_class (unused by generate.py), job_id,
+    # image_size (None = model default), vision_encoder_type, wandb_entity/wandb_project.
     """General Hyperparameters"""
 
     # Model checkpoint path. Should look like this: "/gpfsscratch/rech/cnw/commun/experiments/local_experiment_dir/tr_47_cm4_filtered_35/opt_step-43499"
@@ -63,6 +71,7 @@ class Hparams:
 
 @dataclass
 class CfgFileConfig:
+    # [CLASS DOC] Optional config (file to load as defaults) and save_config (where to save the final config).
     """Config file args"""
 
     config: Optional[Path] = None  # load config file
@@ -71,12 +80,14 @@ class CfgFileConfig:
 
 @dataclass
 class Parameters(Serializable):
+    # [CLASS DOC] Root Serializable config holding hparams.
     """base options."""
 
     hparams: Hparams = Hparams()
 
     @classmethod
     def parse(cls):
+        # [FUNCTION DOC] Classmethod: parse sys.argv into a Parameters instance (no config-file layer).
         parser = ArgumentParser()
         parser.add_arguments(cls, dest="parameters")
         args = parser.parse_args()
@@ -85,6 +96,8 @@ class Parameters(Serializable):
 
 
 def get_config(args=None):
+    # [FUNCTION DOC] Two-pass parse: read --config/--save_config, load the config file as defaults if given, parse everything,
+    # print the resulting Parameters, save to save_config if given, and return it. args is unused.
     # taken from https://github.com/lebrice/SimpleParsing/issues/45#issuecomment-1035224416
     cfgfile_parser = ArgumentParser(add_help=False)
     cfgfile_parser.add_arguments(CfgFileConfig, dest="cfgfile")

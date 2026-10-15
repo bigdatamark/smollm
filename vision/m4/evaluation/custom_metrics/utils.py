@@ -1,3 +1,6 @@
+# [MODULE DOC] Text-normalisation and answer-parsing utilities shared by the metrics: an in-house VQA normaliser, an exact
+# port of the official GT-Vision-Lab VQA normaliser, and MMMU answer parsing/number helpers (adapted from the
+# MMMU repository).
 import re
 import string
 
@@ -148,6 +151,11 @@ NUMBERS_STRING_TO_INT = {
 
 
 def vqa_normalize_text(text: str) -> str:
+    # [FUNCTION DOC] In-house VQA normalisation (see docstring): lower-case, standardise whitespace, drop hyphens, replace all
+    # punctuation except apostrophes by spaces, map number words (none..ten) to digits, expand contractions via
+    # CONTRACTIONS, drop articles, collapse spaces. Returns the normalised string.
+    # KNOWN ISSUE: hyphens are deleted rather than replaced by a space as the docstring says; and since text is
+    # lower-cased first, capitalised CONTRACTIONS keys (e.g. "Im", "Ive") can never match.
     """Process a text
     Source: https://github.com/GT-Vision-Lab/VQA/blob/master/PythonEvaluationTools/vqaEvaluation/vqaEval.py
     1. Conversion of characters to lower case
@@ -180,7 +188,10 @@ def vqa_normalize_text(text: str) -> str:
 
 # Exact replication of the normalization at https://github.com/GT-Vision-Lab/VQA/blob/master/PythonEvaluationTools/vqaEvaluation/vqaEval.py
 class VQANormalizationGtVisionLab:
+    # [CLASS DOC] Faithful copy of the official VQA evaluation answer normalisation (contractions map, number words map,
+    # articles, punctuation list and the period/comma regexes).
     def __init__(self):
+        # [FUNCTION DOC] Build the contractions, manual_map, articles, regexes and punct tables.
         self.contractions = {
             "aint": "ain't",
             "arent": "aren't",
@@ -346,6 +357,10 @@ class VQANormalizationGtVisionLab:
         ]
 
     def processPunctuation(self, in_text):
+        # [FUNCTION DOC] For each punctuation mark: delete it if it is adjacent to a space or if the text contains a digit-comma-digit
+        # pattern, else replace it by a space; then remove periods not followed by a digit. Returns the new text.
+        # KNOWN ISSUE: (inherited from the official code) the period regex uses "(?!<=\d)" instead of a lookbehind and
+        # re.UNICODE is passed as the count argument of sub.
         out_text = in_text
         for p in self.punct:
             if (p + " " in in_text or " " + p in in_text) or (re.search(self.comma_strip, in_text) is not None):
@@ -356,6 +371,8 @@ class VQANormalizationGtVisionLab:
         return out_text
 
     def processDigitArticle(self, in_text):
+        # [FUNCTION DOC] Lower-case and split on whitespace, map number words to digits, drop articles, expand contractions, re-join
+        # with single spaces. Note manual_map.setdefault inserts every seen word into manual_map (grows forever).
         out_text = []
         tempText = in_text.lower().split()
         for word in tempText:
@@ -371,6 +388,7 @@ class VQANormalizationGtVisionLab:
         return out_text
 
     def vqa_normalize_text(self, text):
+        # [FUNCTION DOC] Replace newlines/tabs by spaces, strip, then apply processPunctuation and processDigitArticle. Returns str.
         text = text.replace("\n", " ")
         text = text.replace("\t", " ")
         text = text.strip()
@@ -396,6 +414,8 @@ NUMBER_WORD_TO_NUMBER_INT = {
 
 # Copy pasted and adapted from https://github.com/MMMU-Benchmark/MMMU/blob/main/eval/utils/eval_utils.py#L65
 def convert_to_number(string):
+    # [FUNCTION DOC] HELPER: lower-case, replace number words (zero..nine) by digits as substrings, remove commas and return
+    # float(); raises ValueError if not numeric.
     string = string.lower()
     for k, v in NUMBER_WORD_TO_NUMBER_INT.items():
         string = string.replace(k, v)
@@ -403,6 +423,7 @@ def convert_to_number(string):
 
 
 def check_is_number(string):
+    # [FUNCTION DOC] HELPER: True if convert_to_number succeeds on the string, False on ValueError.
     """
     Check if the given string is a number
     """
@@ -415,6 +436,8 @@ def check_is_number(string):
 
 # Taken and modified from https://github.com/MMMU-Benchmark/MMMU/blob/main/eval/utils/eval_utils.py#L76
 def normalize_str_mmmu(string):
+    # [FUNCTION DOC] Strip, remove a leading "Answer: ", and return the number rounded to 2 decimals (float) if numeric, else the
+    # lower-cased string.
     """
     Normalize the str to lower case and make them float numbers if possible.
     """
@@ -439,6 +462,8 @@ def normalize_str_mmmu(string):
 
 
 def extract_numbers_mmmu(string):
+    # [FUNCTION DOC] Return all number substrings found by three regexes, concatenated in this order: comma-grouped numbers,
+    # scientific notation, simple integers/decimals (may produce overlapping duplicates).
     """
     Exact all forms of numbers from a string with regex.
     """
@@ -464,12 +489,21 @@ def extract_numbers_mmmu(string):
 # Cpoied from https://github.com/MMMU-Benchmark/MMMU/blob/36adc047118013d66c225ebfa352ebbf44740ce4/eval/utils/eval_utils.py#L122
 # Except added "answer: " as key indicator
 def parse_open_response_mmmu(response, normalize_text_fn):
+    # [FUNCTION DOC] Extract candidate answers from a free-text response: key sub-responses (see nested helper), plus every number
+    # found in them, each normalised with normalize_text_fn; returns a de-duplicated list (unordered) of strings
+    # and/or floats.
     """
     Parse the prediction from the generated response.
     Return a list of predicted strings or numbers
     """
 
     def get_key_subresponses(response):
+        # [FUNCTION DOC] HELPER: strip/lower the response, split into sentences, and for each sentence keep the shortest tail following
+        # an indicator ("could be ", "so ", "is ", "thus ", "therefore ", "final ", "answer ", "result ", "answer: ",
+        # and "=" for the last sentence), ignoring trivial punctuation tails. Returns those tails, or [whole response]
+        # if none.
+        # KNOWN ISSUE: the sentence split requires an upper-case letter after ". " but the text was lower-cased first,
+        # so it only splits on newlines (same behaviour as upstream MMMU).
         key_responses = []
         response = response.strip().strip(".").lower()
         sub_responses = re.split(r"\.\s(?=[A-Z])|\n", response)
